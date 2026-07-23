@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+
+[project]
+name = "reed-sync"
+version = "0.1.0"
+description = "A state synchronization engine for declarative dataflow applications"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["rich>=15.0.0"]
+
+
+license = "Apache-2.0"
+
+authors = [
+    { name = "Davi Guanabara de Aragão", email = "davi_guanabara@live.com" },
+]
+
+keywords = [
+    "dataflow",
+    "workflow",
+    "reactive",
+    "synchronization",
+    "dependency-graph",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+
+
+[project.urls]
+Homepage = "https://github.com/DaviGuanabara/Reed"
+Repository = "https://github.com/DaviGuanabara/Reed"
+Issues = "https://github.com/DaviGuanabara/Reed/issues"
+Documentation = "https://github.com/DaviGuanabara/Reed"
+ORCID = "https://orcid.org/0009-0006-7634-6018"
+LinkedIn = "https://www.linkedin.com/in/davi-guanabara-91b3ab82/"
