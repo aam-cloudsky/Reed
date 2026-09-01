@@ -181,3 +181,9 @@ cython_debug/
 .cursorindexingignore
 .python-version
 uv.lock
+docs/.DS_Store
+assets/design system/_ds/.DS_Store
+assets/design system/.DS_Store
+assets/.DS_Store
+assets/design system/.thumbnail
+.DS_Store

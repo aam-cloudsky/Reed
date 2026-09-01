@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/broadsheet-2877f5a2-bef3-45a3-80f8-3744f2f1a1bf/styles.css" />
+<title>Reed — Design System</title>
+<script src="_ds/broadsheet-2877f5a2-bef3-45a3-80f8-3744f2f1a1bf/_ds_bundle.js"></script>
+<style>
+body { background: var(--color-bg); }
+a { color: var(--color-accent-700); }
+a:hover { color: var(--color-accent); }
+</style>
+</helmet>
+<div style="font-family: var(--font-body); color: var(--color-text); max-width: 1160px; margin: 0 auto; padding: 96px 64px 140px;">
+
+  <header style="display: flex; align-items: center; gap: 28px; margin-bottom: 12px;">
+    <svg width="56" height="56" viewBox="0 0 64 64">
+      <rect x="8" y="9" width="48" height="7" rx="1.5" fill="var(--color-text)"><title>Frame</title></rect>
+      <line x1="14" y1="16" x2="14" y2="55" stroke="var(--color-text)" stroke-width="3"><title>State-oriented</title></line>
+      <line x1="22" y1="16" x2="22" y2="55" stroke="var(--color-accent)" stroke-width="3"><title>Declarative</title></line>
+      <line x1="30" y1="16" x2="30" y2="55" stroke="var(--color-text)" stroke-width="3"><title>Incremental</title></line>
+      <line x1="38" y1="16" x2="38" y2="55" stroke="var(--color-accent-2)" stroke-width="3"><title>Event-driven</title></line>
+      <line x1="46" y1="16" x2="46" y2="55" stroke="var(--color-text)" stroke-width="3"><title>Strongly typed</title></line>
+      <line x1="54" y1="16" x2="54" y2="55" stroke="var(--color-text)" stroke-width="3"><title>Layered</title></line>
+    </svg>
+    <h1 style="font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 44px; letter-spacing: -0.015em; margin: 0;">Reed</h1>
+  </header>
+  <p style="font-size: 18px; max-width: 62ch; color: color-mix(in srgb, var(--color-text) 70%, transparent); margin: 0 0 72px;">A design system for Reed's own surfaces — documentation, CLI output, and any interface the engine presents. Built on Broadsheet's newsprint foundation, tuned to Reed's identity as the thing that keeps many separate threads of state aligned and synchronized.</p>
+
+  <section style="margin-bottom: 80px;">
+    <h2 style="font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin: 0 0 28px;">01 · Mark</h2>
+    <div style="display: grid; grid-template-columns: 200px 1fr; gap: 48px; align-items: start;">
+      <div style="display: flex; align-items: center; justify-content: center; height: 160px; background: var(--color-surface); border-radius: var(--radius-md);">
+        <svg width="88" height="88" viewBox="0 0 64 64">
+          <rect x="8" y="9" width="48" height="7" rx="1.5" fill="var(--color-text)"><title>Frame</title></rect>
+          <line x1="14" y1="16" x2="14" y2="55" stroke="var(--color-text)" stroke-width="3"><title>1 — State-oriented</title></line>
+          <line x1="22" y1="16" x2="22" y2="55" stroke="var(--color-accent)" stroke-width="3"><title>2 — Declarative</title></line>
+          <line x1="30" y1="16" x2="30" y2="55" stroke="var(--color-text)" stroke-width="3"><title>3 — Incremental</title></line>
+          <line x1="38" y1="16" x2="38" y2="55" stroke="var(--color-accent-2)" stroke-width="3"><title>4 — Event-driven</title></line>
+          <line x1="46" y1="16" x2="46" y2="55" stroke="var(--color-text)" stroke-width="3"><title>5 — Strongly typed</title></line>
+          <line x1="54" y1="16" x2="54" y2="55" stroke="var(--color-text)" stroke-width="3"><title>6 — Layered</title></line>
+        </svg>
+      </div>
+      <p style="font-size: 16px; line-height: 1.6; margin: 0; text-align: justify;">The mark is a reed: a frame holding a row of evenly spaced teeth, the way a loom's reed holds its warp threads apart and in tension. There are exactly six teeth, one per design principle, in the same order as the deck and document — count them left to right and they spell out State-oriented, Declarative, Incremental, Event-driven, Strongly typed, Layered. Two pick up color: Declarative and Event-driven, because together they are Reed's one-sentence pitch — <em>dependencies are declared, propagation fires on events</em> — everything else is how that promise gets kept. Hover a tooth (or read the SVG source) and it names itself; the mark carries the whole model, not just a shape. It never appears smaller than 32px or in any color combination outside the ones below.</p>
+    </div>
+  </section>
+
+  <section style="margin-bottom: 80px;">
+    <h2 style="font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin: 0 0 28px;">02 · Color</h2>
+    <p style="font-size: 16px; line-height: 1.6; max-width: 70ch; margin: 0 0 28px;">Reed inherits Broadsheet's ground and ramps rather than introducing new hues. Cyan is Reed's primary — every interactive element, link and the mark's default accent tooth. Magenta is reserved for the rarer second signal: a warning-adjacent state, or a highlight that must read as distinct from ordinary interactivity. The two never share one small component.</p>
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;">
+      <div>
+        <div style="height: 72px; border-radius: var(--radius-md); background: var(--color-text);"></div>
+        <p style="font-size: 13px; margin: 8px 0 0;">Ink<br><span style="color: color-mix(in srgb, var(--color-text) 55%, transparent);">#201e1d — text, marks</span></p>
+      </div>
+      <div>
+        <div style="height: 72px; border-radius: var(--radius-md); background: var(--color-accent);"></div>
+        <p style="font-size: 13px; margin: 8px 0 0;">Primary<br><span style="color: color-mix(in srgb, var(--color-text) 55%, transparent);">#0088b0 — interactive, brand</span></p>
+      </div>
+      <div>
+        <div style="height: 72px; border-radius: var(--radius-md); background: var(--color-accent-700);"></div>
+        <p style="font-size: 13px; margin: 8px 0 0;">Primary 700<br><span style="color: color-mix(in srgb, var(--color-text) 55%, transparent);">#006786 — accent-colored body copy</span></p>
+      </div>
+      <div>
+        <div style="height: 72px; border-radius: var(--radius-md); background: var(--color-accent-2);"></div>
+        <p style="font-size: 13px; margin: 8px 0 0;">Secondary<br><span style="color: color-mix(in srgb, var(--color-text) 55%, transparent);">#d6006c — rare, deliberate signal</span></p>
+      </div>
+    </div>
+  </section>
+
+  <section style="margin-bottom: 80px;">
+    <h2 style="font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin: 0 0 28px;">03 · Type</h2>
+    <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 24px;">
+      <span style="font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 56px; letter-spacing: -0.02em;">Aa Reed</span>
+      <span style="font-family: var(--font-body); font-size: 19px; line-height: 1.6; max-width: 68ch; margin-top: 12px;">Source Serif 4 carries both headings and body text, at the body weight's true italic for emphasis and pull quotes — never a synthesized slant. One face, doing every job, is the same discipline the mark keeps: few elements, used deliberately.</span>
+    </div>
+  </section>
+
+  <section style="margin-bottom: 80px;">
+    <h2 style="font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin: 0 0 28px;">04 · Iconography</h2>
+    <p style="font-size: 16px; line-height: 1.6; max-width: 70ch; margin: 0 0 28px;">Interface icons stay on Broadsheet's own set — Phosphor, duotone weight. Reed adds four concept marks, in the same two-tone stroke language as the logomark, for the ideas its own documentation returns to.</p>
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px;">
+      <div style="text-align: center;">
+        <svg width="48" height="48" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="18" fill="none" stroke="var(--color-text)" stroke-width="2" opacity="0.35"></circle><path d="M24 8 A16 16 0 0 1 40 24" fill="none" stroke="var(--color-accent)" stroke-width="3" stroke-linecap="round"></path><circle cx="24" cy="24" r="4" fill="var(--color-text)"></circle></svg>
+        <p style="font-size: 13px; margin: 8px 0 0;">Synchronize</p>
+      </div>
+      <div style="text-align: center;">
+        <svg width="48" height="48" viewBox="0 0 48 48" aria-hidden="true"><path d="M10 24 H30" stroke="var(--color-text)" stroke-width="2" opacity="0.35"></path><path d="M30 24 L23 17 M30 24 L23 31" fill="none" stroke="var(--color-accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="10" cy="24" r="4" fill="var(--color-text)"></circle><circle cx="38" cy="24" r="4" fill="var(--color-text)"></circle></svg>
+        <p style="font-size: 13px; margin: 8px 0 0;">Propagate</p>
+      </div>
+      <div style="text-align: center;">
+        <svg width="48" height="48" viewBox="0 0 48 48" aria-hidden="true"><rect x="10" y="10" width="12" height="12" rx="2" fill="none" stroke="var(--color-text)" stroke-width="2" opacity="0.35"></rect><rect x="26" y="26" width="12" height="12" rx="2" fill="none" stroke="var(--color-text)" stroke-width="2" opacity="0.35"></rect><path d="M22 16 H30 V26" fill="none" stroke="var(--color-accent-2)" stroke-width="3" stroke-linecap="round"></path></svg>
+        <p style="font-size: 13px; margin: 8px 0 0;">Dependency</p>
+      </div>
+      <div style="text-align: center;">
+        <svg width="48" height="48" viewBox="0 0 48 48" aria-hidden="true"><rect x="9" y="14" width="30" height="20" rx="2" fill="none" stroke="var(--color-text)" stroke-width="2" opacity="0.35"></rect><line x1="17" y1="14" x2="17" y2="34" stroke="var(--color-accent)" stroke-width="3"></line><line x1="24" y1="14" x2="24" y2="34" stroke="var(--color-text)" stroke-width="2" opacity="0.35"></line><line x1="31" y1="14" x2="31" y2="34" stroke="var(--color-accent-2)" stroke-width="3"></line></svg>
+        <p style="font-size: 13px; margin: 8px 0 0;">State</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="margin-bottom: 80px;">
+    <h2 style="font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin: 0 0 28px;">05 · Applied</h2>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px;">
+      <div style="background: var(--color-surface); border-radius: var(--radius-md); padding: 32px; box-shadow: var(--shadow-sm);">
+        <div style="display: flex; gap: 8px; margin-bottom: 20px;">
+          <span class="tag tag-accent">stable</span>
+          <span class="tag tag-outline">v0.1</span>
+        </div>
+        <h3 style="font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 22px; margin: 0 0 8px;">Node</h3>
+        <p style="font-size: 15px; line-height: 1.6; margin: 0; color: color-mix(in srgb, var(--color-text) 70%, transparent);">Documentation card treatment — status tags from the ramp, a serif title, muted body copy.</p>
+      </div>
+      <div style="background: var(--color-text); color: var(--color-bg); border-radius: var(--radius-md); padding: 32px; font-family: monospace; font-size: 14px; line-height: 1.7;">
+        <span style="color: var(--color-accent);">@node</span><br>
+        <span>def compute(parcel: Parcel) -&gt; Parcel:</span><br>
+        <span style="opacity: 0.6;">&nbsp;&nbsp;# recomputed only when its dependency is dirty</span><br>
+        <span>&nbsp;&nbsp;return transform(parcel)</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 style="font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin: 0 0 28px;">06 · Usage</h2>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 48px;">
+      <div>
+        <p style="font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent-700); margin: 0 0 12px;">Do</p>
+        <ul style="margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.8;">
+          <li>Use cyan for anything a user can act on.</li>
+          <li>Keep the mark's frame and outer teeth in plain ink; color only the two marked teeth.</li>
+          <li>Let whitespace separate sections — no boxes except the one applied card above.</li>
+        </ul>
+      </div>
+      <div>
+        <p style="font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--color-accent-2) 85%, var(--color-text)); margin: 0 0 12px;">Don't</p>
+        <ul style="margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.8;">
+          <li>Recolor the mark, stretch it, or drop a tooth.</li>
+          <li>Pair cyan and magenta in the same small component.</li>
+          <li>Introduce a second typeface for code or UI chrome — set code in the same serif's monospace fallback shown above, sparingly.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+</body>
+</html>

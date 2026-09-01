@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/broadsheet-2877f5a2-bef3-45a3-80f8-3744f2f1a1bf/styles.css" />
+<title>Reed — Design Principles &amp; Terminology Proposal</title>
+<script src="_ds/broadsheet-2877f5a2-bef3-45a3-80f8-3744f2f1a1bf/_ds_bundle.js"></script>
+<style>
+deck-stage {
+  --type-display: 126px; --type-title: 68px; --type-subtitle: 42px;
+  --type-body: 36px; --type-small: 30px; --type-kicker: 24px;
+  --pad-x: 144px; --page-foot-note: "Reed — a SkyWeaver engine"; --pad-top: 108px; --pad-bottom: 108px;
+  --baseline: 54px; --cap-anchor: 170.44px;
+}
+.slide { display: flex; flex-direction: column; background: var(--color-bg); color: var(--color-text);
+  font-family: var(--font-body); text-wrap: pretty; padding: var(--pad-top) var(--pad-x) var(--pad-bottom);
+  print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+.slide::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  --rm: color-mix(in srgb, currentColor 65%, transparent);
+  background:
+    linear-gradient(var(--rm), var(--rm)) 20px 20px / 28px 1px, linear-gradient(var(--rm), var(--rm)) 20px 20px / 1px 28px,
+    linear-gradient(var(--rm), var(--rm)) calc(100% - 20px) 20px / 28px 1px, linear-gradient(var(--rm), var(--rm)) calc(100% - 20px) 20px / 1px 28px,
+    linear-gradient(var(--rm), var(--rm)) 20px calc(100% - 20px) / 28px 1px, linear-gradient(var(--rm), var(--rm)) 20px calc(100% - 20px) / 1px 28px,
+    linear-gradient(var(--rm), var(--rm)) calc(100% - 20px) calc(100% - 20px) / 28px 1px, linear-gradient(var(--rm), var(--rm)) calc(100% - 20px) calc(100% - 20px) / 1px 28px,
+    linear-gradient(var(--rm), var(--rm)) center 25.5px / 36px 1px, linear-gradient(var(--rm), var(--rm)) center 8px / 1px 36px,
+    radial-gradient(circle, transparent 9px, var(--rm) 9px 10.5px, transparent 11px) center 8px / 36px 36px,
+    radial-gradient(circle, var(--rm) 0 3.5px, transparent 4px) center 8px / 36px 36px,
+    linear-gradient(var(--rm), var(--rm)) center calc(100% - 25.5px) / 36px 1px, linear-gradient(var(--rm), var(--rm)) center calc(100% - 8px) / 1px 36px,
+    radial-gradient(circle, transparent 9px, var(--rm) 9px 10.5px, transparent 11px) center calc(100% - 8px) / 36px 36px,
+    radial-gradient(circle, var(--rm) 0 3.5px, transparent 4px) center calc(100% - 8px) / 36px 36px,
+    linear-gradient(var(--rm), var(--rm)) 8px center / 36px 1px, linear-gradient(var(--rm), var(--rm)) 25.5px center / 1px 36px,
+    radial-gradient(circle, transparent 9px, var(--rm) 9px 10.5px, transparent 11px) 8px center / 36px 36px,
+    radial-gradient(circle, var(--rm) 0 3.5px, transparent 4px) 8px center / 36px 36px,
+    linear-gradient(var(--rm), var(--rm)) calc(100% - 8px) center / 36px 1px, linear-gradient(var(--rm), var(--rm)) calc(100% - 25.5px) center / 1px 36px,
+    radial-gradient(circle, transparent 9px, var(--rm) 9px 10.5px, transparent 11px) calc(100% - 8px) center / 36px 36px,
+    radial-gradient(circle, var(--rm) 0 3.5px, transparent 4px) calc(100% - 8px) center / 36px 36px;
+  background-repeat: no-repeat;
+}
+.slide-title { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: var(--type-title);
+  line-height: calc(1.5 * var(--baseline)); letter-spacing: -0.015em; margin: 0; margin-left: -0.035em; text-box: trim-both cap alphabetic; }
+.pin-bottom { position: absolute; left: var(--pad-x); right: var(--pad-x); bottom: var(--pad-bottom); }
+.meta { display: flex; align-items: baseline; gap: 18px; font-size: var(--type-kicker); color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+.meta span { text-box: trim-both cap alphabetic; }
+.color-bar { position: absolute; left: 463px; top: 20px; width: 64px; height: 16px;
+  background: linear-gradient(to right, var(--color-accent) 0 25%, var(--color-accent-2) 25% 50%, var(--color-process-yellow) 50% 75%, var(--color-text) 75%); }
+deck-stage { counter-reset: page; }
+.slide { counter-increment: page; }
+.page-foot { position: absolute; right: var(--pad-x); bottom: 38px; font-size: var(--type-kicker); letter-spacing: 0.04em;
+  color: color-mix(in srgb, currentColor 65%, transparent); text-box: trim-both cap alphabetic; }
+.page-foot::before { content: counter(page) " · "; font-feature-settings: "tnum" 1; }
+.page-foot::after { content: var(--page-foot-note); }
+.cover { justify-content: flex-start; padding-top: var(--cap-anchor); }
+.cover .rise { display: flex; flex-direction: column; gap: 42px; }
+.display { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: var(--type-display);
+  line-height: calc(2.5 * var(--baseline)); letter-spacing: -0.02em; margin: 0; margin-left: -0.035em; text-box: trim-both cap alphabetic; }
+.cover-sub { font-size: var(--type-subtitle); line-height: var(--baseline); max-width: 40ch; margin: 0; }
+.toc { display: flex; flex-direction: column; max-width: 1040px; font-size: var(--type-subtitle); }
+.toc-row { display: flex; align-items: baseline; gap: 54px; }
+.toc-row > span { text-box: trim-both cap alphabetic; }
+.toc-row + .toc-row { margin-top: calc(3 * var(--baseline) - 1cap); }
+.toc-num { font-size: var(--type-kicker); color: var(--color-accent); }
+.divider { justify-content: flex-start; padding-top: calc(4 * var(--baseline)); }
+.divider .rise { display: flex; flex-direction: column; align-items: flex-start; }
+.divider .slide-title { margin-top: -1cap; }
+.press-field { position: absolute; top: 0; right: 0; bottom: 0; width: 560px; overflow: hidden; pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 62%); mask-image: linear-gradient(to right, transparent, #000 62%); }
+.press-field i { position: absolute; inset: -120%; mix-blend-mode: multiply;
+  background-image: radial-gradient(circle, var(--pf-ink) 0 1.4px, transparent 1.7px); background-size: 10px 10px; }
+.press-field .pf-y { --pf-ink: var(--color-process-yellow); transform: rotate(0.001deg) translate(-3px, 4px); }
+.press-field .pf-c { --pf-ink: var(--color-accent); transform: rotate(15deg) translate(2px, -1px); }
+.press-field .pf-m { --pf-ink: var(--color-accent-2); transform: rotate(75deg) translate(4px, 3px); }
+.ghost-num { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 360px; letter-spacing: -0.02em;
+  text-box: trim-both cap alphabetic; margin: calc(10 * var(--baseline) - 1cap - 0.12em) -0.12em -0.12em calc(-0.033em - 0.12em); }
+.scale-bw { position: absolute; left: 420px; bottom: 20px; display: flex; }
+.scale-bw i { width: 16px; height: 16px; border: 1px solid var(--color-divider); margin-left: -1px; }
+.scale-bw i:nth-child(1) { background: var(--color-text); }
+.scale-bw i:nth-child(2) { background: color-mix(in srgb, var(--color-text) 89%, var(--color-bg)); }
+.scale-bw i:nth-child(3) { background: color-mix(in srgb, var(--color-text) 78%, var(--color-bg)); }
+.scale-bw i:nth-child(4) { background: color-mix(in srgb, var(--color-text) 67%, var(--color-bg)); }
+.scale-bw i:nth-child(5) { background: color-mix(in srgb, var(--color-text) 56%, var(--color-bg)); }
+.scale-bw i:nth-child(6) { background: color-mix(in srgb, var(--color-text) 44%, var(--color-bg)); }
+.scale-bw i:nth-child(7) { background: color-mix(in srgb, var(--color-text) 33%, var(--color-bg)); }
+.scale-bw i:nth-child(8) { background: color-mix(in srgb, var(--color-text) 22%, var(--color-bg)); }
+.scale-bw i:nth-child(9) { background: color-mix(in srgb, var(--color-text) 11%, var(--color-bg)); }
+.scale-bw i:nth-child(10) { background: var(--color-bg); }
+.scale-color { position: absolute; left: 435px; top: 20px; display: flex; }
+.scale-color i { width: 16px; height: 16px; border: 1px solid var(--color-divider); margin-left: -1px; }
+.scale-color .sc-c { background: var(--color-accent); } .scale-color .sc-m { background: var(--color-accent-2); } .scale-color .sc-y { background: var(--color-process-yellow); }
+.scale-color .sc-cm { background: linear-gradient(var(--color-accent), var(--color-accent)), linear-gradient(var(--color-accent-2), var(--color-accent-2)); background-blend-mode: multiply; }
+.scale-color .sc-my { background: linear-gradient(var(--color-accent-2), var(--color-accent-2)), linear-gradient(var(--color-process-yellow), var(--color-process-yellow)); background-blend-mode: multiply; }
+.scale-color .sc-cy { background: linear-gradient(var(--color-accent), var(--color-accent)), linear-gradient(var(--color-process-yellow), var(--color-process-yellow)); background-blend-mode: multiply; }
+.scale-color .sc-cmy { background: linear-gradient(var(--color-accent), var(--color-accent)), linear-gradient(var(--color-accent-2), var(--color-accent-2)), linear-gradient(var(--color-process-yellow), var(--color-process-yellow)); background-blend-mode: multiply; }
+.scale-color .sc-k { background: var(--color-text); }
+.star-target { position: absolute; left: 619px; bottom: 16px; width: 24px; height: 24px; border-radius: 50%;
+  background: repeating-conic-gradient(color-mix(in srgb, var(--color-text) 80%, transparent) 0 5deg, transparent 5deg 10deg);
+  -webkit-mask: radial-gradient(circle, transparent 0 1.5px, #000 2.5px 11px, transparent 12px); mask: radial-gradient(circle, transparent 0 1.5px, #000 2.5px 11px, transparent 12px); }
+.content { padding-top: calc(4 * var(--baseline)); }
+.content > .slide-title { margin-top: -1cap; }
+.content > .bullets { margin-top: calc(4 * var(--baseline) - 1cap); }
+.content > .table { margin-top: calc(3 * var(--baseline)); }
+.content > figure { margin-top: calc(2 * var(--baseline)); }
+.bullets { display: flex; flex-direction: column; max-width: 1400px; margin: 0; padding: 0; list-style: none; font-size: var(--type-body); }
+.bullets li { line-height: var(--baseline); text-box: trim-both cap alphabetic; text-indent: -0.538em; }
+.bullets li::before { content: "• "; }
+.bullets li + li { margin-top: calc(2 * var(--baseline) - 1cap); }
+.cols { display: grid; gap: calc(2 * var(--baseline)); margin-top: calc(4 * var(--baseline) - 1cap); }
+.cols-2 { grid-template-columns: 1fr 1fr; }
+.cols p { font-size: var(--type-small); line-height: var(--baseline); margin: 0; text-align: justify; hyphens: auto; hyphenate-limit-chars: 6 3 3; text-box: trim-both cap alphabetic; }
+.cols h3 { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: var(--type-body); margin: 0 0 calc(1 * var(--baseline) - 1cap); text-box: trim-both cap alphabetic; }
+.quad { display: grid; grid-template-columns: 1fr 1fr; gap: calc(2 * var(--baseline)) 96px; margin-top: calc(4 * var(--baseline) - 1cap); }
+.quad h3 { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: var(--type-body); margin: 0 0 calc(1 * var(--baseline) - 1cap); text-box: trim-both cap alphabetic; }
+.quad p { font-size: var(--type-small); line-height: var(--baseline); margin: 0; text-align: justify; hyphens: auto; hyphenate-limit-chars: 6 3 3; text-box: trim-both cap alphabetic; }
+.slide .table { max-width: 1632px; font-size: 30px; }
+.slide .table th, .slide .table td { text-box: trim-both cap alphabetic; padding: calc(var(--baseline) - 0.5cap - 0.5px) 28px calc(var(--baseline) - 0.5cap - 0.5px); }
+.slide .table th { font-size: var(--type-kicker); }
+.slide .table tbody tr:hover { background: none; }
+.slide .table th:first-child, .slide .table td:first-child { padding-left: 0; }
+.slide .table th:last-child, .slide .table td:last-child { padding-right: 0; }
+.quote { justify-content: flex-start; padding-top: var(--cap-anchor); gap: 54px; }
+.quote .rise { display: flex; flex-direction: column; gap: 54px; }
+.quote blockquote { font-family: var(--font-heading); font-weight: 400; font-style: italic; font-size: 58px; line-height: calc(1.5 * var(--baseline));
+  letter-spacing: -0.01em; max-width: 30ch; margin: 0; text-box: trim-both cap alphabetic; text-indent: -0.475em; }
+.quote figcaption { font-size: var(--type-small); margin: 0; text-indent: -1.045em; }
+@media (prefers-reduced-motion: no-preference) {
+  [data-deck-active] .rise { animation: rise 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+}
+</style>
+</helmet>
+<x-import component-from-global-scope="deck-stage" from="_ds/broadsheet-2877f5a2-bef3-45a3-80f8-3744f2f1a1bf/deck-stage.js" width="1920" height="1080" hint-size="100%,100%">
+
+  <section class="slide cover" data-label="Title" data-speaker-notes="Reed is an incremental state synchronization engine for declarative dataflow applications. This proposal focuses on the design principles and motivation, and offers a refined terminology for the concepts flagged as still unsettled.">
+    <div class="rise">
+      <h1 class="display">Reed</h1>
+      <p class="cover-sub">Design Principles &amp; Terminology — a proposal for the incremental state synchronization engine.</p>
+    </div>
+    <div class="pin-bottom meta"><span>Reed</span><span>·</span><span>September 2026</span></div>
+    <div class="color-bar" aria-hidden="true"></div>
+  </section>
+
+  <section class="slide content" data-label="Contents" data-speaker-notes="Overview of the four sections.">
+    <h2 class="slide-title">Contents</h2>
+    <div class="toc rise">
+      <div class="toc-row"><span class="toc-num">01</span><span>Origin &amp; Motivation</span></div>
+      <div class="toc-row"><span class="toc-num">02</span><span>Design Principles</span></div>
+      <div class="toc-row"><span class="toc-num">03</span><span>Proposed Terminology</span></div>
+      <div class="toc-row"><span class="toc-num">04</span><span>Closing</span></div>
+    </div>
+    <div class="page-foot" aria-hidden="true"></div>
+  </section>
+
+  <section class="slide divider" data-label="Origin & Motivation" data-speaker-notes="Section divider.">
+    <div class="press-field" aria-hidden="true"><i class="pf-y"></i><i class="pf-c"></i><i class="pf-m"></i></div>
+    <div class="scale-color" aria-hidden="true"><i class="sc-c"></i><i class="sc-m"></i><i class="sc-y"></i><i class="sc-cm"></i><i class="sc-my"></i><i class="sc-cy"></i><i class="sc-cmy"></i><i class="sc-k"></i></div>
+    <div class="scale-bw" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <i class="star-target" aria-hidden="true"></i>
+    <div class="rise"><h2 class="slide-title">Origin &amp; Motivation</h2>
+      <div class="ghost-num cmyk-num"><span class="paper">01</span><span class="plate plate-c" aria-hidden="true">01</span><span class="plate plate-m" aria-hidden="true">01</span><span class="plate plate-y" aria-hidden="true">01</span></div>
+    </div>
+  </section>
+
+  <section class="slide content" data-label="Why Reed" data-speaker-notes="The problem Reed factors out of SkyWeaver: manual orchestration of dependent, typed state.">
+    <h2 class="slide-title">Why Reed</h2>
+    <ul class="bullets rise">
+      <li>Declarative dataflow applications accumulate dependencies between computations that developers otherwise track and re-synchronize by hand.</li>
+      <li>Production dataflow systems need a runtime that keeps many strongly typed pieces of state consistent with minimal orchestration code.</li>
+      <li>Reed factors that need into a standalone engine: developers express computations as transformations over state, and the runtime infers dependencies and propagates updates on its own.</li>
+    </ul>
+    <div class="page-foot" aria-hidden="true"></div>
+  </section>
+
+  <section class="slide content" data-label="The name" data-speaker-notes="Reed takes its name from the loom part; the metaphor should anchor the vocabulary, which motivates the terminology proposal in section 3.">
+    <h2 class="slide-title">The name</h2>
+    <div class="cols cols-2 rise">
+      <div>
+        <h3>On a loom</h3>
+        <p>The reed is a comb-like structure that aligns, separates and beats the warp threads into place as fabric is woven — it keeps many parallel threads synchronized without touching any single one directly.</p>
+      </div>
+      <div>
+        <h3>In this engine</h3>
+        <p>Reed organizes strongly typed pieces of application state the same way: it aligns dependencies between them, separates concerns by layer, and keeps every piece synchronized as the whole evolves.</p>
+      </div>
+    </div>
+    <div class="page-foot" aria-hidden="true"></div>
+  </section>
+
+  <section class="slide divider" data-label="Design Principles" data-speaker-notes="Section divider.">
+    <div class="press-field" aria-hidden="true"><i class="pf-y"></i><i class="pf-c"></i><i class="pf-m"></i></div>
+    <div class="scale-color" aria-hidden="true"><i class="sc-c"></i><i class="sc-m"></i><i class="sc-y"></i><i class="sc-cm"></i><i class="sc-my"></i><i class="sc-cy"></i><i class="sc-cmy"></i><i class="sc-k"></i></div>
+    <div class="scale-bw" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <i class="star-target" aria-hidden="true"></i>
+    <div class="rise"><h2 class="slide-title">Design Principles</h2>
+      <div class="ghost-num cmyk-num"><span class="paper">02</span><span class="plate plate-c" aria-hidden="true">02</span><span class="plate plate-m" aria-hidden="true">02</span><span class="plate plate-y" aria-hidden="true">02</span></div>
+    </div>
+  </section>
+
+  <section class="slide content" data-label="Six principles" data-speaker-notes="Each principle is stated as a commitment, not just a label, so it can be checked against the implementation.">
+    <h2 class="slide-title">Six principles</h2>
+    <table class="table rise">
+      <thead><tr><th>Principle</th><th>Commitment</th></tr></thead>
+      <tbody>
+        <tr><td>State-oriented</td><td>Computation revolves around synchronized state, not direct calls between computations.</td></tr>
+        <tr><td>Declarative</td><td>Dependencies are described, never manually orchestrated.</td></tr>
+        <tr><td>Incremental</td><td>Only the computations affected by a change are recomputed.</td></tr>
+        <tr><td>Event-driven</td><td>State evolves in response to events, not on-demand queries.</td></tr>
+        <tr><td>Strongly typed</td><td>Every artifact and every dependency is statically defined.</td></tr>
+        <tr><td>Layered</td><td>Transport, synchronization, computation and dataflow stay independent concerns.</td></tr>
+      </tbody>
+    </table>
+    <div class="page-foot" aria-hidden="true"></div>
+  </section>
+
+  <section class="slide content" data-label="Four layers, one direction" data-speaker-notes="A light touch on architecture — enough to show the principles are load-bearing, not a full layer-by-layer walkthrough.">
+    <h2 class="slide-title">Four layers, one direction</h2>
+    <div class="quad rise">
+      <div><h3>1 · Transport</h3><p>How does information move? Delivers messages between nodes.</p></div>
+      <div><h3>2 · Synchronization</h3><p>What is the shared truth? Maintains one consistent state.</p></div>
+      <div><h3>3 · Activation</h3><p>What must be recomputed? Propagates change incrementally.</p></div>
+      <div><h3>4 · Composition</h3><p>How is computation described? Declares the dataflow graph.</p></div>
+    </div>
+    <div class="quad-axis" aria-hidden="true" style="display:flex;justify-content:space-between;margin-top:calc(2 * var(--baseline) - 1cap);font-size:var(--type-kicker);color:color-mix(in srgb, var(--color-text) 55%, transparent);"><span>lower-level →</span><span>← higher-level</span></div>
+    <div class="page-foot" aria-hidden="true"></div>
+  </section>
+
+  <section class="slide divider" data-label="Proposed Terminology" data-speaker-notes="Section divider.">
+    <div class="press-field" aria-hidden="true"><i class="pf-y"></i><i class="pf-c"></i><i class="pf-m"></i></div>
+    <div class="scale-color" aria-hidden="true"><i class="sc-c"></i><i class="sc-m"></i><i class="sc-y"></i><i class="sc-cm"></i><i class="sc-my"></i><i class="sc-cy"></i><i class="sc-cmy"></i><i class="sc-k"></i></div>
+    <div class="scale-bw" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <i class="star-target" aria-hidden="true"></i>
+    <div class="rise"><h2 class="slide-title">Proposed Terminology</h2>
+      <div class="ghost-num cmyk-num"><span class="paper">03</span><span class="plate plate-c" aria-hidden="true">03</span><span class="plate plate-m" aria-hidden="true">03</span><span class="plate plate-y" aria-hidden="true">03</span></div>
+    </div>
+  </section>
+
+  <section class="slide content" data-label="Three unsettled terms" data-speaker-notes="Depot, Outpost and Parcel are the three terms the team's own notes flag as still under evaluation; Transport, Bus, Message, Node, Port and Flow are already considered stable and are left untouched.">
+    <h2 class="slide-title">Three unsettled terms</h2>
+    <ul class="bullets rise">
+      <li>The team's own notes mark Depot, Outpost and Parcel as still under evaluation — every other term (Node, Bus, Port, Message, Flow) is already considered stable.</li>
+      <li>Those three happen to borrow from logistics vocabulary, while the engine itself is named for a loom part. Aligning them to the same weaving metaphor gives the vocabulary one consistent source instead of two.</li>
+    </ul>
+    <div class="page-foot" aria-hidden="true"></div>
+  </section>
+
+  <section class="slide content" data-label="Renaming proposal" data-speaker-notes="Warp for Depot and Heddle for Outpost read directly off the loom metaphor. Parcel is evaluated and kept — Thread and Strand were considered but collide with concurrency terminology.">
+    <h2 class="slide-title">Renaming proposal</h2>
+    <table class="table rise">
+      <thead><tr><th>Current</th><th>Proposed</th><th>Rationale</th></tr></thead>
+      <tbody>
+        <tr><td>Depot</td><td>Warp</td><td>The threads held under tension on the loom — the authoritative shared state the runtime holds taut across every node.</td></tr>
+        <tr><td>Outpost</td><td>Heddle</td><td>The cords that guide and lift individual warp threads — a node's synchronized, per-dependency interface into the Warp.</td></tr>
+        <tr><td>Parcel</td><td>Parcel <em>(unchanged)</em></td><td>Considered against Thread and Strand for metaphor coherence; retained because Thread collides with concurrency terminology the project must stay orthogonal to.</td></tr>
+      </tbody>
+    </table>
+    <div class="page-foot" aria-hidden="true"></div>
+  </section>
+
+  <section class="slide quote" data-label="On the name" data-speaker-notes="Grounding the renaming argument directly in Reed's own README.">
+    <figure class="rise">
+      <blockquote>“The reed of a weaving loom — a comb-like structure that aligns, separates, and synchronizes warp threads as fabric is woven.”</blockquote>
+      <figcaption>— the Reed README</figcaption>
+    </figure>
+    <div class="page-foot" aria-hidden="true"></div>
+  </section>
+
+  <section class="slide cover" data-label="Close" data-speaker-notes="Close. Open the floor for the vocabulary decision and next-step scheduling with the 4-layer architecture and public-API work.">
+    <div class="rise">
+      <h2 class="display">Discussion</h2>
+      <p class="cover-sub">Warp and Heddle close the vocabulary gap Depot and Outpost left open — one metaphor, end to end.</p>
+    </div>
+    <div class="pin-bottom meta"><span>Reed</span></div>
+    <div class="color-bar" aria-hidden="true"></div>
+  </section>
+
+</x-import>
+</x-dc>
+</body>
+</html>

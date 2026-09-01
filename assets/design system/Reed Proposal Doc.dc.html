@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/broadsheet-2877f5a2-bef3-45a3-80f8-3744f2f1a1bf/styles.css" />
+<title>Reed — Design Principles &amp; Terminology Proposal</title>
+<script src="_ds/broadsheet-2877f5a2-bef3-45a3-80f8-3744f2f1a1bf/_ds_bundle.js"></script>
+<script src="./doc-page.js"></script>
+<style>doc-page:not(:defined){visibility:hidden}
+.doc-body { font-family: var(--font-body); color: var(--color-text); line-height: 1.6; }
+.doc-body h1 { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 46px; letter-spacing: -0.015em; margin: 0 0 8px; }
+.doc-body .byline { font-size: 16px; color: color-mix(in srgb, var(--color-text) 55%, transparent); margin: 0 0 40px; }
+.doc-body h2 { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 28px; letter-spacing: -0.01em; margin: 48px 0 16px; }
+.doc-body h3 { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 20px; margin: 28px 0 10px; }
+.doc-body p { font-size: 17px; text-align: justify; hyphens: auto; hyphenate-limit-chars: 6 3 3; margin: 0 0 16px; }
+.doc-body .abstract { font-size: 16px; padding: 0 32px; margin: 0 0 40px; }
+.doc-body .abstract p { text-align: justify; }
+.doc-body blockquote { font-family: var(--font-heading); font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.5;
+  margin: 24px 0; max-width: 60ch; text-indent: -0.475em; }
+.doc-body blockquote cite { display: block; font-style: normal; font-family: var(--font-body); font-size: 15px; margin-top: 8px; text-indent: -1.045em; }
+.doc-body table { width: 100%; border-collapse: collapse; margin: 20px 0 28px; font-size: 15px; }
+.doc-body th, .doc-body td { text-align: left; padding: 10px 16px 10px 0; border-bottom: 1px solid var(--color-divider); vertical-align: top; }
+.doc-body th { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 14px; letter-spacing: 0.02em; }
+.doc-body ul { margin: 0 0 16px; padding-left: 22px; }
+.doc-body li { font-size: 17px; margin-bottom: 8px; text-align: justify; }
+.doc-body a { color: var(--color-accent-700); }
+.doc-body a:hover { color: var(--color-accent); }
+.doc-body .section-num { color: var(--color-accent-700); }
+</style>
+</helmet>
+<doc-page margin="1in">
+<article class="doc-body">
+  <h1>Reed: Design Principles &amp; Terminology Proposal</h1>
+  <p class="byline">Reed · September 2026</p>
+
+  <div class="abstract">
+    <h3>Abstract</h3>
+    <p>Reed is an incremental state synchronization engine for declarative dataflow applications. This document restates Reed's design principles and motivation in a form suitable for external review, and proposes a refinement of the three architectural terms — Depot, Outpost and Parcel — that internal working notes leave unsettled. The proposal aligns those terms with the loom metaphor Reed is itself named for, replacing Depot with Warp and Outpost with Heddle, while retaining Parcel after considering and rejecting alternatives that collide with existing concurrency terminology.</p>
+  </div>
+
+  <h2><span class="section-num">1.</span> Motivation</h2>
+  <p>Declarative dataflow applications express computation as a graph of typed transformations over state. As such applications grow, the dependencies between individual computations accumulate: a change to one piece of state may require several others to be recomputed, in a specific order, without leaving the system momentarily inconsistent. In the absence of a supporting runtime, developers track these dependencies and re-synchronize affected state by hand — orchestration code that is easy to get subtly wrong and that grows linearly with the number of dependent computations.</p>
+  <p>This problem is common to systems that must keep many strongly typed pieces of state consistent as they are produced, consumed and mutated across independent components. Reed factors that need into a standalone engine: developers declare computations as transformations over typed state, and the runtime is responsible for inferring dependencies between them and propagating updates incrementally, keeping application state consistent with minimal user-defined orchestration.</p>
+
+  <h2><span class="section-num">2.</span> Origin of the Name</h2>
+  <p>Reed takes its name from the reed of a weaving loom: a comb-like structure that aligns, separates and beats the warp threads into place as fabric is woven. The reed does not weave the fabric itself — it keeps many parallel threads synchronized and correctly ordered as the loom's other mechanisms act on them.</p>
+  <blockquote>“Reed organizes strongly typed pieces of application state, automatically coordinating their dependencies and keeping the states synchronized.”<cite>— the Reed README</cite></blockquote>
+  <p>The metaphor is a useful constraint on the engine's own vocabulary: a name drawn from weaving invites terminology drawn from the same craft, rather than from an unrelated domain. Section 4 argues that the project's current vocabulary only partially honors this constraint, and proposes a correction for the terms still under discussion.</p>
+
+  <h2><span class="section-num">3.</span> Design Principles</h2>
+  <p>Reed's architecture rests on six principles, each stated here as a testable commitment rather than a label:</p>
+  <table>
+    <thead><tr><th>Principle</th><th>Commitment</th></tr></thead>
+    <tbody>
+      <tr><td>State-oriented</td><td>Computation revolves around synchronized state rather than direct communication between computations.</td></tr>
+      <tr><td>Declarative</td><td>Dependencies between computations are described, not manually orchestrated.</td></tr>
+      <tr><td>Incremental</td><td>Only the computations affected by a given state change are recomputed.</td></tr>
+      <tr><td>Event-driven</td><td>State evolution is triggered by events, not by on-demand queries.</td></tr>
+      <tr><td>Strongly typed</td><td>Every artifact and every dependency between artifacts is statically defined.</td></tr>
+      <tr><td>Layered</td><td>Transport, synchronization, incremental computation and dataflow composition remain independent, separately replaceable concerns.</td></tr>
+    </tbody>
+  </table>
+  <p>These principles are load-bearing rather than aspirational: they are also what distinguishes Reed's computational model from adjacent systems such as ROS 2 (event-driven but without a single shared state), Salsa (state-centric but query-driven and lazy rather than event-driven and eager), and Dagster (explicit dependencies over an asset graph, but oriented toward scheduled data pipelines rather than reactive, always-consistent application state).</p>
+
+  <h2><span class="section-num">4.</span> Proposed Terminology</h2>
+  <p>Reed's internal working notes single out three architectural terms — Depot, Outpost and Parcel — as still under evaluation, while treating the remainder of the vocabulary (Node, Bus, Port, Message, Flow, Transport, Synchronization, Activation, Composition) as stable. Depot and Outpost were both borrowed from logistics vocabulary: a depot as a centralized store, an outpost as a remote point of access to it. That vocabulary is coherent on its own terms, but it does not come from the same source as the engine's own name.</p>
+  <p>Reading the three unsettled terms against the loom metaphor instead yields the following:</p>
+  <table>
+    <thead><tr><th>Current term</th><th>Proposed term</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr><td>Depot</td><td><strong>Warp</strong></td><td>The set of threads held under tension on a loom — the direct analogue of the authoritative, centrally held state that Reed synchronizes across every node.</td></tr>
+      <tr><td>Outpost</td><td><strong>Heddle</strong></td><td>The cords that guide and lift individual warp threads so the loom can act on them selectively — the direct analogue of a node's synchronized, per-dependency interface into the Warp.</td></tr>
+      <tr><td>Parcel</td><td><strong>Parcel</strong> <em>(unchanged)</em></td><td>Thread and Strand were both considered as the metaphor-consistent choice, and both rejected: Thread collides with the unrelated concept of an operating-system or execution thread, which this project must stay orthogonal to, and Strand reads as a synonym rather than a distinct concept. Parcel is retained as the clearer term.</td></tr>
+    </tbody>
+  </table>
+  <p>Under this proposal, a node no longer "interacts with the Depot through an Outpost" — it interacts with the Warp through a Heddle, and the sentence reads as an extension of the same metaphor that names the engine, rather than a switch into a second one. No other term changes: Node, Bus, Port, Message and Flow already read consistently and are left as they are.</p>
+
+  <h2><span class="section-num">5.</span> Conclusion</h2>
+  <p>Reed's motivation is narrow and concrete: remove hand-written orchestration from declarative dataflow applications by making state synchronization, dependency inference and incremental recomputation the runtime's responsibility rather than the developer's. Its six design principles state that commitment precisely enough to be checked against the implementation. The terminology proposed here does not change what the engine does — it resolves an open naming question flagged in the project's own notes, in favor of the metaphor the engine is already named for, ahead of the public API and documentation work already planned.</p>
+</article>
+</doc-page>
+</x-dc>
+</body>
+</html>

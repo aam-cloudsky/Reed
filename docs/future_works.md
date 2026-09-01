@@ -344,3 +344,94 @@ Recommended documents include:
 - Architectural Comparison
 
 The documentation should explain the architectural concepts independently of the implementation and establish Reed's computational model in relation to existing systems such as ROS 2, Blackboard Systems, Salsa, Hamilton, Dagster, and Flow-Based Programming.
+
+
+
+
+## Future Work — Asynchronous Distributed Coordination
+
+Eu descreveria como uma evolução futura do Reed para concorrência de escrita com arbitragem centralizada, sem ainda falar em rollback. Algo assim:
+
+Concurrent Multi-Writer Parcels
+
+Reed could evolve to allow multiple Outposts to write to the same Parcel while preserving the Depot as the centralized and authoritative source of truth.
+
+Currently, a Parcel has a single well-defined producer. In the proposed model, multiple Outposts could submit concurrent state changes to the same Parcel.
+
+Outpost A ──┐
+            │
+Outpost B ──┼──► Parcel X @ Depot
+            │
+Outpost C ──┘
+
+Writes would not become visible immediately. Instead, each Outpost would submit a proposed state transition to the Depot. The Depot would atomically arbitrate competing writes and only committed state would be propagated through the dataflow.
+
+Each Parcel could maintain a monotonically increasing revision:
+
+Parcel X
+revision 17: FREE
+revision 18: ALLOCATED
+revision 19: RELEASING
+revision 20: FREE
+
+An Outpost attempting to modify the Parcel would submit both the proposed value and the revision on which the operation is based:
+
+Outpost A:
+    expected_revision = 17
+    proposed_value = ALLOCATED_BY_A
+Outpost B:
+    expected_revision = 17
+    proposed_value = ALLOCATED_BY_B
+
+If both operations race, the Depot establishes the authoritative ordering. The first operation successfully committed changes the Parcel:
+
+X: revision 17 → revision 18
+
+The competing operation is then rejected because its expected revision no longer matches the current state:
+
+expected_revision = 17
+current_revision  = 18
+→ write rejected
+
+This follows a first-commit-wins optimistic concurrency model, similar to compare-and-swap semantics.
+
+Importantly, concurrency would be scoped to individual Parcels. Independent state could still evolve concurrently:
+
+Outpost A ──► Parcel X
+Outpost B ──► Parcel Y
+Outpost C ──► Parcel Z
+
+Only competing writes to the same Parcel revision require arbitration.
+
+A fundamental consistency rule would be:
+
+Only committed Depot state may propagate.
+
+Therefore, rejected writes never enter the propagation graph. This avoids the need for rollback or backtracking in the initial implementation.
+
+Conceptually:
+
+                 ┌── proposed write ── Outpost A
+                 │
+                 │
+              Depot
+          authoritative state
+                 │
+          atomic commit
+            /         \
+       accepted      rejected
+          │
+          ▼
+     propagation
+          │
+     ┌────┼────┐
+     ▼    ▼    ▼
+    O1   O2   O3
+
+This mechanism would enable Reed to model shared-resource coordination, reservation systems, concurrent multi-agent environments, and dynamic resource allocation while retaining a centralized Depot as the single source of truth.
+
+A later, more advanced model could allow speculative propagation, where Outposts act before a write is committed. That extension would require version tracking, invalidation, rollback, and recomputation. It should therefore be considered separately from the initial multi-writer concurrency model.
+
+Acho que essa formulação captura exatamente a ideia sem transformar o Reed prematuramente em um sistema distribuído: o Depot continua centralizado; o novo problema é concorrência sobre estado compartilhado, não consenso distribuído.
+
+Os nós teriam que atualziar também a versão do parcel que eles produzem para a versão do depot.
