@@ -181,9 +181,18 @@ cython_debug/
 .cursorindexingignore
 .python-version
 uv.lock
-docs/.DS_Store
-assets/design system/_ds/.DS_Store
-assets/design system/.DS_Store
-assets/.DS_Store
-assets/design system/.thumbnail
+
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+assets/design system/.thumbnail
