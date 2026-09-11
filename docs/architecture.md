@@ -1,184 +1,133 @@
 # Reed Architecture
 
-Reed is a computational framework for coordinating interdependent transformations through explicit dependencies, shared state, and structured communication.
+Reed is a computational framework for coordinating interdependent transformations through shared state, explicit artifact dependencies, and structured communication.
 
-Its architecture is organized around three core mechanisms:
+The architecture is organized into four layers, from the most internal mechanism to the most external behavior:
 
-1. **Dependency Management**
+1. **Bus Coordination**
 2. **Shared-State Synchronization**
-3. **Bus Coordination**
-
-
-Dependency Management captures the relationships among these artifacts, allowing reasoning about the impact of changes. Shared-State Synchronization maintains a Single Source of Truth (SSOT) by ensuring that artifacts and their supporting information remain synchronized via Bus Coordination. 
-
+3. **Dependency Management**
+4. **Incremental Propagation**
 
 ```mermaid
-flowchart LR
-    D[Dependency Management]
-    S[Shared-State Synchronization]
-    B[Bus Coordination]
+flowchart BT
+    B["1. Bus Coordination"]
+    S["2. Shared-State Synchronization"]
+    D["3. Dependency Management"]
+    P["4. Incremental Propagation"]
 
-    D -->|determines what executes| S
-    S -->|requires state interactions| B
-    B -->|coordinates communication| S
+    B -->|"coordinates communication"| S
+    S -->|"maintains shared artifacts"| D
+    D -->|"defines artifact dependencies"| P
 ```
 
-**Dependency Management** determines which transformations are required.
+Each layer answers a different architectural question:
 
-**Shared-State Synchronization** provides nodes with the state required to perform those transformations while maintaining the Repository as the Single Source of Truth.
-
-**Bus Coordination** defines how those interactions occur and preserves their ordering, identity, and causal relationships.
-
-
-Together, these mechanisms define how computational units depend on one another, how state is maintained consistently across the system, and how interactions between components are coordinated.
+| Layer | Question |
+|---|---|
+| Bus Coordination | How do components communicate? |
+| Shared-State Synchronization | Where does shared truth live? |
+| Dependency Management | What depends on what? |
+| Incremental Propagation | What must react when something changes? |
 
 ---
 
-## Dependency Management
+## Architectural Principles
 
-Artifacts produced by a computational workflow often depend on other artifacts or supporting information.
+### Single Source of Truth
 
-Reed represents these relationships explicitly as a **data-flow graph**.
+Reed maintains shared artifacts through a centralized **Repository**.
 
-Each node represents a computational unit that consumes state and produces or transforms artifacts. Dependencies between nodes determine the order in which transformations may occur.
+The Repository is not just storage. It is the authoritative source for shared state.
 
-Conceptually:
+Nodes may keep local state, but local state is not authoritative.
+
+### Producer-Consumer Organization
+
+Reed models computation through a producer-consumer organization.
+
+A **Node** consumes artifacts and produces new artifacts.
+
+This defines the primary responsibility of a Node: transforming declared inputs into declared outputs.
+
+### Artifact-Oriented Dataflow
+
+Reed is organized around artifacts, not around manual call sequences.
+
+Execution follows relationships between artifacts:
 
 ```text
-Artifact A ──▶ Node 1 ──▶ Artifact B ──▶ Node 2 ──▶ Artifact C
+Artifact A -> Node 1 -> Artifact B -> Node 2 -> Artifact C
 ```
 
-When an execution request is received, Reed determines the execution path required to satisfy that request and activates the corresponding nodes according to their dependencies.
+A **Flow** is the composition boundary that groups Nodes and artifacts into an executable dataflow context.
 
-This separates two concerns:
+### Unique Producer Responsibility
 
-- **what depends on what**, represented by the graph;
-- **when something should execute**, determined by the execution mechanism.
+Each artifact has exactly one responsible producer Node within a Flow.
 
-### Dependency Graph
+That same Node is also responsible for maintaining the artifact over time.
 
-A dependency graph may contain multiple branches:
+This principle is central to Reed's mental model:
 
-```mermaid
-flowchart LR
-    A[Source A] --> C[Node C]
-    B[Source B] --> C
-    C --> D[Node D]
-    C --> E[Node E]
-    D --> F[Node F]
-    E --> F
+```text
+If an artifact exists in the shared state, one Node is responsible for producing and maintaining it.
 ```
 
-Changes can therefore be propagated only through the affected portion of the graph rather than requiring the entire computation to be executed again.
+The artifact's type describes what kind of value it carries.
+
+The artifact's identity describes its role in the computation, including who is responsible for producing and maintaining it.
+
+### Shared And Local State Separation
+
+Reed distinguishes two notions of state:
+
+| State | Meaning |
+|---|---|
+| Shared State | Authoritative state maintained by the Repository. |
+| Local State | Node-local view or working state synchronized with the Repository. |
+
+This separation allows Nodes to compute locally while preserving a consistent shared state.
+
+### Causal Ordering
+
+Reed preserves causal ordering between communication interactions.
+
+Communication side effects produced while handling one message are delayed until the current interaction has completed.
+
+This prevents recursive message handling from blurring cause and effect.
+
+### Selective Recomputation
+
+Reed avoids recomputing the whole graph when a local change occurs.
+
+Instead, changes are propagated through the affected part of the dependency graph.
+
+Only computations whose inputs are affected should become eligible for re-execution.
 
 ---
 
-## Shared-State Synchronization
+## 1. Bus Coordination
 
-Nodes require access to the artifacts and supporting information they consume.
+### Purpose
 
-Reed maintains this information through a centralized **Repository**, which acts as the system's **Single Source of Truth (SSOT)**.
+Bus Coordination defines how Reed components communicate.
 
-```mermaid
-flowchart TD
-    R[(Repository)]
+It provides structured message delivery, topic-based routing, communication context, trace identifiers, and split-phase execution.
 
-    N1[Node A] <--> R
-    N2[Node B] <--> R
-    N3[Node C] <--> R
-    N4[Node D] <--> R
-```
+### Core Concepts
 
-Nodes do not constitute independent authoritative sources of state.
+| Concept | Meaning |
+|---|---|
+| Bus | Communication mechanism used to route messages between components. |
+| Topic | Semantic channel associated with a kind of interaction. |
+| Message | Payload describing an operation or transmitted data. |
+| Communication Context | Metadata required to coordinate delivery and causality. |
+| Trace Identifier | Identifier associated with one communication interaction. |
 
-Instead, each node maintains a **local view** containing the subset of state required for its operation, while the Repository remains authoritative.
+### Topics
 
-This produces two distinct notions of state:
-
-### Shared State
-
-The authoritative state maintained by the Repository and potentially accessible by multiple nodes.
-
-### Local State
-
-The synchronized subset of state maintained by an individual node for its own execution.
-
----
-
-## Node Lifecycle
-
-Interaction between a node and the Repository follows an explicit lifecycle.
-
-The lifecycle consists of six phases:
-
-1. **Contract Registration**
-2. **Retrieval**
-3. **Synchronization**
-4. **Transformation**
-5. **Publication**
-6. **Idle**
-
-```mermaid
-stateDiagram-v2
-    [*] --> ContractRegistration
-
-    ContractRegistration --> Retrieval
-    Retrieval --> Idle
-
-    Idle --> Synchronization: state updated
-    Synchronization --> Idle
-
-    Idle --> Transformation: execution requested
-    Transformation --> Publication
-    Publication --> Idle
-```
-
-### Contract Registration
-
-When a node is created, it declares the state elements involved in its operation.
-
-Its contract specifies which elements the node:
-
-- consumes;
-- mutates;
-- produces.
-
-### Retrieval
-
-After its contract is accepted, the node retrieves the state elements required to establish its initial local view.
-
-### Idle
-
-Once initialized, the node waits for either:
-
-- an update to relevant shared state; or
-- an execution request.
-
-### Synchronization
-
-When relevant state changes in the Repository, the node refreshes its local view.
-
-After synchronization, it returns to the Idle state.
-
-### Transformation
-
-When execution is requested, the node performs its computation using the state declared by its contract.
-
-### Publication
-
-Artifacts or state changes produced during transformation are published back to the Repository.
-
-The Repository then becomes the authoritative source for the new state.
-
----
-
-## Bus Coordination
-
-Communication between Nodes and the Repository is coordinated through a **Bus**.
-
-The Bus organizes interactions into semantic communication channels.
-
-Each channel is identified by a **topic** associated with a particular interaction or lifecycle operation.
+Interactions are organized into semantic topics.
 
 Examples include:
 
@@ -189,86 +138,64 @@ synchronize
 publish
 ```
 
-A node may therefore expose multiple communication endpoints while maintaining a single identity within the system.
+A component may expose multiple communication endpoints while maintaining a single identity in the system.
 
-Conceptually:
-
-```text
-                 ┌───────────────┐
-                 │      Bus      │
-                 └───────────────┘
-                   ▲     ▲     ▲
-                   │     │     │
-             contract retrieve publish
-                   │     │     │
-                   ▼     ▼     ▼
-                 ┌───────────────┐
-                 │     Node      │
-                 └───────────────┘
-```
-
-Routing is determined by the combination of:
+Routing is determined by:
 
 - sender identity;
 - recipient identity;
 - communication topic.
 
----
+### Message Structure
 
-## Messages and Communication Context
-
-Every message contains two conceptually distinct components:
+Every message has two conceptual parts:
 
 ```text
 Message
 ├── Payload
-└── Context
+└── Communication Context
 ```
 
 The **payload** describes the requested operation or transmitted data.
 
-The **communication context** contains metadata necessary to coordinate the interaction, including:
+The **communication context** carries coordination metadata, such as:
 
 ```text
 sender
 recipient
 topic
-trace_id
+trace_identifier
 reply_to
 ```
 
-Each interaction receives a unique `trace_id`.
+Replies form new interactions with their own trace identifiers, while referencing the original interaction through `reply_to`.
 
-Replies constitute new interactions with their own `trace_id`, while referencing the original interaction through `reply_to`.
+```mermaid
+sequenceDiagram
+    participant N as Node
+    participant B as Bus
+    participant R as Repository
 
-For example:
-
-```text
-T1: Node ───── request ─────▶ Repository
-                              │
-                              │ reply_to = T1
-                              ▼
-T2: Node ◀──── response ───── Repository
+    N->>B: request
+    B->>R: dispatch request
+    R-->>B: response references request
+    B-->>N: dispatch response
 ```
 
-This creates an explicit causal chain between interactions.
-
----
-
-## Split-Phase Execution
+### Split-Phase Execution
 
 Bus communication follows a **split-phase execution model**.
 
-An interaction is divided into:
+Each interaction has two phases:
 
 1. **Processing**
 2. **Flush / Post-processing**
 
-During processing, a receiving component handles the current message and computes its local result.
+During processing, the receiver handles the current message and computes a local result.
 
-Communication side effects generated during processing are **not emitted immediately**.
+Communication side effects generated during processing are not emitted immediately.
 
-Instead, they are deferred.
+They are deferred until the current interaction completes.
 
 ```mermaid
 sequenceDiagram
@@ -291,17 +218,298 @@ sequenceDiagram
     B->>N: Dispatch response
 ```
 
-Only after the current interaction has completed does the Bus flush the deferred actions.
+### Guarantees
 
-This prevents communication generated during message processing from recursively creating new interactions before the current interaction has finished.
+Bus Coordination preserves:
 
-As a result, the execution model preserves:
-
-- deterministic execution;
 - causal ordering;
 - explicit interaction boundaries;
+- deterministic message processing;
 - traceable request-response chains.
 
 ---
 
+## 2. Shared-State Synchronization
 
+### Purpose
+
+Shared-State Synchronization maintains a consistent shared state across Nodes.
+
+Nodes do not act as independent authoritative sources of state.
+
+They synchronize with the Repository, which acts as Reed's Single Source of Truth.
+
+```mermaid
+flowchart TD
+    R[(Repository)]
+
+    A[Node A] <--> R
+    B[Node B] <--> R
+    C[Node C] <--> R
+    D[Node D] <--> R
+```
+
+### Core Concepts
+
+| Concept | Meaning |
+|---|---|
+| Repository | Authoritative store of shared artifacts. |
+| Artifact | Computational product stored in shared state. |
+| Shared State | Global state maintained by the Repository. |
+| Local State | Node-local view synchronized with shared state. |
+| Provenance | Metadata describing how an artifact was produced. |
+
+### Artifact Publication
+
+When a Node completes a transformation, it publishes produced artifacts to the Repository.
+
+Publication makes the Repository authoritative for the new artifact state.
+
+Publication also records **provenance**.
+
+Provenance describes:
+
+- the responsible producer;
+- the artifact version;
+- the artifact versions consumed to produce it.
+
+```mermaid
+flowchart LR
+    A[Input Artifact] --> N[Producer Node]
+    N --> B[Published Artifact]
+    B --> P[Provenance]
+
+    P --> O[Producer]
+    P --> V[Version]
+    P --> D[Dependency Versions]
+```
+
+### Node Lifecycle
+
+Interaction between a Node and the Repository follows a lifecycle:
+
+1. **Contract Registration**
+2. **Retrieval**
+3. **Synchronization**
+4. **Transformation**
+5. **Publication**
+6. **Idle**
+
+```mermaid
+stateDiagram-v2
+    [*] --> ContractRegistration
+
+    ContractRegistration --> Retrieval
+    Retrieval --> Idle
+
+    Idle --> Synchronization: shared state updated
+    Synchronization --> Idle
+
+    Idle --> Transformation: execution requested
+    Transformation --> Publication
+    Publication --> Idle
+```
+
+### Lifecycle Phases
+
+| Phase | Meaning |
+|---|---|
+| Contract Registration | The Node declares which artifacts it consumes and produces. |
+| Retrieval | The Node retrieves artifacts required to initialize its local state. |
+| Idle | The Node waits for relevant state changes or execution requests. |
+| Synchronization | The Node refreshes local state after relevant shared-state updates. |
+| Transformation | The Node computes using its declared inputs. |
+| Publication | The Node publishes produced artifacts and provenance. |
+
+### Guarantees
+
+Shared-State Synchronization preserves:
+
+- one authoritative shared state;
+- clear separation between shared state and local state;
+- explicit publication boundaries;
+- provenance for published artifacts.
+
+---
+
+## 3. Dependency Management
+
+### Purpose
+
+Dependency Management defines relationships between artifacts.
+
+It answers:
+
+```text
+What depends on what?
+```
+
+Artifacts produced by a computational workflow may depend on other artifacts.
+
+Reed represents these relationships as an artifact dependency graph.
+
+### Producer-Consumer Graph
+
+Nodes participate in the graph as producer-consumer units.
+
+A Node consumes artifacts and produces artifacts.
+
+```mermaid
+flowchart LR
+    A[Artifact A] --> N1[Node 1]
+    N1 --> B[Artifact B]
+    B --> N2[Node 2]
+    N2 --> C[Artifact C]
+```
+
+The graph may contain branches and joins:
+
+```mermaid
+flowchart LR
+    A[Artifact A] --> C[Node C]
+    B[Artifact B] --> C
+    C --> D[Artifact D]
+    C --> E[Artifact E]
+    D --> F[Node F]
+    E --> F
+    F --> G[Artifact G]
+```
+
+### Unique Producer Responsibility
+
+Each artifact has a single responsible producer Node.
+
+That producer is also the artifact's maintainer within the Flow.
+
+This prevents ambiguity in the dependency graph.
+
+When another Node consumes an artifact, it consumes a value whose production and maintenance responsibility is known.
+
+```text
+Artifact identity = value role + responsible producer + position in the computation
+```
+
+The artifact's data type is not enough to define its architectural identity.
+
+Two artifacts may carry the same kind of value while occupying different roles in the computation.
+
+### Flow Boundary
+
+A Flow groups Nodes and artifacts into a composition boundary.
+
+Within that boundary, Reed can reason about:
+
+- which artifacts exist;
+- which Nodes produce them;
+- which Nodes consume them;
+- how changes may affect downstream computations.
+
+This does not require the user to manually define an execution sequence.
+
+The execution order emerges from artifact dependencies.
+
+### Guarantees
+
+Dependency Management preserves:
+
+- explicit artifact dependencies;
+- producer-consumer responsibility;
+- unambiguous artifact ownership;
+- separation between data type and artifact identity.
+
+---
+
+## 4. Incremental Propagation
+
+### Purpose
+
+Incremental Propagation determines which computations must react when an artifact changes.
+
+It answers:
+
+```text
+What must react when something changes?
+```
+
+Instead of recomputing the entire Flow, Reed propagates change information through the affected portion of the dependency graph.
+
+### Core Concepts
+
+| Concept | Meaning |
+|---|---|
+| Dirty Flag | Marker indicating that an artifact or dependency is no longer up to date. |
+| Dirty Propagation | Process of spreading invalidation through affected dependencies. |
+| Trigger Policy | Rule that determines when a Node should execute in response to changes. |
+| Selective Recomputation | Re-execution of only the affected computations. |
+
+### Dirty Propagation
+
+When an artifact changes, dependent artifacts may become outdated.
+
+Reed marks affected dependencies as dirty and propagates that information downstream.
+
+```mermaid
+flowchart LR
+    A[Artifact changed] --> D[Dirty propagation]
+    D --> T[Trigger policy]
+    T --> E[Affected Nodes execute]
+    E --> P[New artifacts published]
+```
+
+Dirty propagation separates two concerns:
+
+- **invalidation**, which identifies what became outdated;
+- **execution**, which decides what should run.
+
+### Trigger Policy
+
+A Trigger Policy determines whether a Node should execute after dependency changes.
+
+Examples of possible policies include:
+
+- execute when any dependency changes;
+- execute only when all dependencies have changed;
+- execute only when explicitly requested.
+
+The policy belongs to the reactive behavior of the graph, not to the artifact itself.
+
+### Selective Recomputation
+
+Selective recomputation is the practical result of incremental propagation.
+
+If a change affects only one branch of the graph, Reed should only activate that branch.
+
+```mermaid
+flowchart LR
+    A[Changed Artifact] --> B[Node B]
+    A --> C[Node C]
+    X[Unaffected Artifact] --> Y[Node Y]
+
+    B --> D[Updated Artifact]
+    C --> E[Updated Artifact]
+    Y --> Z[Unchanged Artifact]
+```
+
+### Guarantees
+
+Incremental Propagation preserves:
+
+- localized reaction to change;
+- automatic downstream invalidation;
+- policy-driven activation;
+- avoidance of unnecessary recomputation.
+
+---
+
+## Summary
+
+Reed combines four architectural layers:
+
+| Layer | Responsibility |
+|---|---|
+| Bus Coordination | Preserves structured communication and causal ordering. |
+| Shared-State Synchronization | Maintains the Repository as the Single Source of Truth. |
+| Dependency Management | Defines artifact relationships and producer responsibility. |
+| Incremental Propagation | Propagates changes and activates affected computations. |
+
+Together, these layers allow Reed to coordinate interdependent transformations while preserving explicit dependencies, shared-state consistency, provenance, causal communication, and selective recomputation.
