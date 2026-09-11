@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Validate imports
+        run: |
+          python - <<'PY'
+          import reed
+
+          required_exports = ("Parcel", "flow", "node", "output", "input")
+          missing_exports = [name for name in required_exports if not hasattr(reed, name)]
+
+          if missing_exports:
+              raise SystemExit(f"Missing exports: {missing_exports}")
+          PY
+
+      - name: Lint
+        run: python -m ruff check src examples tests
+
+      - name: Compile Python sources
+        run: python -m compileall src examples tests
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+      - name: Build distribution
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: Upload distribution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reed-sync-dist
+          path: dist/*
