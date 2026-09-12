@@ -30,7 +30,7 @@ class Node:
 
         This separation is required because the Node must first attach its
         `_on_status_changed` callback to the Outpost. Only after that callback is
-        installed may the Outpost begin registration and initial Depot sync.
+        installed may the Outpost begin registration and initial repository sync.
 
         Without this two-phase initialization, the Outpost could receive its
         initial pallet before the Node is fully wired, causing dependency changes

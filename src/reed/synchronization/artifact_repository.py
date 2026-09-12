@@ -1,4 +1,4 @@
-# src/skyweaver/core/logistics/depot.py
+# src/reed/synchronization/artifact_repository.py
 
 
 from typing import TYPE_CHECKING, Any, Dict, Optional, cast
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from reed.execution.artifact_record import ArtifactRecord
 
 
-class Depot:
+class ArtifactRepository:
     # self declared reserved
     __bus_id__ = PublisherReservedIDs.DEPOT
 
@@ -200,7 +200,7 @@ class Depot:
 
     def set_artifact_record(self, record: "ArtifactRecord") -> None:
         """
-        Commit `record` into this Depot's additive, domain-type-keyed
+        Commit `record` into this ArtifactRepository's additive, domain-type-keyed
         `ArtifactRecord` storage (Slice 2E; docs/parcel_boundary_decision.md,
         "Addendum: Slice 2E ArtifactRecord Commit Storage").
 

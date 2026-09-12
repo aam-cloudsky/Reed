@@ -22,7 +22,7 @@ added by the follow-up:
        across repeated run() calls, and Flow.add(...) still works
        normally after run() has been called).
     5. Run-specific state is not stored on Flow.
-    6. Each Run owns its own repository instance, backed by Depot, and
+    6. Each Run owns its own repository instance, backed by ArtifactRepository, and
        two Runs never share repository state or repository identity.
 """
 
@@ -194,9 +194,9 @@ def test_run_has_a_repository_accessor():
     assert run.repository is not None
 
 
-def test_run_repository_is_backed_by_depot():
+def test_run_repository_is_backed_by_artifact_repository():
     from reed import Flow
-    from reed.synchronization.depot import Depot
+    from reed.synchronization.artifact_repository import ArtifactRepository
 
     def produce() -> int:
         return 1
@@ -205,7 +205,7 @@ def test_run_repository_is_backed_by_depot():
     flow.add(produce)
     run = flow.run()
 
-    assert isinstance(run.repository, Depot)
+    assert isinstance(run.repository, ArtifactRepository)
 
 
 def test_each_run_owns_a_distinct_repository_instance():
@@ -224,7 +224,7 @@ def test_each_run_owns_a_distinct_repository_instance():
 
 
 def test_two_runs_from_the_same_flow_do_not_share_repository_identity():
-    # Depot.identity is derived from the Bus it was constructed with;
+    # ArtifactRepository.identity is derived from the Bus it was constructed with;
     # two Runs must each construct their own Bus, so their repositories'
     # identities must differ even though both Runs came from one Flow.
     from reed import Flow

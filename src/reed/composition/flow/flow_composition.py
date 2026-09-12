@@ -42,7 +42,7 @@ Slice 2A (docs/architectural_decision.md, "Run"; architectural_invariants.md
 stores nothing about the `Run`s it has created -- no list, no counter,
 no last-created reference -- so it remains a plain, reusable composition
 object no matter how many times `run()` is called. `Run` owns a
-distinct, `Depot`-backed repository instance per `Run` (Slice 2A
+distinct, `ArtifactRepository`-backed repository instance per `Run` (Slice 2A
 follow-up) and a distinct `NodeRuntime` per materialized node (Slice
 2B, `run.node_runtime(...)`) -- `Flow` and `FlowNode` acquire none of
 that state; see `reed/execution/run.py`'s and

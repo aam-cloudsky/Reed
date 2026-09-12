@@ -48,7 +48,7 @@ class StateFlags:
 @dataclass(eq=False)
 class Outpost(SchemaBuilder):
     """
-    Reactive configuration unit synchronized via Depot.
+    Reactive configuration unit synchronized via ArtifactRepository.
 
     - Declares parcels as dataclass fields
     - CONSUMED parcels are dependencies
@@ -114,7 +114,7 @@ class Outpost(SchemaBuilder):
         bus: Bus,
     ) -> None:
         """
-        Reactive configuration unit synchronized via Depot.
+        Reactive configuration unit synchronized via ArtifactRepository.
 
         - Declares Parcels as dataclass fields
         - CONSUMED Parcels are dependencies
@@ -126,7 +126,7 @@ class Outpost(SchemaBuilder):
 
         In the current runtime, `None` means that the corresponding Parcel is
         not currently available in this Outpost: it has not yet been received
-        from the Depot or has not yet been produced locally.
+        from the ArtifactRepository or has not yet been produced locally.
 
         This is a runtime availability state, not a Parcel state.
 

@@ -13,7 +13,7 @@ from reed.transportation.protocol.message_context import MessageContext
 
 class Sentinel:
     """
-    Passive watcher of Depot updates.
+    Passive watcher of ArtifactRepository updates.
 
     Responsibilities:
     - Listen to DepotUpdate events via SET topic

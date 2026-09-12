@@ -69,11 +69,11 @@ Explicitly out of scope for this slice (Milestone 2, later slices):
       slice's own tests use to build fixtures.
     - No repository storage of `ArtifactRecord`s. `run.repository`
       (`reed.execution.run.Run.repository`, Slice 2A follow-up) remains
-      backed directly by `Depot`, whose `get_parcel`/`set_parcel` are
-      hard-typed to `Parcel` instances (`Depot.set_parcel` raises
-      `TypeError` for anything that is not a `Parcel`) -- `Depot` cannot
-      hold an `ArtifactRecord` without either modifying `Depot` itself
-      (forbidden: `Depot` is regression-protected legacy infrastructure,
+      backed directly by `ArtifactRepository`, whose `get_parcel`/`set_parcel` are
+      hard-typed to `Parcel` instances (`ArtifactRepository.set_parcel` raises
+      `TypeError` for anything that is not a `Parcel`) -- `ArtifactRepository` cannot
+      hold an `ArtifactRecord` without either modifying `ArtifactRepository` itself
+      (forbidden: `ArtifactRepository` is regression-protected legacy infrastructure,
       and changing its type contract is exactly the kind of
       "disproportionate migration" this slice's task instruction says to
       report rather than force) or making `ArtifactRecord` a `Parcel`

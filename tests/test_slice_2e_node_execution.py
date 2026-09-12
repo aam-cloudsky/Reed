@@ -12,7 +12,7 @@ each piece of the firing pipeline this slice adds:
     - `NodeRuntime.wrap(...)` / `.commit(...)` committing into
       `run.repository`'s additive, domain-type-keyed ArtifactRecord
       storage (docs/parcel_boundary_decision.md, "Addendum: Slice 2E
-      ArtifactRecord Commit Storage"), independent of `Depot`'s existing
+      ArtifactRecord Commit Storage"), independent of `ArtifactRepository`'s existing
       Parcel storage path.
     - `Run.publish(...)`'s explicit refusal to guess multi-node
       dispatch/routing when the published type matches zero or more than
@@ -99,7 +99,7 @@ def test_committed_artifact_record_storage_is_independent_of_parcel_storage():
 
     run.publish(Measurement(3))
 
-    # The additive ArtifactRecord path must not touch Depot's existing,
+    # The additive ArtifactRecord path must not touch ArtifactRepository's existing,
     # untouched Parcel storage.
     assert run.repository.get_parcel(Estimate) is None
 

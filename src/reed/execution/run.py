@@ -11,7 +11,7 @@ Scope for this slice (docs/refactor_priority_order.md, Milestone 2, Slice
         v (run())
     Run
         v (owns)
-    repository (Depot, for now -- see below)
+    repository (ArtifactRepository, for now -- see below)
     NodeRuntime instances (one per (Run, FlowNode) pair -- see below)
 
 `Run` represents one concrete execution instance of a `Flow`
@@ -31,36 +31,36 @@ Run-scoped repository ownership (Slice 2A follow-up):
 
     Each `Run` constructs and owns its own repository instance, exposed
     as `run.repository`. For this migration stage the repository is the
-    existing `Depot`, constructed the same way the current,
+    existing `ArtifactRepository`, constructed the same way the current,
     regression-protected execution path already constructs one
     (`reed.synchronization.logistics.Logistics.__init__`):
 
         bus = Bus.create()
-        repository = Depot(bus=bus)
+        repository = ArtifactRepository(bus=bus)
 
     This is the temporary migration strategy
     `docs/refactor_priority_order.md`'s Slice 2A row and its
     accompanying prose describe: "`Run` gets a `.repository` accessor
     from this point on, backed by whatever the current storage class is
-    called internally (still `Depot` until Milestone 3, slice 3A) ...
+    called internally (still `ArtifactRepository` until Milestone 3, slice 3A) ...
     Milestone 2 can and should pass its tests while the underlying
-    storage class is still internally called `Depot`." It is not the
-    final repository architecture: `Depot` is not renamed, no
+    storage class is still internally called `ArtifactRepository`." It is not the
+    final repository architecture: `ArtifactRepository` is not renamed, no
     `ArtifactRecord`-aware `get`/`set` API is defined here, and no
     adapter/protocol/factory layer is introduced. `Run.repository` is a
-    plain pass-through to the `Depot` instance this `Run` constructed
+    plain pass-through to the `ArtifactRepository` instance this `Run` constructed
     for itself -- nothing more.
 
-    Each `Run` gets its own `Bus` and its own `Depot`: two `Run`s
+    Each `Run` gets its own `Bus` and its own `ArtifactRepository`: two `Run`s
     created from the same `Flow` share no repository state and no
-    repository identity (`Depot.identity` differs because each is built
+    repository identity (`ArtifactRepository.identity` differs because each is built
     from a distinct `Bus`).
 
     An earlier version of this module deferred `.repository` entirely,
-    reasoning that constructing a `Depot` pulled in "the full legacy
+    reasoning that constructing a `ArtifactRepository` pulled in "the full legacy
     transportation/lifecycle stack" and that doing so would read as a
     speculative abstraction under `docs/non-goals.md`. Both reasons were
-    wrong on inspection: constructing a `Bus` + `Depot` pair is the same
+    wrong on inspection: constructing a `Bus` + `ArtifactRepository` pair is the same
     trivial, already-used, regression-tested two-line pattern
     `Logistics.__init__` already relies on today (no I/O, no threads, no
     sockets -- `Bus.create()` just wraps an in-process `MessageHub()`),
@@ -152,13 +152,14 @@ Explicitly still out of scope for this slice (Milestone 2, later slices):
 
     - No domain-facing `repository.get(domain_type)` /
       `repository.set(...)` API on `Run` itself. `run.repository`
-      exposes the raw `Depot` instance as-is (its existing
+      exposes the raw `ArtifactRepository` instance as-is (its existing
       `get_parcel`/`set_parcel`/`get_pallet` methods, plus Slice 2E's
       additive `set_artifact_record`/`get_artifact_record`); a
       `Run`-level accessor wired into `on_output` dispatch is Slice 2F's
       job.
-    - No rename of `Depot` to `ArtifactRepository` (Milestone 3, slice
-      3A; docs/non-goals.md, "Broad Renaming").
+    - The `Depot` -> `ArtifactRepository` rename itself (Milestone 3,
+      slice 3A; docs/non-goals.md, "Broad Renaming") is now done -- this
+      module's own `Depot` references were updated by that slice.
     - No new node-participation identity semantics, no distributed
       execution, no advanced scheduling -- unchanged from Milestone 1.
 
@@ -177,7 +178,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.execution.node_runtime import NodeRuntime
-from reed.synchronization.depot import Depot
+from reed.synchronization.artifact_repository import ArtifactRepository
 from reed.transportation.bus import Bus
 
 if TYPE_CHECKING:
@@ -194,7 +195,7 @@ class Run:
 
     See module docstring for the exact scope. `Run` owns an
     identity/ownership boundary plus its own repository instance
-    (`.repository`, currently backed directly by `Depot`), its own
+    (`.repository`, currently backed directly by `ArtifactRepository`), its own
     `NodeRuntime` per materialized node (`.node_runtime(...)`), and a
     single-node firing path (`.publish(...)`) -- it exists so that later
     slices (2F-2G) have somewhere correct to attach callback dispatch and
@@ -204,7 +205,7 @@ class Run:
 
     def __init__(self, flow: Flow) -> None:
         self._flow = flow
-        self._repository = Depot(bus=Bus.create())
+        self._repository = ArtifactRepository(bus=Bus.create())
         self._node_runtimes: dict[FlowNode, NodeRuntime] = {}
         self.callback_failures: list[BaseException] = []
         self._pending_callback_coroutines: list[Any] = []
@@ -227,13 +228,13 @@ class Run:
         return self._flow
 
     @property
-    def repository(self) -> Depot:
+    def repository(self) -> ArtifactRepository:
         """
         This `Run`'s own repository instance.
 
-        Backed directly by `Depot` for this migration stage (Slice 2A
+        Backed directly by `ArtifactRepository` for this migration stage (Slice 2A
         follow-up; docs/refactor_priority_order.md's Slice 2A row).
-        Every `Run` constructs its own `Bus` + `Depot` pair, so two
+        Every `Run` constructs its own `Bus` + `ArtifactRepository` pair, so two
         `Run`s -- even from the same `Flow` -- never share repository
         state or repository identity.
         """

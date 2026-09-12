@@ -18,7 +18,7 @@ class Parcel(ABC):
     ======
 
     Parcel is the fundamental semantic unit transported through the
-    SkyWeaver runtime and stored in the Depot.
+    SkyWeaver runtime and stored in the ArtifactRepository.
 
     A Parcel represents an actual published or publishable data object.
     It is not used to represent absence.

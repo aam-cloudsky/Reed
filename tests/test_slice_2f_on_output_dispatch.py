@@ -22,8 +22,8 @@ each piece of the dispatch step this slice adds to `Run.publish(...)`:
       `run.callback_failures` without affecting the committed record;
     - an async callback failure raised during `wait_for_callbacks()` is
       isolated into `run.callback_failures` the same way;
-    - `Depot.get(domain_type)` is a thin, additive alias for
-      `Depot.get_artifact_record(domain_type)`.
+    - `ArtifactRepository.get(domain_type)` is a thin, additive alias for
+      `ArtifactRepository.get_artifact_record(domain_type)`.
 
 Multi-node graph propagation, TriggerPolicy-gated execution eligibility,
 and stateful-firing serialization remain out of scope for this slice (see
@@ -176,12 +176,12 @@ def test_wait_for_callbacks_is_a_no_op_when_nothing_is_pending():
     assert run.callback_failures == []
 
 
-def test_depot_get_is_an_additive_alias_for_get_artifact_record():
-    from reed.synchronization.depot import Depot
+def test_artifact_repository_get_is_an_additive_alias_for_get_artifact_record():
+    from reed.synchronization.artifact_repository import ArtifactRepository
     from reed.transportation.bus import Bus
     from reed.execution.artifact_record import ArtifactRecord
 
-    depot = Depot(bus=Bus.create())
+    depot = ArtifactRepository(bus=Bus.create())
     record = ArtifactRecord(value=Estimate(42))
 
     depot.set_artifact_record(record)

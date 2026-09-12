@@ -28,9 +28,9 @@ establishes:
     5. `NodeRuntime.unwrap(record)` returns exactly the wrapped domain
        value (the "NodeRuntime boundary -> unwrap -> DomainValue" step).
     6. Nothing was made to (a) wrap/commit a domain value into the
-       repository, or (b) make `Depot` (`run.repository`) able to hold
+       repository, or (b) make `ArtifactRepository` (`run.repository`) able to hold
        an `ArtifactRecord` -- both remain explicitly out of scope, and
-       `Depot`'s existing regression behavior (rejecting non-`Parcel`
+       `ArtifactRepository`'s existing regression behavior (rejecting non-`Parcel`
        values) is unchanged.
 """
 
@@ -206,8 +206,8 @@ def test_node_runtime_wrap_capability_was_introduced():
 
 def test_depot_still_rejects_non_parcel_values_including_artifact_record():
     # Confirms the reported mismatch directly and guards against a future
-    # slice silently assuming Depot already supports ArtifactRecord:
-    # Depot's regression-protected set_parcel(...) is unchanged and still
+    # slice silently assuming ArtifactRepository already supports ArtifactRecord:
+    # ArtifactRepository's regression-protected set_parcel(...) is unchanged and still
     # hard-typed to Parcel instances.
     from reed import Flow
 
