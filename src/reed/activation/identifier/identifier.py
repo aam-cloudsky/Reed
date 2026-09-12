@@ -32,13 +32,13 @@ class NodeId(Identity):
 
 
 @dataclass(frozen=True)
-class DepotId(Identity):
+class ArtifactRepositoryId(Identity):
     bus: BusId
 
 
 @dataclass(frozen=True)
 class LogisticsId(Identity):
-    depot: DepotId
+    depot: ArtifactRepositoryId
 
     @property
     def bus(self) -> BusId:
@@ -59,7 +59,7 @@ class OutpostId(Identity):
         return self.logistics.depot.bus
 
     @property
-    def depot(self) -> DepotId:
+    def depot(self) -> ArtifactRepositoryId:
         return self.logistics.depot
 
     @property

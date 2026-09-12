@@ -6,7 +6,10 @@ import pytest
 
 from reed.activation.role import Role
 from reed.activation.schema import SchemaBuilder
-from reed.synchronization.depot_messages import DepotRegistry, DepotSet
+from reed.synchronization.artifact_repository_messages import (
+    ArtifactRepositoryRegistry,
+    ArtifactRepositorySet,
+)
 from reed.synchronization.parcel.parcel import Parcel
 from reed.synchronization.parcel.provenance import ParcelVersion
 from reed.synchronization.validity.dependency_registry import (
@@ -138,7 +141,7 @@ def test_sentinel_marks_registered_produced_parcels_invalid_then_valid_on_set():
     context = message_context(ProducerA)
 
     sentinel.register(
-        DepotRegistry(
+        ArtifactRepositoryRegistry(
             outpost_type=ProducerA,
             parcels_by_role={Role.PRODUCED: {DerivedParcel}},
         ),
@@ -146,7 +149,7 @@ def test_sentinel_marks_registered_produced_parcels_invalid_then_valid_on_set():
     )
 
     transition = sentinel.verify_validity(
-        DepotSet(pallet={DerivedParcel: DerivedParcel(1)}),
+        ArtifactRepositorySet(pallet={DerivedParcel: DerivedParcel(1)}),
         context,
     )
 

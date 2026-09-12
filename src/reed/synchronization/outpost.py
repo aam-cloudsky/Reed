@@ -6,11 +6,11 @@ from reed.activation.identifier.identifier import LogisticsId, NodeId, OutpostId
 from reed.activation.schema import SchemaBuilder
 from reed.activation.status.status import Status
 from reed.activation.status.status_manager import StatusManager
-from reed.synchronization.depot_messages import (
-    DepotGet,
-    DepotRegistry,
-    DepotSet,
-    DepotUpdate,
+from reed.synchronization.artifact_repository_messages import (
+    ArtifactRepositoryGet,
+    ArtifactRepositoryRegistry,
+    ArtifactRepositorySet,
+    ArtifactRepositoryUpdate,
 )
 from reed.synchronization.lifecycle import LifecycleState, LifecycleStateMessage
 from reed.synchronization.parcel.parcel import Parcel
@@ -222,7 +222,7 @@ class Outpost(SchemaBuilder):
 
     def _register_with_depot(self) -> None:
         self._registry_port.send(
-            DepotRegistry(
+            ArtifactRepositoryRegistry(
                 outpost_type=type(self),
                 parcels_by_role=self._schema.types_by_role,
                 # producer_path=f"{self.identity.node.flow.name}.{self.identity.node.name}",
@@ -231,7 +231,7 @@ class Outpost(SchemaBuilder):
 
     def _on_registry_arrive(self, message: BaseMessage, context: MessageContext):
         self._transition_state(OutpostOperationalStates.ON_RECEIVING_FROM_DEPOT)
-        depot_registry = cast(DepotRegistry, message)
+        depot_registry = cast(ArtifactRepositoryRegistry, message)
         return depot_registry.registered
 
     def _on_registry_arrive_end(self, result: Any):
@@ -259,14 +259,14 @@ class Outpost(SchemaBuilder):
     # =======================================================
 
     def _request_pallet(self) -> None:
-        self._get_port.send(DepotGet(types=list(self._schema.types())))
+        self._get_port.send(ArtifactRepositoryGet(types=list(self._schema.types())))
 
     def _on_pallet_arrive(self, message: BaseMessage, context: MessageContext):
         """
         Split Phase call. This is the phase 'processing'. No colaterals (callbacks) should be here.
         """
         self._transition_state(OutpostOperationalStates.ON_RECEIVING_FROM_DEPOT)
-        mes = cast(DepotUpdate, message)
+        mes = cast(ArtifactRepositoryUpdate, message)
         return self._set_parcels(
             mes.pallet,
         )
@@ -309,7 +309,7 @@ class Outpost(SchemaBuilder):
             )
 
         self._set_port.send(
-            DepotSet(
+            ArtifactRepositorySet(
                 pallet=produced,
             )
         )

@@ -1,7 +1,10 @@
 from typing import Dict, Set, Type
 
 from reed.activation.role import Role
-from reed.synchronization.depot_messages import DepotRegistry, DepotSet
+from reed.synchronization.artifact_repository_messages import (
+    ArtifactRepositoryRegistry,
+    ArtifactRepositorySet,
+)
 from reed.synchronization.parcel.parcel import Parcel
 from reed.synchronization.validity.dependency_registry import (
     DependencyRegistry,
@@ -16,7 +19,7 @@ class Sentinel:
     Passive watcher of ArtifactRepository updates.
 
     Responsibilities:
-    - Listen to DepotUpdate events via SET topic
+    - Listen to ArtifactRepositoryUpdate events via SET topic
     - Extract changed parcel types
     - Notify the validation/coordination service
 
@@ -30,7 +33,7 @@ class Sentinel:
         self._registry = DependencyRegistry()
         self._parcel_validity: Dict[Type[Parcel], bool] = {}
 
-    def register(self, message: DepotRegistry, context: MessageContext):
+    def register(self, message: ArtifactRepositoryRegistry, context: MessageContext):
         module_type = context.publisher_type
         parcels_by_role = message.parcels_by_role
 
@@ -61,7 +64,7 @@ class Sentinel:
 
     def verify_producer(
         self,
-        message: DepotRegistry,
+        message: ArtifactRepositoryRegistry,
         context: MessageContext,
     ) -> None:
         module_type = context.publisher_type
@@ -79,7 +82,7 @@ class Sentinel:
                 )
 
     def verify_validity(
-        self, message: DepotSet, context: MessageContext
+        self, message: ArtifactRepositorySet, context: MessageContext
     ) -> ValidityTransition:
 
         module_type = context.publisher_type

@@ -5,12 +5,12 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 import warnings
 
-from reed.activation.identifier.identifier import DepotId
-from reed.synchronization.depot_messages import (
-    DepotGet,
-    DepotRegistry,
-    DepotSet,
-    DepotUpdate,
+from reed.activation.identifier.identifier import ArtifactRepositoryId
+from reed.synchronization.artifact_repository_messages import (
+    ArtifactRepositoryGet,
+    ArtifactRepositoryRegistry,
+    ArtifactRepositorySet,
+    ArtifactRepositoryUpdate,
 )
 from reed.synchronization.lifecycle import LifecycleState, LifecycleStateMessage
 from reed.synchronization.parcel.parcel import Parcel
@@ -37,7 +37,7 @@ class ArtifactRepository:
     ):
 
         self._bus = bus
-        self.identity = DepotId(self.__class__.__name__, bus.identity)
+        self.identity = ArtifactRepositoryId(self.__class__.__name__, bus.identity)
         self.sentinel = Sentinel()
         self._setup_ports()
         self._setup_storage()
@@ -90,7 +90,7 @@ class ArtifactRepository:
     # ------------------------------------------------------------------
 
     def _on_registry_request(self, message: BaseMessage, context: MessageContext):
-        depot_registry = cast(DepotRegistry, message)
+        depot_registry = cast(ArtifactRepositoryRegistry, message)
         self.sentinel.register(message=depot_registry, context=context)
 
         return depot_registry, context.from_id, context.trace_id
@@ -98,7 +98,7 @@ class ArtifactRepository:
     def _on_end_registry_request(self, result: Any):
         depot_registry, to_id, trace_id = result
         self._registry_port.send(
-            message=DepotRegistry(
+            message=ArtifactRepositoryRegistry(
                 outpost_type=depot_registry.outpost_type,
                 parcels_by_role=depot_registry.parcels_by_role,
                 registered=True,
@@ -111,28 +111,28 @@ class ArtifactRepository:
 
     def _on_get_request(self, message: BaseMessage, context: MessageContext):
 
-        if not isinstance(message, DepotGet):
+        if not isinstance(message, ArtifactRepositoryGet):
             return
 
-        mes: DepotGet = cast(DepotGet, message)
+        mes: ArtifactRepositoryGet = cast(ArtifactRepositoryGet, message)
         parcel_types = mes.types
         return (self.get_pallet(parcel_types), context.from_id, context.trace_id)
 
     def _on_end_get_request(self, result: Any):
         pallet, to_id, trace_id = result
-        self._get_port.send(DepotUpdate(pallet=pallet), to_id=to_id, reply_to=trace_id)
+        self._get_port.send(ArtifactRepositoryUpdate(pallet=pallet), to_id=to_id, reply_to=trace_id)
 
     def _on_set_request(self, message: BaseMessage, context: MessageContext):
-        if not isinstance(message, DepotSet):
+        if not isinstance(message, ArtifactRepositorySet):
             return
 
         validity_transition: ValidityTransition = self.sentinel.verify_validity(
-            message=cast(DepotSet, message), context=context
+            message=cast(ArtifactRepositorySet, message), context=context
         )
 
         # TODO: Can ONLY mutate if valid! dismiss otherwise
 
-        mes: DepotSet = cast(DepotSet, message)
+        mes: ArtifactRepositorySet = cast(ArtifactRepositorySet, message)
         pallet = mes.pallet
 
         confirmed_parcels: Dict[type, Parcel] = {}
@@ -153,7 +153,7 @@ class ArtifactRepository:
             )
 
         self._set_port.send(
-            DepotUpdate(pallet=confirmed_parcels),
+            ArtifactRepositoryUpdate(pallet=confirmed_parcels),
             to_id=PublisherReservedIDs.BROADCAST,
         )
 
@@ -208,7 +208,7 @@ class ArtifactRepository:
         type -- exactly as the accepted addendum describes. Completely
         separate from `_storage`/`get_parcel`/`set_parcel`: this method
         never reads or writes `_storage`, never touches a `Parcel`, and
-        does not go through the bus (`DepotGet`/`DepotSet`/`DepotUpdate`
+        does not go through the bus (`ArtifactRepositoryGet`/`ArtifactRepositorySet`/`ArtifactRepositoryUpdate`
         are untouched).
         """
         self._artifact_records[type(record.value)] = record

@@ -1,4 +1,4 @@
-# core/logistics/depot_messages.py
+# core/logistics/artifact_repository_messages.py
 
 from dataclasses import dataclass
 from typing import Dict
@@ -9,22 +9,22 @@ from reed.transportation.protocol.base_message import BaseMessage
 
 
 @dataclass(frozen=True)
-class DepotUpdate(BaseMessage):
+class ArtifactRepositoryUpdate(BaseMessage):
     pallet: Dict[type, Parcel]
 
 
 @dataclass(frozen=True)
-class DepotGet(BaseMessage):
+class ArtifactRepositoryGet(BaseMessage):
     types: list[type[Parcel]]
 
 
 @dataclass(frozen=True)
-class DepotSet(BaseMessage):
+class ArtifactRepositorySet(BaseMessage):
     pallet: Dict[type, Parcel]
 
 
 @dataclass(frozen=True)
-class DepotRegistry(BaseMessage):
+class ArtifactRepositoryRegistry(BaseMessage):
     outpost_type: type
     parcels_by_role: Dict[Role, set[type[Parcel]]]
     registered: bool = False
