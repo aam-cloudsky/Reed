@@ -14,8 +14,12 @@ from reed.synchronization.artifact_repository_messages import (
 )
 from reed.synchronization.lifecycle import LifecycleState, LifecycleStateMessage
 from reed.synchronization.parcel.parcel import Parcel
-from reed.synchronization.validity.sentinel import Sentinel
-from reed.synchronization.validity.validity_transition import ValidityTransition
+from reed.synchronization.validity.repository_adapter_sentinel import (
+    RepositoryAdapterSentinel,
+)
+from reed.synchronization.validity.repository_adapter_validity_transition import (
+    RepositoryAdapterValidityTransition,
+)
 from reed.transportation.bus import Bus
 from reed.transportation.enums.topics_enum import TopicsEnum
 from reed.transportation.protocol.base_message import BaseMessage
@@ -38,7 +42,7 @@ class ArtifactRepository:
 
         self._bus = bus
         self.identity = ArtifactRepositoryId(self.__class__.__name__, bus.identity)
-        self.sentinel = Sentinel()
+        self.sentinel = RepositoryAdapterSentinel()
         self._setup_ports()
         self._setup_storage()
         self._notify(LifecycleState.ACTIVE)
@@ -126,7 +130,7 @@ class ArtifactRepository:
         if not isinstance(message, ArtifactRepositorySet):
             return
 
-        validity_transition: ValidityTransition = self.sentinel.verify_validity(
+        validity_transition: RepositoryAdapterValidityTransition = self.sentinel.verify_validity(
             message=cast(ArtifactRepositorySet, message), context=context
         )
 
@@ -243,10 +247,10 @@ class ArtifactRepository:
         from rich.table import Table
 
         """
-        Show validity of parcels tracked by Sentinel.
+        Show validity of parcels tracked by RepositoryAdapterSentinel.
         """
         console = Console()
-        table = Table(title="Depot Validity (Sentinel)")
+        table = Table(title="Depot Validity (RepositoryAdapterSentinel)")
 
         table.add_column("Parcel", style="bold")
         table.add_column("Status", justify="center")

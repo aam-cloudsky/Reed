@@ -8,7 +8,7 @@ from reed.synchronization.parcel.parcel import Parcel
 
 
 @dataclass(frozen=True)
-class ValidityTransition:
+class RepositoryAdapterValidityTransition:
     # Estado
     before: Dict[Type[Parcel], bool]
     after: Dict[Type[Parcel], bool]
@@ -38,7 +38,7 @@ class ValidityTransition:
             )
 
         return (
-            "\n[ValidityTransition]\n"
+            "\n[RepositoryAdapterValidityTransition]\n"
             f"  Origin parcels : {names(self.origin_pallet)}\n"
             f"  Became VALID   : {names(self.became_valid)}\n"
             f"  Became INVALID : {names(self.became_invalid)}\n"

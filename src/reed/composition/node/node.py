@@ -3,7 +3,7 @@ from typing import Callable
 
 from reed.activation.identifier.identifier import FlowId, NodeId
 from reed.activation.role import Role
-from reed.activation.status.status import Status
+from reed.activation.status.repository_adapter_status import RepositoryAdapterStatus
 from reed.composition.node.node_definition import NodeDefinition, NodeKind
 from reed.composition.node.propagation_policy import PropagationPolicy
 from reed.exceptions.errors import MissingDependencyError
@@ -71,7 +71,7 @@ class Node:
 
     def _should_run(
         self,
-        status: Status,
+        status: RepositoryAdapterStatus,
     ) -> bool:
 
         match self.definition.propagation_policy:
@@ -99,7 +99,7 @@ class Node:
 
     def _all_required_dependencies_dirty(
         self,
-        status: Status,
+        status: RepositoryAdapterStatus,
         produced: type,
     ) -> bool:
         descriptor = self._repository_adapter.schema().descriptor(produced)
@@ -131,7 +131,7 @@ class Node:
 
     def _on_status_changed(
         self,
-        status: Status,
+        status: RepositoryAdapterStatus,
     ) -> None:
         if not self.status_changes_enabled:
             return

@@ -4,8 +4,10 @@ from typing import Any, Callable, ClassVar, Dict, Optional, TypeAlias, cast
 
 from reed.activation.identifier.identifier import LogisticsId, NodeId, RepositoryAdapterId
 from reed.activation.schema import RepositoryAdapterSchemaBuilder
-from reed.activation.status.status import Status
-from reed.activation.status.status_manager import StatusManager
+from reed.activation.status.repository_adapter_status import RepositoryAdapterStatus
+from reed.activation.status.repository_adapter_status_manager import (
+    RepositoryAdapterStatusManager,
+)
 from reed.synchronization.artifact_repository_messages import (
     ArtifactRepositoryGet,
     ArtifactRepositoryRegistry,
@@ -156,7 +158,7 @@ class RepositoryAdapter(RepositoryAdapterSchemaBuilder):
         )
         self._bus = bus
 
-        self._status_manager = StatusManager(
+        self._status_manager = RepositoryAdapterStatusManager(
             self._schema.descriptors,
         )
         self._setup_ports()
@@ -277,7 +279,7 @@ class RepositoryAdapter(RepositoryAdapterSchemaBuilder):
         """
 
         if status_updated:
-            _on_status_changed: Callable[[Status[ParcelType]], None] = getattr(
+            _on_status_changed: Callable[[RepositoryAdapterStatus[ParcelType]], None] = getattr(
                 self, "_on_status_changed", lambda change_statue: None
             )
             _on_status_changed(
@@ -288,7 +290,7 @@ class RepositoryAdapter(RepositoryAdapterSchemaBuilder):
 
     def set_on_status_changed(
         self,
-        callback: Callable[[Status[ParcelType]], None],
+        callback: Callable[[RepositoryAdapterStatus[ParcelType]], None],
     ) -> None:
         object.__setattr__(
             self,

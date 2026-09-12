@@ -3,20 +3,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Generic, Iterable, TypeVar
 
-from reed.activation.status.dirty_flags import DirtyFlag
+from reed.activation.status.repository_adapter_dirty_flags import (
+    RepositoryAdapterDirtyFlag,
+)
 
 
 TElement = TypeVar("TElement")
 
 
 @dataclass
-class Status(Generic[TElement]):
+class RepositoryAdapterStatus(Generic[TElement]):
 
-    flags: dict[TElement, DirtyFlag] = field(default_factory=dict)
+    flags: dict[TElement, RepositoryAdapterDirtyFlag] = field(default_factory=dict)
 
     dependency_flags: dict[
         TElement,
-        dict[TElement, DirtyFlag],
+        dict[TElement, RepositoryAdapterDirtyFlag],
     ] = field(default_factory=dict)
 
     # -------------------------------------------------------
@@ -29,7 +31,8 @@ class Status(Generic[TElement]):
     ) -> bool:
 
         return any(
-            flag is DirtyFlag.DIRTY for flag in self.dependency_flags[produced].values()
+            flag is RepositoryAdapterDirtyFlag.DIRTY
+            for flag in self.dependency_flags[produced].values()
         )
 
     def all_dependencies_dirty(
@@ -40,7 +43,7 @@ class Status(Generic[TElement]):
         flags = self.dependency_flags[produced]
 
         return len(flags) > 0 and all(
-            flag is DirtyFlag.DIRTY for flag in flags.values()
+            flag is RepositoryAdapterDirtyFlag.DIRTY for flag in flags.values()
         )
 
     def dirty_dependencies(
@@ -51,7 +54,7 @@ class Status(Generic[TElement]):
         return {
             dependency
             for dependency, flag in self.dependency_flags[produced].items()
-            if flag is DirtyFlag.DIRTY
+            if flag is RepositoryAdapterDirtyFlag.DIRTY
         }
 
     def any_dirty(

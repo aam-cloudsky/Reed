@@ -1,6 +1,6 @@
 from enum import Enum, auto
 
 
-class DirtyFlag(Enum):
+class RepositoryAdapterDirtyFlag(Enum):
     CLEAN = auto()
     DIRTY = auto()

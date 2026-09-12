@@ -16,7 +16,9 @@ from reed.synchronization.validity.dependency_registry import (
     DependencyRegistry,
     DuplicateProducerError,
 )
-from reed.synchronization.validity.sentinel import Sentinel
+from reed.synchronization.validity.repository_adapter_sentinel import (
+    RepositoryAdapterSentinel,
+)
 from reed.transportation.protocol.message_context import MessageContext
 from reed.transportation.publisher_manager import PublisherID
 
@@ -137,7 +139,7 @@ def test_parcel_record_origin_inherits_previous_version_before_advancing():
 
 
 def test_sentinel_marks_registered_produced_parcels_invalid_then_valid_on_set():
-    sentinel = Sentinel()
+    sentinel = RepositoryAdapterSentinel()
     context = message_context(ProducerA)
 
     sentinel.register(

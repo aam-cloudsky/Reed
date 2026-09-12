@@ -10,11 +10,13 @@ from reed.synchronization.validity.dependency_registry import (
     DependencyRegistry,
     DuplicateProducerError,
 )
-from reed.synchronization.validity.validity_transition import ValidityTransition
+from reed.synchronization.validity.repository_adapter_validity_transition import (
+    RepositoryAdapterValidityTransition,
+)
 from reed.transportation.protocol.message_context import MessageContext
 
 
-class Sentinel:
+class RepositoryAdapterSentinel:
     """
     Passive watcher of ArtifactRepository updates.
 
@@ -83,7 +85,7 @@ class Sentinel:
 
     def verify_validity(
         self, message: ArtifactRepositorySet, context: MessageContext
-    ) -> ValidityTransition:
+    ) -> RepositoryAdapterValidityTransition:
 
         module_type = context.publisher_type
 
@@ -131,7 +133,7 @@ class Sentinel:
 
         became_valid = {p for p in after if not before.get(p, False) and after[p]}
 
-        return ValidityTransition(
+        return RepositoryAdapterValidityTransition(
             before=before,
             after=after,
             became_invalid=became_invalid,

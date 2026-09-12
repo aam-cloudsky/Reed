@@ -4,8 +4,10 @@ from __future__ import annotations
 from typing import Generic, TypeVar
 
 from reed.activation.dependency_descriptor import DependencyDescriptor
-from reed.activation.status.dirty_flags import DirtyFlag
-from reed.activation.status.status import Status
+from reed.activation.status.repository_adapter_dirty_flags import (
+    RepositoryAdapterDirtyFlag,
+)
+from reed.activation.status.repository_adapter_status import RepositoryAdapterStatus
 
 
 
@@ -13,20 +15,20 @@ from reed.activation.status.status import Status
 TElement = TypeVar("TElement")
 
 
-class StatusManager(Generic[TElement]):
+class RepositoryAdapterStatusManager(Generic[TElement]):
 
     def __init__(
         self,
         descriptors: dict[TElement, DependencyDescriptor[TElement]],
     ) -> None:
 
-        flags: dict[TElement, DirtyFlag] = {
-            element: DirtyFlag.CLEAN for element in descriptors
+        flags: dict[TElement, RepositoryAdapterDirtyFlag] = {
+            element: RepositoryAdapterDirtyFlag.CLEAN for element in descriptors
         }
 
         dependency_flags: dict[
             TElement,
-            dict[TElement, DirtyFlag],
+            dict[TElement, RepositoryAdapterDirtyFlag],
         ] = {}
 
         for produced, descriptor in descriptors.items():
@@ -35,10 +37,11 @@ class StatusManager(Generic[TElement]):
                 continue
 
             dependency_flags[produced] = {
-                dependency: DirtyFlag.CLEAN for dependency in descriptor.depends_on
+                dependency: RepositoryAdapterDirtyFlag.CLEAN
+                for dependency in descriptor.depends_on
             }
 
-        self.status = Status(
+        self.status = RepositoryAdapterStatus(
             flags=flags,
             dependency_flags=dependency_flags,
         )
@@ -64,8 +67,8 @@ class StatusManager(Generic[TElement]):
 
         changed = False
 
-        if self.status.flags[dependency] is DirtyFlag.CLEAN:
-            self.status.flags[dependency] = DirtyFlag.DIRTY
+        if self.status.flags[dependency] is RepositoryAdapterDirtyFlag.CLEAN:
+            self.status.flags[dependency] = RepositoryAdapterDirtyFlag.DIRTY
             changed = True
 
         for produced, flags in self.status.dependency_flags.items():
@@ -73,10 +76,10 @@ class StatusManager(Generic[TElement]):
             if dependency not in flags:
                 continue
 
-            if flags[dependency] is DirtyFlag.CLEAN:
-                flags[dependency] = DirtyFlag.DIRTY
+            if flags[dependency] is RepositoryAdapterDirtyFlag.CLEAN:
+                flags[dependency] = RepositoryAdapterDirtyFlag.DIRTY
 
-            self.status.flags[produced] = DirtyFlag.DIRTY
+            self.status.flags[produced] = RepositoryAdapterDirtyFlag.DIRTY
 
         return changed
 
@@ -94,7 +97,7 @@ class StatusManager(Generic[TElement]):
         depends on a DIRTY version of it.
         """
 
-        self.status.flags[produced] = DirtyFlag.CLEAN
+        self.status.flags[produced] = RepositoryAdapterDirtyFlag.CLEAN
         self._clean_dependencies(produced)
 
     def _clean_dependencies(self, produced):
@@ -105,16 +108,18 @@ class StatusManager(Generic[TElement]):
 
         for dependency in flags:
 
-            flags[dependency] = DirtyFlag.CLEAN
+            flags[dependency] = RepositoryAdapterDirtyFlag.CLEAN
 
             dependency_still_dirty = any(
                 dependency in produced_flags
-                and produced_flags[dependency] is DirtyFlag.DIRTY
+                and produced_flags[dependency] is RepositoryAdapterDirtyFlag.DIRTY
                 for produced_flags in self.status.dependency_flags.values()
             )
 
             self.status.flags[dependency] = (
-                DirtyFlag.DIRTY if dependency_still_dirty else DirtyFlag.CLEAN
+                RepositoryAdapterDirtyFlag.DIRTY
+                if dependency_still_dirty
+                else RepositoryAdapterDirtyFlag.CLEAN
             )
 
     # -------------------------------------------------------
@@ -124,8 +129,8 @@ class StatusManager(Generic[TElement]):
     def clear(self) -> None:
 
         for element in self.status.flags:
-            self.status.flags[element] = DirtyFlag.CLEAN
+            self.status.flags[element] = RepositoryAdapterDirtyFlag.CLEAN
 
         for flags in self.status.dependency_flags.values():
             for dependency in flags:
-                flags[dependency] = DirtyFlag.CLEAN
+                flags[dependency] = RepositoryAdapterDirtyFlag.CLEAN
