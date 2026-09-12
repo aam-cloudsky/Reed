@@ -138,11 +138,21 @@ Do not rename `Outpost` to `NodeMemory` or `LocalState`.
 
 `Outpost` may later be absorbed into `NodeRuntime` or renamed to an internal adapter, but that requires a separate implementation step.
 
-## Compatibility Removal
+## Compatibility Removal (superseded)
 
-Do not remove the decorator-based API as part of the first implementation pass.
-
-`@flow`, `@input`, `@node`, and `@output` may be moved toward compatibility paths later, but the first pass should introduce the new architecture without deleting the old public surface.
+This non-goal applied only to the first implementation pass (Milestones
+1-2): do not remove the decorator-based API before the new architecture
+existed and was proven. That constraint has since been explicitly and
+deliberately superseded: once the new architecture (Flow/Run/NodeContext/
+TriggerPolicy) passed its acceptance example, its end-to-end tests, and
+completed Milestone 3, Reed's owner made an explicit decision that the
+previous decorator/Parcel/`bind(...)`/callable-Flow programming model
+would not be maintained as a compatibility layer, and it has been
+removed accordingly (see docs/refactor_state.md's legacy-removal entries
+for that decision and its execution). This section is retained as a
+historical record of the earlier constraint, not as a statement of
+current policy: the decorator-based API, `Parcel`, and the legacy
+callable-Flow execution path no longer exist in this codebase.
 
 ## Target Tests
 
