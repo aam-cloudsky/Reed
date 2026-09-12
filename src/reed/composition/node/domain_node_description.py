@@ -142,6 +142,8 @@ class DomainNodeDescriptionBuilder:
 
         context: NodeContextDescriptor | None = None
         if parsed_signature.context_parameter_name is not None:
+            assert parsed_signature.context_memory_type is not None
+            assert parsed_signature.context_output_type is not None
             context = NodeContextDescriptor(
                 parameter_name=parsed_signature.context_parameter_name,
                 memory_type=parsed_signature.context_memory_type,
