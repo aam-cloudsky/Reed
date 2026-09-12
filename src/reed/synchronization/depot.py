@@ -221,6 +221,22 @@ class Depot:
         """
         return self._artifact_records.get(domain_type)
 
+    def get(self, domain_type: type) -> Optional["ArtifactRecord"]:
+        """
+        Thin, additive alias for `get_artifact_record(domain_type)`
+        (Slice 2F; docs/refactor_priority_order.md's Slice 2A row: "no
+        domain-facing `repository.get(domain_type)` API on `Run` itself"
+        deferred exactly this to Slice 2F).
+
+        Exists only because `test_on_output_runs_after_commit_and_receives_domain_value`
+        and `test_callback_failure_does_not_undo_committed_output` read
+        committed output through `run.repository.get(<domain_type>)`
+        rather than `get_artifact_record(<domain_type>)`. Delegates
+        entirely to `get_artifact_record`; not a rename, not a new
+        behavior, not a change to the existing Parcel storage path.
+        """
+        return self.get_artifact_record(domain_type)
+
     def show_validity(self) -> None:
 
         from rich.console import Console

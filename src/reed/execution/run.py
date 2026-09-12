@@ -171,7 +171,9 @@ materialized through it, and support one real, single-node firing via
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+import asyncio
+import inspect
+from typing import TYPE_CHECKING, Any, Callable
 
 from reed.execution.node_runtime import NodeRuntime
 from reed.synchronization.depot import Depot
@@ -203,6 +205,8 @@ class Run:
         self._flow = flow
         self._repository = Depot(bus=Bus.create())
         self._node_runtimes: dict[FlowNode, NodeRuntime] = {}
+        self.callback_failures: list[BaseException] = []
+        self._pending_callback_coroutines: list[Any] = []
 
     @property
     def flow(self) -> Flow:
@@ -311,7 +315,72 @@ class Run:
         record = node_runtime.wrap(result)
         node_runtime.commit(record)
 
+        self._dispatch_on_output(flow_node, record.value)
+
         return record.value
+
+    def _dispatch_on_output(self, flow_node: "FlowNode", domain_value: object) -> None:
+        """
+        Invoke `flow_node`'s declared `on_output` callback with
+        `domain_value`, strictly after `NodeRuntime.commit(...)` has
+        already succeeded (Slice 2F; architectural_invariants.md #21,
+        #22, #23).
+
+        A synchronous `on_output` is invoked inline, inside a
+        try/except; any raised exception is caught and appended to
+        `self.callback_failures` rather than propagating out of
+        `publish(...)` or being silently swallowed. An async
+        `on_output` (detected via `inspect.iscoroutinefunction`) is
+        not awaited here -- calling it only produces a coroutine
+        object, which is queued onto `self._pending_callback_coroutines`
+        for `.wait_for_callbacks()` to drain. Either way, nothing here
+        can undo or affect the already-committed `ArtifactRecord` or
+        repository state -- this method only observes a commit that
+        has already happened.
+        """
+        on_output = flow_node.on_output
+        if on_output is None:
+            return
+
+        if inspect.iscoroutinefunction(on_output):
+            self._pending_callback_coroutines.append(on_output(domain_value))
+            return
+
+        try:
+            on_output(domain_value)
+        except BaseException as exc:  # noqa: BLE001 -- isolate any callback failure
+            self.callback_failures.append(exc)
+
+    def wait_for_callbacks(self) -> None:
+        """
+        Drain every pending async `on_output` coroutine queued by
+        `._dispatch_on_output(...)` to completion (Slice 2F).
+
+        Uses `asyncio.run` over an internal `asyncio.gather` as a
+        bounded, synchronous driver -- not an always-on background
+        event loop or thread pool (non-goals.md, "Execution
+        Infrastructure Exposure"): once this method returns, nothing
+        it started keeps running. Each pending coroutine's exception,
+        if any, is isolated into `self.callback_failures` the same
+        way a synchronous callback's exception is -- it never
+        propagates out of this method and never affects any
+        already-committed `ArtifactRecord` or repository state.
+        """
+        if not self._pending_callback_coroutines:
+            return
+
+        pending, self._pending_callback_coroutines = (
+            self._pending_callback_coroutines,
+            [],
+        )
+
+        async def _drain() -> None:
+            results = await asyncio.gather(*pending, return_exceptions=True)
+            for result in results:
+                if isinstance(result, BaseException):
+                    self.callback_failures.append(result)
+
+        asyncio.run(_drain())
 
     def _find_flow_node(self, node: Callable) -> FlowNode:
         for flow_node in self._flow.flow_nodes:
