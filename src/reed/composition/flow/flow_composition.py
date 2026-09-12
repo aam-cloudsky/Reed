@@ -1,9 +1,13 @@
 """
-Flow (Slice 1F, remainder of Priority 11 -- `Flow.add(...)`).
+Flow (Slice 1F, remainder of Priority 11 -- `Flow.add(...)`; Slice 2A,
+part of Priority 11/12 -- `Flow.run()` / `Run` separation; Slice 2B,
+part of Priority 13 -- adds a read-only `flow_nodes` accessor so
+`Run.node_runtime(...)` can resolve a node function to its
+`FlowNode`).
 
-This is the Milestone 1 integration gate: it connects the composition
-collaborators already built in Slices 1A-1E into the target composition
-surface (docs/flow_composition_implementation_basis.md, "Move `@flow` Out
+Slice 1F connected the composition collaborators already built in
+Slices 1A-1E into the target composition surface
+(docs/flow_composition_implementation_basis.md, "Move `@flow` Out
 Of The Main API Path", "`Flow.add(...)`"; docs/refactor_priority_order.md,
 Priority 11):
 
@@ -31,16 +35,35 @@ only -- this slice does not evaluate `trigger_policy` or invoke
 imply execution, `TriggerPolicy` decides eligibility but nothing here
 evaluates that eligibility, and `TriggerPolicy != on_output`).
 
-Explicitly out of scope for this slice (Milestone 2):
+Slice 2A (docs/architectural_decision.md, "Run"; architectural_invariants.md
+#4, #6 -- `Flow != Run`, `Flow` owns no Run-specific execution state) adds
+`Flow.run()`, which creates and returns a new `Run`
+(`reed.execution.run.Run`) associated with this `Flow`. `Flow` itself
+stores nothing about the `Run`s it has created -- no list, no counter,
+no last-created reference -- so it remains a plain, reusable composition
+object no matter how many times `run()` is called. `Run` owns a
+distinct, `Depot`-backed repository instance per `Run` (Slice 2A
+follow-up) and a distinct `NodeRuntime` per materialized node (Slice
+2B, `run.node_runtime(...)`) -- `Flow` and `FlowNode` acquire none of
+that state; see `reed/execution/run.py`'s and
+`reed/execution/node_runtime.py`'s module docstrings for the exact
+scope of each.
 
-    - `Flow.run()`, `Run`, `NodeRuntime`, `NodeExecution` do not exist.
-      This class deliberately has no `run()` method.
-    - No `ArtifactRecord` wrapping/unwrapping, no `NodeMemory`, no
-      `ctx.memory`/`ctx.last_output` runtime behavior.
+Explicitly out of scope for this slice (Milestone 2, later slices):
+
+    - `NodeRuntime` exists as of Slice 2B, but only as an
+      ownership boundary owned by `Run` (`run.node_runtime(...)`);
+      `Flow` itself gains no new capability from it beyond exposing
+      `flow_nodes` for `Run` to resolve against. `NodeExecution`
+      (2E) does not exist yet.
+    - No `ArtifactRecord` wrapping/unwrapping (2C), no `NodeMemory`
+      (2D), no `ctx.memory`/`ctx.last_output` runtime behavior (2D/2E).
     - `on_output` is never called; `trigger_policy` is never read for
       eligibility decisions. Both are inert metadata here.
-    - No commit semantics, no callback dispatch (sync or async), no
-      stateful-firing serialization, no `ArtifactRepository` migration.
+    - No `.publish(...)`, no commit semantics, no callback dispatch
+      (sync or async, 2F), no `callback_failures` (2F), no
+      stateful-firing serialization (2G), no `ArtifactRepository`
+      migration.
     - No `Flow.connect(...)` (docs/non-goals.md, "Manual Topology
       Connection"): topology is inferred from producer/consumer artifact
       types via `ArtifactDependencyGraph`, not from an explicit connect
@@ -66,20 +89,40 @@ from reed.composition.flow.artifact_dependency_graph import ArtifactDependencyGr
 from reed.composition.flow.flow_node import FlowNode
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.composition.node.domain_node_description import DomainNodeDescriptionBuilder
+from reed.execution.run import Run
 
 
 class Flow:
     """
-    Explicit Flow composition object (target architecture, Slice 1F).
+    Explicit Flow composition object (target architecture, Slices 1F,
+    2A, and 2B).
 
     See module docstring for the exact scope. Owns `FlowNode`
     registrations and one `ArtifactDependencyGraph` for topology
-    validation; owns no Run-specific execution state.
+    validation; owns no Run-specific execution state, including after
+    `run()` is called any number of times. `flow_nodes` (Slice 2B) is
+    a read-only view of those registrations, added so `Run` can
+    resolve a node function to its `FlowNode` without reaching into
+    `Flow`'s private internals.
     """
 
     def __init__(self) -> None:
         self._flow_nodes: list[FlowNode] = []
         self._dependency_graph = ArtifactDependencyGraph()
+
+    @property
+    def flow_nodes(self) -> tuple[FlowNode, ...]:
+        """
+        This `Flow`'s registered `FlowNode` participations, in
+        registration order (Slice 2B).
+
+        A read-only snapshot -- mutating the returned tuple is not
+        possible, and mutating it would not affect `Flow`'s own
+        registrations either way. Added so `Run.node_runtime(...)`
+        can resolve a node function to its `FlowNode` without
+        reaching into `Flow`'s private internals.
+        """
+        return tuple(self._flow_nodes)
 
     def add(
         self,
@@ -151,3 +194,24 @@ class Flow:
         self._flow_nodes.append(flow_node)
 
         return flow_node
+
+    def run(self) -> Run:
+        """
+        Create a new `Run` -- one concrete execution instance of this
+        `Flow` (Slice 2A; docs/architectural_decision.md, "Run").
+
+        Each call returns a distinct `Run`. `Flow` records nothing
+        about the `Run`s it creates, so it remains a reusable
+        composition object -- `add(...)` can still be called, and
+        `run()` can be called again, after any number of prior
+        `run()` calls.
+
+        The returned `Run` cannot yet execute meaningful computation.
+        `NodeRuntime` exists as of Slice 2B as an ownership boundary
+        only (`run.node_runtime(...)`); commit semantics and callback
+        dispatch remain Milestone 2C-2G -- see
+        `reed/execution/run.py`'s and
+        `reed/execution/node_runtime.py`'s module docstrings for the
+        exact scope.
+        """
+        return Run(self)

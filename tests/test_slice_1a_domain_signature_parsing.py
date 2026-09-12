@@ -108,13 +108,19 @@ def test_multiple_node_context_parameters_are_rejected():
         parse(invalid)
 
 
-def test_node_context_shell_has_no_runtime_behavior():
-    # NodeContext is a real, importable, generic type at this slice -- it
-    # is not instantiated or given runtime behavior until Milestone 2
-    # (Run/NodeRuntime exist). Slice 1A only requires that the type is
-    # detectable via typing.get_origin(...), which the tests above already
-    # exercise indirectly; this test just documents/pins the shell itself.
-    assert NodeContext.__slots__ == ()
+def test_node_context_shell_is_generic_and_detectable():
+    # NodeContext is a real, importable, generic type at this slice --
+    # Slice 1A only requires that the type is detectable via
+    # typing.get_origin(...), which the tests above already exercise
+    # indirectly; this test documents/pins the shell's genericness.
+    #
+    # This test originally also pinned `NodeContext.__slots__ == ()` --
+    # "no runtime behavior until Milestone 2". Milestone 2, Slice 2D is
+    # exactly the slice that gives NodeContext real runtime behavior
+    # (`ctx.memory`/`ctx.last_output`), so that assertion is now stale by
+    # design and has been removed here (Test Integrity Rule) rather than
+    # left to fail -- see tests/test_slice_2d_node_context.py for
+    # NodeContext's dedicated runtime-behavior coverage.
     parametrized = NodeContext[TrackerMemory, Estimate]
     assert parametrized is not None
 
