@@ -421,3 +421,65 @@ Flow topology is inferred from typed Node signatures.
 
 This gives Reed a clearer identity as a strongly typed artifact coordination framework.
 
+
+## Addendum: Slice 2E ArtifactRecord Commit Storage (accepted 2026-09-12)
+
+This addendum resolves the Open Architectural Question recorded in
+`docs/refactor_state.md` during Slice 2C ("How will `run.repository` come
+to hold an `ArtifactRecord`?"), which became blocking at Slice 2E. It is an
+explicit human decision, not an agent-derived inference, made after an
+Architect subagent correctly escalated rather than guessing among the
+alternatives recorded there.
+
+**Decision.** During Milestone 2, `Run.repository` remains the existing
+`Depot`. `Depot` gains a **separate, additive storage path for committed
+`ArtifactRecord`s**, keyed by the artifact's domain semantic type
+(`type(record.value)`), alongside its existing, completely untouched
+`Parcel` storage (`_storage: Dict[type, Parcel]`, `get_parcel`/
+`set_parcel`). The two storage paths are independent: `set_parcel`'s
+existing `isinstance(parcel, Parcel)` check, its dict, and its bus-message
+behavior (`DepotGet`/`DepotSet`/`DepotUpdate`) are not modified, widened,
+or reused for `ArtifactRecord`s in any way.
+
+The `ArtifactRecord` stored through this new path is the **authoritative
+shared artifact state** for that domain type on that `Run` --
+`docs/architecture.md`'s "Single Source of Truth" principle applies to it
+exactly as it applies to a committed `Parcel` today. `NodeRuntime.
+last_output` (Slice 2D) is a **synchronized local view** of the latest
+value this `NodeRuntime` itself successfully committed there -- not a
+second authoritative copy. This mirrors `docs/architecture.md`'s own
+Shared-State / Local-State distinction: "Local state is not authoritative."
+
+**Explicitly rejected for this slice (still on the table for later
+slices, not decided here):**
+
+- Widening `Depot.set_parcel(...)`'s type contract to accept
+  `ArtifactRecord` in place. Rejected again for the same reason it was
+  rejected in Slice 2C: `Depot` is regression-protected legacy
+  infrastructure, and widening its existing, tested type contract is a
+  disproportionate migration for this slice.
+- Pulling any part of the `Depot -> ArtifactRepository` rename (Slice 3A,
+  `docs/refactor_priority_order.md` Priority 15) forward into Slice 2E.
+  Slice 3A remains solely responsible for the repository rename,
+  vocabulary migration, and final consolidation of both storage paths
+  into one `ArtifactRepository` API. This slice's additive path is
+  explicitly a Milestone-2-only interim shape, not a preview of
+  `ArtifactRepository`'s eventual public API.
+
+**Scope this unblocks.** Slice 2E may now implement "commit the
+`ArtifactRecord`" (`docs/refactor_priority_order.md`, Milestone 2 table)
+by committing into this new additive `Depot` path, keyed by
+`type(record.value)`, and may update `NodeRuntime.last_output` from that
+same committed value. Slice 2F's target contracts that call
+`run.repository.get(domain_type)` can be satisfied by a domain-facing
+accessor over this same additive path -- Slice 2F, not 2E, is responsible
+for wiring that accessor into `on_output` dispatch; Slice 2E only needs
+the accessor to exist and be correct.
+
+**What remains undecided, deliberately, for Slice 3A:** the exact shape of
+the eventual consolidated `ArtifactRepository` API; whether the two
+storage paths introduced across Slice 2C (`ArtifactRecord`'s existence)
+and this addendum (its additive storage) are merged, renamed, or replaced
+outright; and any bus-message vocabulary migration
+(`DepotGet`/`DepotSet`/`DepotUpdate` and their `ArtifactRepository`-named
+successors, per `docs/implementation_refactor_assessment.md` #9).
