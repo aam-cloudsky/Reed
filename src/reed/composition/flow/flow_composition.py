@@ -124,6 +124,22 @@ class Flow:
         """
         return tuple(self._flow_nodes)
 
+    @property
+    def dependency_graph(self) -> ArtifactDependencyGraph:
+        """
+        This `Flow`'s `ArtifactDependencyGraph` (Slice 2H).
+
+        A minimal, read-only accessor mirroring the `flow_nodes`
+        property's exact precedent above -- added so `Run.publish(...)`
+        can query `consumers_of(...)` to discover cascade-eligible
+        FlowNodes without reaching into `Flow`'s private state or
+        `Run` duplicating a second producer/consumer index of its own.
+        The graph instance itself is the same one `add(...)` already
+        registers every `FlowNode` against; this property does not
+        construct a new one or copy it.
+        """
+        return self._dependency_graph
+
     def add(
         self,
         function: Callable,

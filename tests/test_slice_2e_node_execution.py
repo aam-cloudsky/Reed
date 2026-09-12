@@ -149,7 +149,7 @@ def test_publish_passes_node_context_when_node_declares_one():
     assert run.node_runtime(track).memory is seen_memory[0]
 
 
-def test_publish_raises_when_no_flow_node_consumes_the_published_type():
+def test_publish_completes_without_firing_when_no_flow_node_consumes_the_published_type():
     from reed import Flow
 
     def estimate(measurement: Measurement) -> Estimate:
@@ -159,17 +159,24 @@ def test_publish_raises_when_no_flow_node_consumes_the_published_type():
     flow.add(estimate)
     run = flow.run()
 
-    with pytest.raises(ValueError):
-        run.publish(OtherMeasurement(1))
+    published = OtherMeasurement(1)
+    result = run.publish(published)
+
+    assert result is published
 
 
-def test_publish_raises_when_more_than_one_flow_node_consumes_the_published_type():
+def test_publish_fires_all_consumers_when_more_than_one_flow_node_consumes_the_published_type():
     from reed import Flow
 
+    fired_a: list[Measurement] = []
+    fired_b: list[Measurement] = []
+
     def estimate_a(measurement: Measurement) -> Estimate:
+        fired_a.append(measurement)
         return Estimate(measurement.value)
 
     def estimate_b(measurement: Measurement) -> OtherMeasurement:
+        fired_b.append(measurement)
         return OtherMeasurement(measurement.value)
 
     flow = Flow()
@@ -177,5 +184,7 @@ def test_publish_raises_when_more_than_one_flow_node_consumes_the_published_type
     flow.add(estimate_b)
     run = flow.run()
 
-    with pytest.raises(ValueError):
-        run.publish(Measurement(1))
+    run.publish(Measurement(1))
+
+    assert [m.value for m in fired_a] == [1]
+    assert [m.value for m in fired_b] == [1]
