@@ -175,6 +175,7 @@ import asyncio
 import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
+from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.execution.node_runtime import NodeRuntime
 from reed.synchronization.depot import Depot
 from reed.transportation.bus import Bus
@@ -207,6 +208,18 @@ class Run:
         self._node_runtimes: dict[FlowNode, NodeRuntime] = {}
         self.callback_failures: list[BaseException] = []
         self._pending_callback_coroutines: list[Any] = []
+        # Slice 2I: per-(Run, FlowNode) join-state bookkeeping for the
+        # cascade's TriggerPolicy eligibility check -- see module
+        # docstring's "Multi-input joins" section. `_last_known_values`
+        # holds the last committed value observed for each consumed
+        # domain type ever seen for a FlowNode (needed to build a join's
+        # full call-argument set once eligible); `_fresh_since_last_firing`
+        # holds the subset of consumed types that have received a value
+        # since that FlowNode's last firing (used only to evaluate
+        # ALL_INPUTS_CHANGED's "every input is fresh" condition, and reset
+        # after each firing).
+        self._last_known_values: dict[FlowNode, dict[type, object]] = {}
+        self._fresh_since_last_firing: dict[FlowNode, set[type]] = {}
 
     @property
     def flow(self) -> Flow:
@@ -253,22 +266,34 @@ class Run:
         Entry point to the automatic propagation cascade (Slice 2H;
         Slice 2E's original single-firing dispatch is now
         `Run._fire(...)`, reused unchanged by both direct publication
-        and cascade propagation).
+        and cascade propagation; Slice 2I adds real `TriggerPolicy`
+        eligibility gating and multi-input join firing on top of the
+        same FIFO loop).
 
         `domain_value` is treated as an already-committed input and
         seeds a FIFO queue of pending committed domain values. While the
         queue is non-empty, this pops one committed value, uses
         `self._flow.dependency_graph.consumers_of(type(value))` to find
-        every `FlowNode` consuming that type, fires each single-input
-        consumer (`len(flow_node.consumed_artifacts) == 1`) via
-        `self._fire(...)`, and enqueues its committed output domain
-        value for the next iteration. A discovered multi-input FlowNode
-        (a join candidate) is left inert -- looked up, found, and
-        deliberately skipped, never fired and never an error (Slice
-        2I's job). No per-version "already fired" bookkeeping is
-        introduced: a fresh cascade runs to quiescence (queue empty) on
-        every call, so a second `publish(...)` call re-fires downstream
-        nodes again with new data.
+        every `FlowNode` consuming that type, and for each discovered
+        consumer -- single- or multi-input alike -- records the
+        arriving value into this `Run`'s per-FlowNode join-state
+        (`._record_input`), checks that every one of its consumed types
+        now has a value (`._is_fully_covered`; a node cannot be called
+        with a missing parameter), and then consults
+        `flow_node.trigger_policy` (`._is_eligible_to_fire`) before ever
+        firing it. `TriggerPolicy.MANUAL` nodes are discovered (their
+        join-state is still tracked) but never auto-fired.
+        `ANY_INPUT_CHANGED` fires on every arrival once full coverage is
+        first reached; `ALL_INPUTS_CHANGED` fires only once every
+        consumed type has gone fresh since the node's last firing, then
+        resets that freshness. An eligible node's full call-argument set
+        is built from its last-known values (`._build_call_kwargs`)
+        before calling `self._fire(...)`, and its committed output is
+        enqueued for the next iteration. No per-version "already fired"
+        bookkeeping beyond this join-state is introduced: a fresh
+        cascade runs to quiescence (queue empty) on every call, so a
+        second `publish(...)` call re-fires downstream nodes again with
+        new data (subject to the same `TriggerPolicy` gating).
 
         Returns the domain value produced by firing the `FlowNode`(s)
         that directly consume `domain_value` itself -- specifically,
@@ -288,12 +313,24 @@ class Run:
             consumers = self._flow.dependency_graph.consumers_of(domain_type)
 
             for flow_node in consumers:
-                if len(flow_node.consumed_artifacts) != 1:
-                    # Multi-input FlowNode: discovered, not fired, no
-                    # error -- Slice 2I owns join-firing semantics.
+                self._record_input(flow_node, domain_type, current_value)
+
+                if not self._is_fully_covered(flow_node):
+                    # Not every consumed type has a value yet -- the
+                    # node cannot be called with a missing parameter,
+                    # regardless of TriggerPolicy. Discovered, not
+                    # fired, no error (Slice 2H's join precedent,
+                    # generalized to every policy).
                     continue
 
-                result = self._fire(flow_node, current_value)
+                if not self._is_eligible_to_fire(flow_node):
+                    # Covered but TriggerPolicy says wait (MANUAL: never;
+                    # ALL_INPUTS_CHANGED: not every input fresh since the
+                    # last firing yet).
+                    continue
+
+                call_kwargs = self._build_call_kwargs(flow_node)
+                result = self._fire(flow_node, call_kwargs)
                 pending.append(result)
 
                 if is_first_iteration:
@@ -303,30 +340,97 @@ class Run:
 
         return direct_result
 
-    def _fire(self, flow_node: "FlowNode", domain_value: object) -> object:
-        """
-        Fire one `FlowNode` with `domain_value` as its single consumed
-        input (Slice 2H; the exact single-firing body Slice 2E
-        originally inlined into `publish`, refactored out unchanged so
-        it runs identically whether invoked directly or from cascade
-        propagation).
+    def _consumed_types(self, flow_node: "FlowNode") -> set[type]:
+        return {
+            descriptor.domain_type for descriptor in flow_node.consumed_artifacts
+        }
 
-        Builds `flow_node`'s call arguments (`domain_value` for its one
-        consumed parameter, plus a constructed `NodeContext` snapshot
-        when the node declares one), calls the node function, wraps the
-        returned domain value into an `ArtifactRecord`, commits it into
-        `self.repository`, updates the firing `NodeRuntime`'s
-        `.last_output`, and dispatches `on_output`. Returns the produced
-        domain value (`record.value`).
+    def _record_input(
+        self, flow_node: "FlowNode", domain_type: type, value: object
+    ) -> None:
         """
-        node_runtime = self.node_runtime(flow_node.definition.function)
+        Record `value` as the last-known committed value for
+        `domain_type` on `flow_node`, and mark `domain_type` fresh
+        since `flow_node`'s last firing (Slice 2I).
+
+        Populated as commits are observed by the cascade's existing
+        find-consumers loop -- no new traversal, no new index.
+        """
+        self._last_known_values.setdefault(flow_node, {})[domain_type] = value
+        self._fresh_since_last_firing.setdefault(flow_node, set()).add(domain_type)
+
+    def _is_fully_covered(self, flow_node: "FlowNode") -> bool:
+        """
+        Whether every one of `flow_node`'s consumed types has at least
+        one last-known value -- required before it can ever be called,
+        regardless of TriggerPolicy (Slice 2I).
+        """
+        known = self._last_known_values.get(flow_node, {})
+        return self._consumed_types(flow_node) <= known.keys()
+
+    def _is_eligible_to_fire(self, flow_node: "FlowNode") -> bool:
+        """
+        TriggerPolicy eligibility check, given `flow_node` is already
+        fully covered (Slice 2I; architectural_invariants.md #18-20).
+
+        - MANUAL: never eligible via the cascade.
+        - ALL_INPUTS_CHANGED: eligible once every consumed type is
+          fresh since the last firing (or since ever, before the first
+          firing).
+        - ANY_INPUT_CHANGED: eligible on every arrival once full
+          coverage is reached (already guaranteed by the caller).
+        """
+        policy = flow_node.trigger_policy
+
+        if policy is TriggerPolicy.MANUAL:
+            return False
+
+        if policy is TriggerPolicy.ALL_INPUTS_CHANGED:
+            fresh = self._fresh_since_last_firing.get(flow_node, set())
+            return self._consumed_types(flow_node) <= fresh
+
+        # TriggerPolicy.ANY_INPUT_CHANGED
+        return True
+
+    def _build_call_kwargs(self, flow_node: "FlowNode") -> dict[str, object]:
+        """
+        Build `flow_node`'s full call-argument set from its last-known
+        values (Slice 2I) -- one value per consumed parameter, using
+        each type's most recently observed value (substituting the
+        just-arrived value for its own type, since `_record_input` is
+        always called before this).
+        """
+        known = self._last_known_values[flow_node]
 
         call_kwargs: dict[str, object] = {
-            flow_node.consumed_artifacts[0].name: domain_value,
+            descriptor.name: known[descriptor.domain_type]
+            for descriptor in flow_node.consumed_artifacts
         }
 
         if flow_node.context is not None:
+            node_runtime = self.node_runtime(flow_node.definition.function)
             call_kwargs[flow_node.context.parameter_name] = node_runtime.context
+
+        return call_kwargs
+
+    def _fire(self, flow_node: "FlowNode", call_kwargs: dict[str, object]) -> object:
+        """
+        Fire one `FlowNode` with `call_kwargs` as its full call
+        arguments (Slice 2E; generalized to multi-input joins by Slice
+        2I -- `call_kwargs` now covers every consumed parameter plus an
+        optional `NodeContext` snapshot, built by
+        `._build_call_kwargs(...)`, instead of always being a single
+        domain value).
+
+        Calls the node function, wraps the returned domain value into
+        an `ArtifactRecord`, commits it into `self.repository`, updates
+        the firing `NodeRuntime`'s `.last_output`, dispatches
+        `on_output`, and -- for `TriggerPolicy.ALL_INPUTS_CHANGED` --
+        clears `flow_node`'s freshness set so a later partial update
+        round does not immediately re-trigger it. Returns the produced
+        domain value (`record.value`).
+        """
+        node_runtime = self.node_runtime(flow_node.definition.function)
 
         firing_lock = node_runtime.firing_lock
 
@@ -340,6 +444,9 @@ class Run:
         finally:
             if firing_lock is not None:
                 firing_lock.release()
+
+        if flow_node.trigger_policy is TriggerPolicy.ALL_INPUTS_CHANGED:
+            self._fresh_since_last_firing[flow_node] = set()
 
         self._dispatch_on_output(flow_node, record.value)
 

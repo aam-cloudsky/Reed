@@ -103,10 +103,12 @@ def test_fan_out_fires_every_consumer_of_the_same_artifact_type():
     assert run.node_runtime(to_c).last_output.value == 15
 
 
-def test_multi_input_flow_node_is_discovered_but_not_fired_and_raises_no_error():
+def test_multi_input_flow_node_fires_once_fully_covered_under_default_all_inputs_changed_policy():
     # to_d consumes both _B and _C -- two consumed artifact types, so it
-    # is a join candidate. It must be discovered as a consumer of _B
-    # (reachable from publish(A)) but never fired and never errored.
+    # is a join candidate. Under the default ALL_INPUTS_CHANGED policy it
+    # must fire exactly once, with call arguments built from the
+    # last-known value of each consumed type, once both have arrived
+    # from the same publish(_A(...)) cascade.
     fired: list[str] = []
 
     def to_b(a: _A) -> _B:
@@ -117,8 +119,8 @@ def test_multi_input_flow_node_is_discovered_but_not_fired_and_raises_no_error()
         fired.append("to_c")
         return _C(a.value)
 
-    def to_d(b: _B, c: _C) -> _D:
-        fired.append("to_d")  # pragma: no cover -- must never actually fire
+    def to_d(b: _B, c: _C, ctx: NodeContext[_Memory, _D]) -> _D:
+        fired.append("to_d")
         return _D(b.value + c.value)
 
     flow = Flow()
@@ -127,13 +129,11 @@ def test_multi_input_flow_node_is_discovered_but_not_fired_and_raises_no_error()
     flow.add(to_d)
     run = flow.run()
 
-    result = run.publish(_A(7))
+    run.publish(_A(7))
 
-    assert "to_d" not in fired
-    assert set(fired) == {"to_b", "to_c"}
-    # No exception was raised (implicit -- publish() returned normally),
-    # and the directly-fired node's own committed value is returned.
-    assert isinstance(result, (_B, _C))
+    assert "to_d" in fired
+    assert fired.count("to_d") == 1
+    assert run.node_runtime(to_d).last_output.value == 14
 
 
 def test_quiescence_terminates_a_finite_cascade_with_no_leftover_queue():
