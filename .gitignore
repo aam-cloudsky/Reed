@@ -196,3 +196,8 @@ Icon?
 .VolumeIcon.icns
 .com.apple.timemachine.donotpresent
 assets/design system/.thumbnail
+
+# Reed Agentic Refactor Workflow -- ephemeral per-run coordination artifacts
+# (never authoritative; see .claude/skills/reed-refactor/SKILL.md)
+.claude/reed-refactor/*
+!.claude/reed-refactor/.gitkeep

@@ -3,7 +3,6 @@ from typing import cast
 from reed.synchronization.lifecycle import LifecycleState, LifecycleStateMessage
 from reed.transportation.enums.topics_enum import TopicsEnum
 from reed.transportation.observability.trace import TraceEvent
-from reed.transportation.protocol.validity_message import ValidityMessage
 from reed.transportation.publisher_manager import (
     PublisherID,
     PublisherManager,
@@ -39,7 +38,6 @@ class EventRenderer:
 
         self._topic_renderers = {
             TopicsEnum.LIFECYCLE: self._render_lifecycle,
-            TopicsEnum.VALIDITY: self._render_validity,
         }
 
     # ==========================================================
@@ -133,53 +131,6 @@ class EventRenderer:
             line.append(" error", style="bold red")
 
         self.console.print(line)
-
-    # ==========================================================
-    # Validity Renderer
-    # ==========================================================
-
-    def _render_validity(self, trace_event: TraceEvent):
-
-        trace = trace_event.trace
-        message = trace.message
-
-        if not isinstance(message, ValidityMessage):
-            self._render_default(trace_event)
-            return
-
-        validity_message = cast(ValidityMessage, message)
-
-        became_valid = validity_message.validity_transition.became_valid
-        became_invalid = validity_message.validity_transition.became_invalid
-        source_id = validity_message.validity_source_id
-
-        line = Text()
-
-        if became_valid:
-            line.append("+", style="green")
-            line.append(
-                ", ".join(p.__name__ for p in became_valid),
-                style="bold green",
-            )
-
-        if became_invalid:
-            if became_valid:
-                line.append("  ")
-
-            line.append("-", style="red")
-            line.append(
-                ", ".join(p.__name__ for p in became_invalid),
-                style="red",
-            )
-
-        line.append(" ∵ ", style="grey50")
-        line.append(str(self._resolve_id(source_id)), style="grey50")
-
-        self.console.print(line)
-
-    # ==========================================================
-    # Publisher Resolution
-    # ==========================================================
 
     def _resolve_id(self, pid: PublisherID) -> Text:
 

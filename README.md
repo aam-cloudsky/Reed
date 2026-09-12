@@ -3,7 +3,7 @@
   <img src="assets/reed-logo.svg" alt="Reed logo" width="320">
 </p>
 
-Reed is an incremental state synchronization engine for declarative dataflow applications. It allows developers to express computations as transformations over strongly typed state. Reed automatically infers dependencies between computations and incrementally propagates updates, keeping the application state consistent with minimal user-defined orchestration.
+Reed is a reactive computation framework for coordinating interdependent transformations over ordinary, strongly typed Python values. Developers express computations as plain functions over domain types; Reed infers the dependencies between them, and automatically propagates change through the resulting graph until it settles, keeping every derived value consistent with minimal orchestration code.
 
 Reed is named after the reed of a weaving loom—a comb-like structure that aligns, separates, and synchronizes warp threads as fabric is woven.
 
@@ -23,40 +23,34 @@ pip install reed
 
 ## Quick Start
 
-
-
 ```python
 from dataclasses import dataclass
-from reed import Parcel, flow, input, node, output
+from reed import Flow
 
 
 @dataclass
-class MyTextCarrier(Parcel):
-    text: str
+class Text:
+    value: str
+
 
 @dataclass
-class TextSizeCarrier(Parcel):
-    size: int
+class TextSize:
+    value: int
 
 
-@flow
-class SizeCounterFlow:
-
-    @input
-    def receive(self, text: str) -> MyTextCarrier:
-        return MyTextCarrier(text)
-
-    @node
-    def compute(self, my_text_wrapper: MyTextCarrier) -> TextSizeCarrier:
-        return TextSizeCarrier(len(my_text_wrapper.text))
-
-    @output
-    def result(self, text_size_carrier: TextSizeCarrier) -> int:
-        return TextSizeCarrier.size
+def compute(text: Text) -> TextSize:
+    return TextSize(len(text.value))
 
 
-flow = SizeCounterFlow()
-print(flow("Hello Reed"))
+def show_size(size: TextSize) -> None:
+    print(size.value)
+
+
+flow = Flow()
+flow.add(compute, on_output=show_size)
+
+run = flow.run()
+run.publish(Text("Hello Reed"))
 ```
 
 Output:
@@ -65,37 +59,36 @@ Output:
 10
 ```
 
-
+`Text` and `TextSize` are ordinary Python dataclasses -- Reed places no
+base class or decorator requirement on domain types. A function's
+parameter and return type annotations are enough for Reed to infer the
+dependency between `compute`'s input and output; publishing a `Text`
+automatically propagates through every eligible downstream node.
 
 ---
 
 ## Example
 
-A complete example demonstrating multiple flows, synchronization, and flow composition is available in:
-
-For a more complete example demonstrating multiple flows, shared synchronization, and flow composition, see:
+A complete example demonstrating fan-out, a multi-input join gated by a
+`TriggerPolicy`, and automatic multi-hop propagation through a full
+graph is available in:
 
 ```text
-examples/annotations.py
+examples/text_analysis_pipeline.py
 ```
 
 ---
 
 ## Features
-- Declarative flow definition.
-- Strongly typed state through `Parcel` objects.
-- Automatic dependency inference.
-- Incremental state synchronization.
-- Flow composition.
+- Ordinary Python domain values -- no base class or decorator required.
+- Explicit `Flow` composition (`flow.add(...)`) with automatic, type-inferred dependencies.
+- Automatic, multi-hop reactive propagation: fan-out, multi-input joins, and repeated updates, driven by a single `run.publish(...)`.
+- Per-node `TriggerPolicy` (any-input, all-inputs, or manual) governing execution eligibility.
+- Optional `NodeContext` for node-local memory and access to the previous committed output.
+- Post-commit `on_output` observation, isolated from execution.
 
 ---
 
 ## License
 
 Reed is distributed under the Apache License 2.0.
-
-
-
-
-
-

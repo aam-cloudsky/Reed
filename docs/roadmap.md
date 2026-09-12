@@ -2,7 +2,7 @@
 
 This roadmap organizes Reed's open architectural work by implementation impact.
 
-Reed's current architectural baseline is described in [`reed_architecture.md`](./reed_architecture.md).
+Reed's current architectural baseline is described in [`architecture.md`](./architecture.md).
 
 ---
 
@@ -242,7 +242,7 @@ This issue depends on the blocking work because the roadmap and architecture doc
 
 Expected outcome:
 
-- maintain `reed_architecture.md` as the architectural baseline;
+- maintain `architecture.md` as the architectural baseline;
 - maintain this roadmap as a dependency-oriented planning document;
 - update documentation when blocking decisions are accepted or revised.
 
@@ -282,7 +282,7 @@ Expected outcome:
 2. Resolve issue #2 enough to define `Parcel`, payload boundaries, ports, automatic wrapping, automatic unwrapping, and provenance identity.
 3. Resolve issue #3 enough to decide whether `NodeContext` exists and how `LocalState` behaves inside a Run.
 4. Resolve issue #4 enough to stabilize the public Flow composition API used by downstream projects.
-5. Use issues #1, #2, #3, and #4 to update `reed_architecture.md`.
+5. Use issues #1, #2, #3, and #4 to update `architecture.md`.
 6. Design issue #7 using the stabilized execution model, especially `Run`, `NodeExecution`, `Parcel`, `State`, and causality.
 7. Define issue #8 as a thin structured logging layer aligned with issue #7.
 8. Design issue #9 after state, context, and Flow composition semantics are explicit.

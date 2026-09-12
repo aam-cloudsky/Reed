@@ -33,11 +33,22 @@ jobs:
           python - <<'PY'
           import reed
 
-          required_exports = ("Parcel", "flow", "node", "output", "input")
+          # Reed's only supported public execution model (the previous
+          # decorator/Parcel/bind(...) programming model was retired --
+          # see docs/refactor_state.md's legacy-removal entries).
+          required_exports = ("Flow", "TriggerPolicy", "NodeContext", "Run")
           missing_exports = [name for name in required_exports if not hasattr(reed, name)]
 
           if missing_exports:
               raise SystemExit(f"Missing exports: {missing_exports}")
+
+          retired_exports = ("Parcel", "flow", "node", "output", "input")
+          still_present = [name for name in retired_exports if hasattr(reed, name)]
+
+          if still_present:
+              raise SystemExit(
+                  f"Retired legacy exports must not be public: {still_present}"
+              )
           PY
 
       - name: Lint
