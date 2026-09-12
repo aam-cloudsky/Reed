@@ -6,12 +6,6 @@ from dataclasses import dataclass
 import pytest
 
 
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    reason="Target architecture is documented but not implemented yet.",
-)
-
-
 class Measurement:
     def __init__(self, value: int) -> None:
         self.value = value
@@ -185,6 +179,10 @@ def test_parallel_safe_branching_uses_distinct_output_artifact_types():
     assert enhance_node.produced_artifact.domain_type is EnhancedImage
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Requires Milestone 2, Slice 2E (NodeExecution firing pipeline: Run x NodeRuntime-scoped NodeMemory) -- not implemented in Milestone 1.",
+)
 def test_run_instances_isolate_node_memory():
     from reed import Flow, NodeContext
 
@@ -208,6 +206,10 @@ def test_run_instances_isolate_node_memory():
     assert second_run.node_runtime(track).context.memory.previous_confidence == 0.8
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Requires Milestone 2, Slice 2E (NodeExecution firing pipeline: ctx.last_output wired to a real committed value) -- not implemented in Milestone 1.",
+)
 def test_last_output_exposes_latest_committed_domain_value():
     from reed import Flow, NodeContext
 
@@ -232,6 +234,10 @@ def test_last_output_exposes_latest_committed_domain_value():
     assert seen_previous[1].value == 1
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Requires Milestone 2, Slice 2F (on_output dispatch after commit) -- not implemented in Milestone 1; on_output is composition metadata only through Slice 1F.",
+)
 def test_on_output_runs_after_commit_and_receives_domain_value():
     from reed import Flow
 
@@ -255,6 +261,10 @@ def test_on_output_runs_after_commit_and_receives_domain_value():
     assert observed[0].value == 3
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Requires Milestone 2, Slice 2F (async on_output dispatch) -- not implemented in Milestone 1.",
+)
 def test_async_on_output_is_supported_after_commit():
     from reed import Flow
 
@@ -277,6 +287,10 @@ def test_async_on_output_is_supported_after_commit():
     assert observed == [5]
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Requires Milestone 2, Slice 2F (callback failure isolation and run.callback_failures) -- not implemented in Milestone 1.",
+)
 def test_callback_failure_does_not_undo_committed_output():
     from reed import Flow
 
@@ -296,6 +310,10 @@ def test_callback_failure_does_not_undo_committed_output():
     assert run.callback_failures
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Requires Milestone 2, Slice 2G (stateful NodeRuntime firing serialization) -- not implemented in Milestone 1.",
+)
 def test_stateful_node_runtime_firings_are_serialized():
     from reed import Flow, NodeContext, TriggerPolicy
 

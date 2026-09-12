@@ -1039,37 +1039,162 @@ into agent-sized pieces.
 
 ### Milestone 1 -- Typed Composition Foundation
 
-Composition-time correctness: signature parsing, artifact identity, and the
-`Flow.add(...)` surface. No `Run`/execution changes yet.
+**Question this milestone answers: what is the computation?**
 
-| Slice | Priorities | Delivers | Target tests it should move |
-|---|---|---|---|
-| 1A | 1 | Typed domain signature parsing; `NodeContext` detected and excluded from input ports; `NodeContext[MemoryType, OutputType]` validated against the return type; self-flow rejected at signature level. | `test_node_signature_uses_domain_types_not_artifact_records`, `test_node_context_is_injected_and_not_registered_as_input_port`, `test_node_context_output_type_must_match_return_type`, `test_self_flow_signature_is_rejected` |
-| 1B | 2, 3 | `NodeDescription`/`NodeDefinition` store artifact descriptors instead of Parcel-centered metadata; `ArtifactDescriptor` type introduced. | (supports 1A/1E; no test moves alone) |
-| 1C | 4, 5 | `NodeContext` becomes a real generic class; `NodeMemory` storage boundary introduced under the run-local path. | (prerequisite for 1A's validation to check a real class; supports Milestone 2) |
-| 1D | 6, 7 | `ArtifactRecord` introduced as the internal wrapper; `ArtifactProvenance`/`ArtifactVersion` carry forward `Parcel`'s existing version/provenance behavior. | regression: `tests/test_current_regression_artifacts_repository.py` must stay green |
-| 1E | 8 | `DependencyRegistry` migrated to `FlowNode`/artifact-type vocabulary; unique-producer and self-flow validation enforced at Flow-composition time. | `test_duplicate_output_domain_type_is_rejected_in_one_flow`, `test_parallel_safe_branching_uses_distinct_output_artifact_types` |
-| 1F | 9 | `FlowNode` created as the object returned by `Flow.add(...)`. | `test_flow_add_registers_callable_and_returns_flownode` (partial) |
-| 1G | 10 | `PropagationPolicy` renamed/relocated to `TriggerPolicy`, owned by `FlowNode`. | `test_flow_add_uses_keyword_only_trigger_policy_and_on_output` (partial) |
-| 1H | 11 (the `Flow.add(...)` surface only, not the full builder/execution split) | `Flow.add(...)` with keyword-only `trigger_policy`/`on_output`; rejects positional configuration ambiguity. | `test_flow_add_registers_callable_and_returns_flownode`, `test_flow_add_uses_keyword_only_trigger_policy_and_on_output`, `test_flow_add_rejects_positional_configuration_ambiguity` |
+Composition-time correctness only: signature parsing, artifact identity, and
+the `Flow.add(...)` surface. No `Run`, no `NodeRuntime`, no execution.
+
+| Slice | Priorities | Delivers | Regression protection | Target tests it can flip |
+|---|---|---|---|---|
+| 1A | 1; part of 4 | Typed domain signature parsing (`NodeDescriptionBuilder`); self-flow rejected at signature level; **and** the minimal `NodeContext[MemoryType, OutputType]` representation needed for the parser to detect it -- a real, importable generic class with no runtime behavior (no `ctx.memory`, no `ctx.last_output`, no Run/NodeRuntime wiring). See "1A / 1C dependency" below for why the shell has to move here. | `tests/test_current_regression_node_description.py` must stay green (old Parcel-based path untouched). | None yet -- see "Why no target test moves before 1F" below. Agent should add a focused unit-level test for the new signature-parsing/context-detection behavior itself, per `refactor_guide.md` #11. |
+| 1B | 2, 3 | `NodeDescription`/`NodeDefinition` store artifact descriptors instead of Parcel-centered metadata; `ArtifactDescriptor` type (`domain_type` + role + parameter/output name) introduced. | Same regression file as 1A. | None yet (prerequisite for 1C-1F). |
+| 1C | 9 | `FlowNode` created: holds the `NodeDefinition`, the consumed/produced `ArtifactDescriptor`s, and fields for `trigger_policy`/`on_output` (typed against the *existing* `PropagationPolicy` enum for now -- see "FlowNode / DependencyRegistry ordering" below for why this is not a forward dependency). | -- | None yet (nothing can reach `FlowNode` publicly until 1F). |
+| 1D | 8 | `DependencyRegistry` migrated to `FlowNode`/artifact-type vocabulary (producers/consumers keyed by `FlowNode` and domain artifact type); unique-producer validation preserved; self-flow validation added at the Flow-composition level. | `tests/test_current_regression_artifacts_repository.py::test_dependency_registry_*` (old `Role`/Parcel-keyed API) must stay green -- keep the old entry points working alongside the new ones rather than replacing them in place. | None yet. |
+| 1E | 10 | `PropagationPolicy` renamed to `TriggerPolicy` (enum values renamed to the `*_INPUT*_CHANGED` / `MANUAL` shape already used elsewhere in the docs and in the test suite) and ownership relocated from `NodeDefinition` to `FlowNode`. | -- | None yet. |
+| 1F | remainder of 11 | `Flow.add(...)`: creates a `FlowNode` from a callable, runs `DependencyRegistry` validation (duplicate producer, self-flow), stores `trigger_policy`/`on_output` as keyword-only arguments, rejects positional configuration ambiguity. This is a wiring slice over already-built collaborators (1A-1E), not a new architectural transformation. | All of the above regression suites still green. | **All nine** Milestone-1 target tests: `test_flow_add_registers_callable_and_returns_flownode`, `test_flow_add_uses_keyword_only_trigger_policy_and_on_output`, `test_flow_add_rejects_positional_configuration_ambiguity`, `test_node_signature_uses_domain_types_not_artifact_records`, `test_node_context_is_injected_and_not_registered_as_input_port`, `test_node_context_output_type_must_match_return_type`, `test_duplicate_output_domain_type_is_rejected_in_one_flow`, `test_self_flow_signature_is_rejected`, `test_parallel_safe_branching_uses_distinct_output_artifact_types`. |
+
+#### Why no target test moves before 1F
+
+Every Milestone-1 target test calls `flow.add(...)` -- there is no test in
+`tests/test_target_architecture_contract.py` that exercises
+`NodeDescriptionBuilder`, `FlowNode`, or `DependencyRegistry` directly. That
+means 1A-1E deliver real, verifiable mechanism, but none of them can be
+*observed* as done through a pre-existing target test; only 1F can. This is
+expected, not a sign that 1A-1E should be merged into 1F: each still has its
+own bounded change surface, its own regression protection, and its own
+definition of done, and 1F itself stays a thin wiring slice specifically
+*because* the substantive work already happened in 1A-1E. Treat "many
+pre-existing tests flip in one slice" and "large diff" as different things --
+1F should have the smaller diff of the six.
+
+#### The 1A / 1C dependency (resolved)
+
+The original decomposition put minimal typed `NodeContext` recognition in 1A
+and the "real generic class" in 1C -- but a signature parser cannot recognize
+`NodeContext[MemoryType, OutputType]` in a function annotation unless
+`NodeContext` already exists as an importable generic type to check
+`typing.get_origin(annotation) is NodeContext` against. Priority 4's own
+"Recommended work" already anticipated this ("make the type available to the
+signature parser"). The fix: 1A now includes the minimal structural
+`NodeContext` shell (the class exists, is generic over `MemoryType`/
+`OutputType`, and is detectable/inspectable), while the *behavior* --
+`ctx.memory` and `ctx.last_output` actually backed by Run-local storage --
+moves entirely into Milestone 2 (slice 2D), because `NodeMemory` is defined
+(`architectural_invariants.md` #14) as scoped to `Run x NodeRuntime`, which
+does not exist until Milestone 2. Putting `NodeMemory`'s storage boundary in
+Milestone 1 (the original 1C) was never implementable -- it depended on an
+abstraction (`Run`, `NodeRuntime`) two milestones away. It is now placed
+correctly.
+
+#### FlowNode / DependencyRegistry ordering (resolved)
+
+The original decomposition asked `DependencyRegistry` to migrate to
+`FlowNode` vocabulary (Priority 8) *before* `FlowNode` existed (Priority 9).
+Priority 8's own text confirms the dependency runs the other way ("migrate
+producer keys to `FlowNode`"): you cannot key a registry by an object that
+does not exist yet. `FlowNode` now comes first (1C), `DependencyRegistry`
+second (1D). `TriggerPolicy` (1E) comes after `FlowNode` too, but this is
+*not* a forward dependency: `FlowNode`'s trigger-policy field can be (and
+should be) typed against the current, already-existing `PropagationPolicy`
+enum in 1C, and 1E only renames that enum and relocates its ownership --
+nothing in 1C references a type that doesn't exist yet.
+
+#### ArtifactRecord placement (also corrected, not separately requested)
+
+The original 1D introduced `ArtifactRecord`/`ArtifactProvenance`/
+`ArtifactVersion` in Milestone 1 with no consumer: nothing wraps or unwraps
+through it until `NodeRuntime`'s execution boundary exists. That is exactly
+the kind of premature abstraction `non-goals.md`'s "Speculative Abstractions"
+rule warns against ("a concrete requirement of the current slice"), and it
+was also a real dependency problem, not just a style issue. `ArtifactRecord`
+now moves to Milestone 2, slice 2C, where it is introduced and used in the
+same slice.
 
 ### Milestone 2 -- Run And Execution Boundary
 
-Execution-time correctness: `Run` isolation, `NodeRuntime`, commit/callback
-ordering. Depends on Milestone 1.
+**Question this milestone answers: how is one composition executed?**
 
-| Slice | Priorities | Delivers | Target tests it should move |
+Depends on Milestone 1 (1A-1F). Introduces `Run`, `NodeRuntime`,
+`NodeExecution`, and the domain-value/`ArtifactRecord` boundary.
+
+| Slice | Priorities | Delivers | Verification |
 |---|---|---|---|
-| 2A | 11 (remainder), 12 | `Flow` becomes a pure composition/builder object; `Flow.run()` creates a `Run`. | (prerequisite; no test moves alone) |
-| 2B | 13 | `Node` migrated to `NodeRuntime`; automatic wrap/unwrap at the execution boundary; `ctx.memory` and `ctx.last_output` wired to `Run x NodeRuntime`. | `test_run_instances_isolate_node_memory`, `test_last_output_exposes_latest_committed_domain_value` |
-| 2C | 14 | `NodeExecution` splits commit from `on_output` dispatch; async callbacks supported; callback failure isolated from commit; stateful firings serialized. | `test_on_output_runs_after_commit_and_receives_domain_value`, `test_async_on_output_is_supported_after_commit`, `test_callback_failure_does_not_undo_committed_output`, `test_stateful_node_runtime_firings_are_serialized` |
-| 2D | 15 | `Depot` renamed to `ArtifactRepository` (storage vocabulary only; bus protocol renames stay in priority 16). | supports `run.repository.get(...)` usage in the Milestone 2 tests above |
+| 2A | part of 11, 12 | `Flow` becomes a pure composition/builder object (no execution-entry mixing); `Flow.run()` creates a `Run`. `Run` gets a `.repository` accessor from this point on, backed by whatever the current storage class is called internally (still `Depot` until Milestone 3, slice 3A -- see below). | No target test moves alone; `tests/test_current_regression_flow_runtime.py` (the old `@flow` path) must stay green throughout. |
+| 2B | part of 13 | `Node` migrated to `NodeRuntime`: run-local ownership of one `FlowNode`'s execution state, created and held by `Run`. | No target test moves alone. |
+| 2C | 6, 7, part of 13 | `ArtifactRecord` introduced as the internal wrapper (value + version + provenance, carrying forward `Parcel`'s existing version/provenance mechanics -- `ArtifactProvenance`/`ArtifactVersion`); wired into `NodeRuntime`'s execution path so user functions receive/return domain values while Reed wraps/unwraps `ArtifactRecord`s at the boundary. | `tests/test_current_regression_artifacts_repository.py` (Parcel version/provenance tests) must stay green. |
+| 2D | 5, part of 4, part of 13 | `NodeMemory` storage boundary, scoped to `Run x NodeRuntime`; `ctx.memory` and `ctx.last_output` on the `NodeContext` shell (from 1A) wired to real per-run, per-runtime storage. | No target test moves alone (see 2E; `ctx.last_output` needs a commit to report). |
+| 2E | 14, part of 13 | `NodeExecution`: the firing pipeline -- build arguments, execute the user function, wrap the output, commit the `ArtifactRecord`, update memory/`last_output`. | `test_run_instances_isolate_node_memory`, `test_last_output_exposes_latest_committed_domain_value` |
+| 2F | part of 14 | `on_output` dispatch strictly after commit; async callback support; callback failure isolated from (does not undo) the committed output; `run.callback_failures` observable. | `test_on_output_runs_after_commit_and_receives_domain_value`, `test_async_on_output_is_supported_after_commit`, `test_callback_failure_does_not_undo_committed_output` |
+| 2G | part of 13, part of 14 | Stateful `NodeRuntime` firings serialized (at most one firing in flight per state-aware `NodeRuntime`). | `test_stateful_node_runtime_firings_are_serialized` |
 
-Priorities 16-24 (message renames, `Outpost`, `OutpostBuilder`, schema,
-validity vocabulary, `Logistics`, transport, public decorators, public
-exports) remain cross-cutting vocabulary work. Do not schedule them as slices
-until Milestones 1 and 2 are complete and their own dependencies (noted in
-each priority's "why" above) are satisfied.
+Priority 13 ("`Node` -> `NodeRuntime`") and Priority 14 ("Create
+`NodeExecution`") each span several of these slices -- see "Priority-to-Slice
+Traceability" below for the explicit breakdown. That is expected: both
+priorities describe a whole execution pipeline, and the seams above ("and"
+clauses in the original wording) are exactly where it splits into
+independently verifiable slices.
+
+`run.repository`, used by the 2F target tests, is Run's own accessor
+(introduced in 2A) -- it does not require the `Depot` -> `ArtifactRepository`
+class rename (Priority 15, Milestone 3) to already be done. Milestone 2 can
+and should pass its tests while the underlying storage class is still
+internally called `Depot`.
+
+### Milestone 3 -- Infrastructure Alignment
+
+**Question this milestone answers: how does Reed's internal infrastructure
+support that execution model?**
+
+Depends on Milestone 2 (specifically 2C, so `ArtifactRecord` exists before
+the store that holds it is renamed). Purely cross-cutting vocabulary and
+internal-infrastructure work; no target test depends on this milestone
+except indirectly (none of the fifteen target tests name `Depot`,
+`ArtifactRepository`, `Outpost`, or any Priority-16-24 concept directly).
+
+| Slice | Priorities | Delivers |
+|---|---|---|
+| 3A | 15 | `Depot` renamed to `ArtifactRepository` (class and storage-method vocabulary only); `Run.repository` now genuinely typed/named `ArtifactRepository` instead of pointing at a `Depot` instance under an aliased attribute name. |
+| 3B+ | 16-24 | `DepotMessages` -> repository message renames; `Outpost` and `OutpostBuilder`; `SchemaBuilder`/`Schema`; `Sentinel`/`Status`/`DirtyFlags`/`ValidityTransition`; `Logistics`; the transportation layer; public decorators; public package exports. Left undecomposed for now -- each already has "why" reasoning in the Priority list above (Priorities 16-24), and should be broken into its own lettered slices only once Milestone 3 actually begins, so this document does not over-plan work that is still several milestones away. |
+
+This milestone did not exist in the previous decomposition. `ArtifactRepository`
+was originally placed in Milestone 2; see "ArtifactRepository placement" in
+the Milestone-2 discussion above and in the top-level task report for why it
+moved.
+
+### Priority-To-Slice Traceability
+
+Priorities 1-24 remain the authoritative *dependency* order (unchanged by
+this refinement -- nothing above reorders priorities 1-24 relative to each
+other; it only decides which milestone/slice each one's work lands in, and
+splits a few of them across slices where their own description already
+described more than one transformation).
+
+| Priority | Slice(s) |
+|---|---|
+| 1 | 1A |
+| 2 | 1B |
+| 3 | 1B |
+| 4 | split: minimal structural shell -> 1A; real `ctx.memory`/`ctx.last_output` behavior -> 2D |
+| 5 | 2D |
+| 6 | 2C |
+| 7 | 2C |
+| 8 | 1D |
+| 9 | 1C |
+| 10 | 1E |
+| 11 | split: `Flow.add(...)` surface -> 1F; remainder (pure builder / execution-entry separation) -> 2A |
+| 12 | 2A |
+| 13 | split: runtime ownership -> 2B; wrap/unwrap boundary -> 2C; context/memory wiring -> 2D; firing pipeline -> 2E; `on_output` dispatch -> 2F; serialization -> 2G |
+| 14 | split: build/execute/commit -> 2E; failure classification and callback dispatch -> 2F; interacts with serialization -> 2G |
+| 15 | 3A |
+| 16 | 3B+ (undecomposed) |
+| 17 | 3B+ (undecomposed) |
+| 18 | 3B+ (undecomposed) |
+| 19 | 3B+ (undecomposed) |
+| 20 | 3B+ (undecomposed) |
+| 21 | 3B+ (undecomposed) |
+| 22 | 3B+ (undecomposed) |
+| 23 | 3B+ (undecomposed) |
+| 24 | 3B+ (undecomposed) |
 
 ### How To Use This Table
 
