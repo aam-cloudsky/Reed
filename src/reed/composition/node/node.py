@@ -8,7 +8,7 @@ from reed.composition.node.node_definition import NodeDefinition, NodeKind
 from reed.composition.node.propagation_policy import PropagationPolicy
 from reed.exceptions.errors import MissingDependencyError
 from reed.synchronization.logistics import Logistics
-from reed.synchronization.outpost_builder import OutpostBuilder
+from reed.synchronization.repository_adapter_builder import RepositoryAdapterBuilder
 
 _UNSET = object()
 
@@ -25,14 +25,14 @@ class Node:
         """
         Completes Node local runtime wiring using two-phase initialization.
 
-        Phase 1 creates the Node identity and its Outpost instance, but does not
-        allow the Outpost to start external synchronization yet.
+        Phase 1 creates the Node identity and its RepositoryAdapter instance, but does not
+        allow the RepositoryAdapter to start external synchronization yet.
 
         This separation is required because the Node must first attach its
-        `_on_status_changed` callback to the Outpost. Only after that callback is
-        installed may the Outpost begin registration and initial repository sync.
+        `_on_status_changed` callback to the RepositoryAdapter. Only after that callback is
+        installed may the RepositoryAdapter begin registration and initial repository sync.
 
-        Without this two-phase initialization, the Outpost could receive its
+        Without this two-phase initialization, the RepositoryAdapter could receive its
         initial pallet before the Node is fully wired, causing dependency changes
         to be detected without triggering `process()`.
         """
@@ -44,23 +44,23 @@ class Node:
 
         self._output_result = _UNSET
 
-        self._outpost = OutpostBuilder(
+        self._repository_adapter = RepositoryAdapterBuilder(
             description=self.definition.description,
         ).build(
             node_id=self.identity,
             logistics=self.logistics,
         )
 
-        self._outpost.set_on_status_changed(
+        self._repository_adapter.set_on_status_changed(
             self._on_status_changed,
         )
 
         self._produced = tuple(
-            self._outpost.schema().descriptors_by_role(Role.PRODUCED).keys()
+            self._repository_adapter.schema().descriptors_by_role(Role.PRODUCED).keys()
         )
 
         try:
-            self._outpost.start()
+            self._repository_adapter.start()
         except Exception:
             self.close()
             raise
@@ -102,7 +102,7 @@ class Node:
         status: Status,
         produced: type,
     ) -> bool:
-        descriptor = self._outpost.schema().descriptor(produced)
+        descriptor = self._repository_adapter.schema().descriptor(produced)
         dependency_flags = status.dependency_flags.get(produced, {})
         required_dependencies = descriptor.depends_on
 
@@ -119,12 +119,12 @@ class Node:
         self,
         produced: type,
     ) -> bool:
-        descriptor = self._outpost.schema().descriptor(produced)
+        descriptor = self._repository_adapter.schema().descriptor(produced)
         required_dependencies = descriptor.depends_on
 
         for dependency in required_dependencies:
-            dependency_descriptor = self._outpost.schema().descriptor(dependency)
-            if getattr(self._outpost, dependency_descriptor.field_name) is None:
+            dependency_descriptor = self._repository_adapter.schema().descriptor(dependency)
+            if getattr(self._repository_adapter, dependency_descriptor.field_name) is None:
                 return False
 
         return True
@@ -176,9 +176,9 @@ class Node:
         self.status_changes_enabled = True
 
     def close(self) -> None:
-        if hasattr(self, "_outpost"):
-            self.logistics.depot.sentinel.unregister(type(self._outpost))
-            self._outpost.close()
+        if hasattr(self, "_repository_adapter"):
+            self.logistics.depot.sentinel.unregister(type(self._repository_adapter))
+            self._repository_adapter.close()
 
     # ======================================================
     # Runtime
@@ -194,7 +194,7 @@ class Node:
 
         if self.kind == NodeKind.OUTPUT:
             self._output_result = result
-            self._outpost._status_manager.clear()
+            self._repository_adapter._status_manager.clear()
             return
 
         self._write_function_result(result)
@@ -229,8 +229,8 @@ class Node:
             parameter_name,
             parcel_type,
         ) in self.definition.description.consumed_parameters:
-            descriptor = self._outpost.schema().descriptor(parcel_type)
-            arguments.append(getattr(self._outpost, descriptor.field_name))
+            descriptor = self._repository_adapter.schema().descriptor(parcel_type)
+            arguments.append(getattr(self._repository_adapter, descriptor.field_name))
 
         return arguments
 
@@ -238,9 +238,9 @@ class Node:
         missing_dependencies: list[str] = []
 
         for _, parcel_type in self.definition.description.consumed_parameters:
-            descriptor = self._outpost.schema().descriptor(parcel_type)
+            descriptor = self._repository_adapter.schema().descriptor(parcel_type)
 
-            if getattr(self._outpost, descriptor.field_name) is None:
+            if getattr(self._repository_adapter, descriptor.field_name) is None:
                 missing_dependencies.append(parcel_type.__name__)
 
         return missing_dependencies
@@ -251,7 +251,7 @@ class Node:
     ) -> None:
 
         descriptors = list(
-            self._outpost.schema().descriptors_by_role(Role.PRODUCED).values()
+            self._repository_adapter.schema().descriptors_by_role(Role.PRODUCED).values()
         )
 
         if len(descriptors) == 0:
@@ -259,9 +259,9 @@ class Node:
 
         if len(descriptors) == 1:
 
-            with self._outpost:
+            with self._repository_adapter:
                 setattr(
-                    self._outpost,
+                    self._repository_adapter,
                     descriptors[0].field_name,
                     result,
                 )
@@ -280,7 +280,7 @@ class Node:
                 f"{len(descriptors)} were expected."
             )
 
-        with self._outpost:
+        with self._repository_adapter:
 
             for descriptor, parcel in zip(
                 descriptors,
@@ -288,7 +288,7 @@ class Node:
                 strict=True,
             ):
                 setattr(
-                    self._outpost,
+                    self._repository_adapter,
                     descriptor.field_name,
                     parcel,
                 )

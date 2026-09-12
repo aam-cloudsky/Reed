@@ -3,9 +3,9 @@ from typing import TypeVar
 from reed.activation.identifier.identifier import LogisticsId, NodeId
 from reed.synchronization.artifact_repository import ArtifactRepository
 from reed.transportation.bus import Bus
-from reed.synchronization.outpost import Outpost
+from reed.synchronization.repository_adapter import RepositoryAdapter
 
-OutpostT = TypeVar("OutpostT", bound=Outpost)
+RepositoryAdapterT = TypeVar("RepositoryAdapterT", bound=RepositoryAdapter)
 
 
 class Logistics:
@@ -22,8 +22,8 @@ class Logistics:
 
     def create_outpost(
         self,
-        outpost_type: type[OutpostT],
+        outpost_type: type[RepositoryAdapterT],
         node_id: NodeId,
-    ) -> OutpostT:
+    ) -> RepositoryAdapterT:
 
         return outpost_type(bus=self._bus, node_id=node_id, logistics_id=self.identity)

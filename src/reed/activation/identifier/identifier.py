@@ -46,7 +46,7 @@ class LogisticsId(Identity):
 
 
 @dataclass(frozen=True)
-class OutpostId(Identity):
+class RepositoryAdapterId(Identity):
     logistics: LogisticsId
     node: NodeId
 

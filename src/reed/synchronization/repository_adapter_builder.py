@@ -5,7 +5,7 @@ from reed.activation.identifier.identifier import NodeId
 from reed.activation.role import Role
 from reed.composition.node.node_definition import NodeDescription, ParcelType
 from reed.synchronization.logistics import Logistics
-from reed.synchronization.outpost import Outpost
+from reed.synchronization.repository_adapter import RepositoryAdapter
 from reed.synchronization.parcel.parcel import Parcel
 
 NodeResult: TypeAlias = Parcel | tuple[Parcel, ...]
@@ -15,26 +15,26 @@ NodeFunction: TypeAlias = Callable[..., NodeResult]
 ConsumedParameter: TypeAlias = tuple[str, ParcelType]
 
 
-class OutpostBuilder:
+class RepositoryAdapterBuilder:
     def __init__(
         self,
         description: NodeDescription,
     ) -> None:
         self._description = description
-        self._outpost_type = self._build_outpost_type()
+        self._repository_adapter_type = self._build_repository_adapter_type()
 
     def build(
         self,
         *,
         node_id: NodeId,
         logistics: Logistics,
-    ) -> Outpost:
+    ) -> RepositoryAdapter:
 
-        return logistics.create_outpost(self._outpost_type, node_id=node_id)
+        return logistics.create_outpost(self._repository_adapter_type, node_id=node_id)
 
-    def _build_outpost_type(
+    def _build_repository_adapter_type(
         self,
-    ) -> type[Outpost]:
+    ) -> type[RepositoryAdapter]:
         generated_fields: list[tuple[str, object, object]] = []
 
         used_names: set[str] = set()
@@ -72,9 +72,9 @@ class OutpostBuilder:
             )
 
         generated_type = make_dataclass(
-            cls_name=(f"{self._description.function.__name__}" "Outpost"),
+            cls_name=(f"{self._description.function.__name__}" "RepositoryAdapter"),
             fields=generated_fields,
-            bases=(Outpost,),
+            bases=(RepositoryAdapter,),
             namespace={
                 "__module__": (self._description.function.__module__),
             },
@@ -82,7 +82,7 @@ class OutpostBuilder:
         )
 
         return cast(
-            type[Outpost],
+            type[RepositoryAdapter],
             generated_type,
         )
 

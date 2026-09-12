@@ -21,7 +21,7 @@ from reed.composition.node.node_definition import (
     ParcelType,
 )
 from reed.synchronization.logistics import Logistics
-from reed.synchronization.outpost_builder import ConsumedParameter
+from reed.synchronization.repository_adapter_builder import ConsumedParameter
 from reed.synchronization.parcel.parcel import Parcel
 
 

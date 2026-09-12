@@ -2,7 +2,7 @@ from dataclasses import InitVar, dataclass, field, fields
 from enum import Enum, auto
 from typing import Any, Callable, ClassVar, Dict, Optional, TypeAlias, cast
 
-from reed.activation.identifier.identifier import LogisticsId, NodeId, OutpostId
+from reed.activation.identifier.identifier import LogisticsId, NodeId, RepositoryAdapterId
 from reed.activation.schema import SchemaBuilder
 from reed.activation.status.status import Status
 from reed.activation.status.status_manager import StatusManager
@@ -46,7 +46,7 @@ class StateFlags:
 
 
 @dataclass(eq=False)
-class Outpost(SchemaBuilder):
+class RepositoryAdapter(SchemaBuilder):
     """
     Reactive configuration unit synchronized via ArtifactRepository.
 
@@ -95,7 +95,7 @@ class Outpost(SchemaBuilder):
 
     bus: InitVar[Bus] = field(kw_only=True)
 
-    _identity: OutpostId = field(
+    _identity: RepositoryAdapterId = field(
         init=False,
         repr=False,
     )
@@ -125,7 +125,7 @@ class Outpost(SchemaBuilder):
         Declared Parcel fields may temporarily hold `None`.
 
         In the current runtime, `None` means that the corresponding Parcel is
-        not currently available in this Outpost: it has not yet been received
+        not currently available in this RepositoryAdapter: it has not yet been received
         from the ArtifactRepository or has not yet been produced locally.
 
         This is a runtime availability state, not a Parcel state.
@@ -151,7 +151,7 @@ class Outpost(SchemaBuilder):
         self._init_flags()
         self._transition_state(OutpostOperationalStates.BEGINNING_OPERATION)
 
-        self._identity: OutpostId = OutpostId(
+        self._identity: RepositoryAdapterId = RepositoryAdapterId(
             name=self.__class__.__name__, logistics=self.logistics_id, node=self.node_id
         )
         self._bus = bus
@@ -184,7 +184,7 @@ class Outpost(SchemaBuilder):
             self._last_lifecycle_state = state
 
     @property
-    def identity(self) -> OutpostId:
+    def identity(self) -> RepositoryAdapterId:
         return self._identity
 
     # =======================================================
@@ -415,7 +415,7 @@ class Outpost(SchemaBuilder):
             raise RuntimeError(
                 "_set_parcels called while internal Parcel mutation "
                 "is not permitted. "
-                f"Outpost: '{type(self).__module__}.{type(self).__qualname__}'. "
+                f"RepositoryAdapter: '{type(self).__module__}.{type(self).__qualname__}'. "
                 f"Operational state: '{self._state.name}'."
             )
 
@@ -508,7 +508,7 @@ class Outpost(SchemaBuilder):
         # Otherwise: forbidden
         # -------------------------------------------------
         raise AttributeError(
-            "Direct assignment is disabled. " "Use 'with Outpost() as outpost:'"
+            "Direct assignment is disabled. " "Use 'with RepositoryAdapter() as repository_adapter:'"
         )
 
     def close(self) -> None:
