@@ -139,6 +139,7 @@ produced domain value into the run's repository.
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 from reed.composition.node.node_context import NodeContext
@@ -173,6 +174,7 @@ class NodeRuntime:
         self._flow_node = flow_node
         self._memory: object | None = None
         self._last_output: object | None = None
+        self._firing_lock: threading.Lock | None = None
 
     @property
     def run(self) -> Run:
@@ -280,6 +282,38 @@ class NodeRuntime:
             )
 
         return self._last_output
+
+    @property
+    def firing_lock(self) -> "threading.Lock | None":
+        """
+        This `NodeRuntime`'s own mutual-exclusion primitive (Slice 2G;
+        architectural_invariants.md #17, "Stateful NodeRuntime firings
+        are serialized").
+
+        Lazily instantiated and memoized exactly like `.memory`, and
+        gated by the same state-awareness signal `.memory`/`.last_output`
+        already use (`self.flow_node.context is not None`): a
+        `NodeRuntime` whose node function declares no `NodeContext`
+        parameter has nothing to race on and gets no `Lock` at all --
+        this property returns `None` for it rather than constructing an
+        unnecessary lock.
+
+        For a state-aware `NodeRuntime`, `Run.publish(...)` acquires
+        this `Lock` immediately before calling the node function and
+        releases it (via try/finally) immediately after
+        `.commit(...)` completes, so that at most one firing of this
+        `NodeRuntime` is ever in flight at the same time -- across
+        threads, and reentrantly within the same thread (a plain
+        `threading.Lock`, not an `RLock`, so a reentrant firing blocks
+        rather than silently nesting).
+        """
+        if self._flow_node.context is None:
+            return None
+
+        if self._firing_lock is None:
+            self._firing_lock = threading.Lock()
+
+        return self._firing_lock
 
     @property
     def context(self) -> NodeContext:

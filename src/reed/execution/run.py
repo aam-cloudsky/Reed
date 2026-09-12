@@ -310,14 +310,43 @@ class Run:
         if flow_node.context is not None:
             call_kwargs[flow_node.context.parameter_name] = node_runtime.context
 
-        result = flow_node.definition.function(**call_kwargs)
+        firing_lock = node_runtime.firing_lock
 
-        record = node_runtime.wrap(result)
-        node_runtime.commit(record)
+        if firing_lock is not None:
+            firing_lock.acquire()
+        try:
+            result = flow_node.definition.function(**call_kwargs)
+
+            record = node_runtime.wrap(result)
+            node_runtime.commit(record)
+        finally:
+            if firing_lock is not None:
+                firing_lock.release()
 
         self._dispatch_on_output(flow_node, record.value)
 
         return record.value
+
+    def publish_many(self, domain_values: "list[object]") -> None:
+        """
+        Publish each value in `domain_values`, in order, via
+        `self.publish(...)` (Slice 2G).
+
+        A thin, sequential convenience wrapper -- not a second
+        execution path, a queue, or a scheduler: it calls
+        `self.publish(value)` once per value, exactly as if the caller
+        had called `.publish(...)` in a loop themselves. See
+        `test_stateful_node_runtime_firings_are_serialized`
+        (tests/test_target_architecture_contract.py), which uses this
+        method; the actual concurrency guarantee it relies on
+        (`architectural_invariants.md #17) comes from
+        `NodeRuntime.firing_lock`, not from this method firing
+        concurrently -- see module docstring and the SliceContract's
+        stop_conditions for why a sequential loop, plus a real
+        per-NodeRuntime lock, is the correct shape here.
+        """
+        for domain_value in domain_values:
+            self.publish(domain_value)
 
     def _dispatch_on_output(self, flow_node: "FlowNode", domain_value: object) -> None:
         """

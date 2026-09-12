@@ -290,10 +290,6 @@ def test_callback_failure_does_not_undo_committed_output():
     assert run.callback_failures
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Requires Milestone 2, Slice 2G (stateful NodeRuntime firing serialization) -- not implemented in Milestone 1.",
-)
 def test_stateful_node_runtime_firings_are_serialized():
     from reed import Flow, NodeContext, TriggerPolicy
 
