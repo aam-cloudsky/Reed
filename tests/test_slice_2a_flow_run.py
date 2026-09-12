@@ -159,15 +159,12 @@ def test_flow_instance_state_is_unchanged_by_run():
         )
 
 
-def test_run_has_no_publish_capability_yet():
-    # Run cannot yet execute meaningful computation -- that is an
-    # accepted, explicit outcome of Slice 2A (boundary, not runtime).
-    # Repository ownership (Slice 2A follow-up) and NodeRuntime
-    # ownership (Slice 2B, tests/test_slice_2b_node_runtime.py) both
-    # exist by now, but neither does anything yet -- nothing reads or
-    # writes through `run.repository`, and no `NodeRuntime` can
-    # execute a node. `.publish(...)` (the actual firing entry point)
-    # remains Slice 2E.
+def test_run_publish_capability_was_introduced():
+    # Slice 2E legitimately adds Run.publish as the real firing entry
+    # point, making this test's original negative assertion
+    # (not hasattr(run, "publish")) stale by construction -- corrected
+    # here in place, the same Test Integrity Rule precedent already
+    # applied in Slices 2B and 2D (see docs/refactor_state.md).
     from reed import Flow
 
     def produce() -> int:
@@ -177,7 +174,7 @@ def test_run_has_no_publish_capability_yet():
     flow.add(produce)
     run = flow.run()
 
-    assert not hasattr(run, "publish")
+    assert hasattr(run, "publish")
 
 
 # --- Slice 2A follow-up: Run-scoped repository ownership -------------------

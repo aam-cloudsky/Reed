@@ -1,7 +1,7 @@
 # src/skyweaver/core/logistics/depot.py
 
 
-from typing import Any, Dict, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 import warnings
 
@@ -22,6 +22,9 @@ from reed.transportation.protocol.base_message import BaseMessage
 from reed.transportation.protocol.message_context import MessageContext
 from reed.transportation.protocol.validity_message import ValidityMessage
 from reed.transportation.publisher_manager import PublisherReservedIDs
+
+if TYPE_CHECKING:
+    from reed.execution.artifact_record import ArtifactRecord
 
 
 class Depot:
@@ -160,6 +163,15 @@ class Depot:
 
     def _setup_storage(self):
         self._storage: Dict[type, Parcel] = {}
+        # Slice 2E addition (docs/parcel_boundary_decision.md, "Addendum:
+        # Slice 2E ArtifactRecord Commit Storage"): a wholly separate,
+        # additive, domain-type-keyed storage path for committed
+        # `ArtifactRecord`s. This dict, and the two methods below that
+        # read/write it, are independent of `_storage`/`get_parcel`/
+        # `set_parcel` above -- neither reads nor writes the other, and
+        # `set_parcel`'s existing `isinstance(parcel, Parcel)` type check
+        # is untouched.
+        self._artifact_records: Dict[type, "ArtifactRecord"] = {}
 
     def get_pallet(self, parcel_types: list[type[Parcel]]) -> Dict[type, Parcel]:
         """
@@ -181,6 +193,33 @@ class Depot:
 
         self._storage[type(parcel)] = parcel
         return True
+
+    # ------------------------------------------------------------------
+    # ArtifactRecord Management (Slice 2E, additive)
+    # ------------------------------------------------------------------
+
+    def set_artifact_record(self, record: "ArtifactRecord") -> None:
+        """
+        Commit `record` into this Depot's additive, domain-type-keyed
+        `ArtifactRecord` storage (Slice 2E; docs/parcel_boundary_decision.md,
+        "Addendum: Slice 2E ArtifactRecord Commit Storage").
+
+        Keyed by `type(record.value)` -- the artifact's domain semantic
+        type -- exactly as the accepted addendum describes. Completely
+        separate from `_storage`/`get_parcel`/`set_parcel`: this method
+        never reads or writes `_storage`, never touches a `Parcel`, and
+        does not go through the bus (`DepotGet`/`DepotSet`/`DepotUpdate`
+        are untouched).
+        """
+        self._artifact_records[type(record.value)] = record
+
+    def get_artifact_record(self, domain_type: type) -> Optional["ArtifactRecord"]:
+        """
+        Return the committed `ArtifactRecord` for `domain_type`, or
+        `None` if nothing has been committed for that domain type yet
+        (Slice 2E). See `set_artifact_record` for the storage this reads.
+        """
+        return self._artifact_records.get(domain_type)
 
     def show_validity(self) -> None:
 

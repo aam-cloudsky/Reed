@@ -185,7 +185,12 @@ def test_artifact_record_has_no_wrap_or_commit_capability_yet():
     assert not hasattr(record, "commit")
 
 
-def test_node_runtime_has_no_wrap_capability_yet():
+def test_node_runtime_wrap_capability_was_introduced():
+    # Slice 2E legitimately adds NodeRuntime.wrap as part of the commit
+    # path, making this test's original negative assertion
+    # (not hasattr(node_runtime, "wrap")) stale by construction --
+    # corrected here in place, the same Test Integrity Rule precedent
+    # already applied in Slices 2B and 2D (see docs/refactor_state.md).
     from reed import Flow
 
     def produce_estimate() -> Estimate:
@@ -196,7 +201,7 @@ def test_node_runtime_has_no_wrap_capability_yet():
     run = flow.run()
     node_runtime = run.node_runtime(produce_estimate)
 
-    assert not hasattr(node_runtime, "wrap")
+    assert hasattr(node_runtime, "wrap")
 
 
 def test_depot_still_rejects_non_parcel_values_including_artifact_record():

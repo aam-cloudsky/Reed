@@ -245,14 +245,20 @@ def test_node_context_cannot_be_constructed_without_memory_and_last_output():
         NodeContext()  # type: ignore[call-arg]
 
 
-def test_no_execution_commit_or_repository_capability_was_introduced():
+def test_no_execute_fire_or_context_commit_wrap_unwrap_capability_was_introduced():
+    # Slice 2E legitimately adds Run.publish and NodeRuntime.commit as
+    # the real firing/commit path, making the two assertions that
+    # pinned their absence stale by construction -- removed here, the
+    # same Test Integrity Rule precedent already applied in Slices 2B
+    # and 2D (see docs/refactor_state.md). Every other assertion below
+    # is still true after Slice 2E (NodeRuntime.execute/.fire and
+    # NodeContext.commit/.wrap/.unwrap were not introduced by this
+    # slice) and is kept unchanged.
     flow, track = _make_flow_with_tracker()
     run = flow.run()
     node_runtime = run.node_runtime(track)
 
-    assert not hasattr(run, "publish")
     assert not hasattr(node_runtime, "execute")
-    assert not hasattr(node_runtime, "commit")
     assert not hasattr(node_runtime, "fire")
     ctx = node_runtime.context
     assert not hasattr(ctx, "commit")

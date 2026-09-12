@@ -179,10 +179,6 @@ def test_parallel_safe_branching_uses_distinct_output_artifact_types():
     assert enhance_node.produced_artifact.domain_type is EnhancedImage
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Requires Milestone 2, Slice 2E (NodeExecution firing pipeline: Run x NodeRuntime-scoped NodeMemory) -- not implemented in Milestone 1.",
-)
 def test_run_instances_isolate_node_memory():
     from reed import Flow, NodeContext
 
@@ -206,10 +202,6 @@ def test_run_instances_isolate_node_memory():
     assert second_run.node_runtime(track).context.memory.previous_confidence == 0.8
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Requires Milestone 2, Slice 2E (NodeExecution firing pipeline: ctx.last_output wired to a real committed value) -- not implemented in Milestone 1.",
-)
 def test_last_output_exposes_latest_committed_domain_value():
     from reed import Flow, NodeContext
 

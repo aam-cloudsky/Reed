@@ -2,7 +2,8 @@
 NodeRuntime (Slice 2B, part of Priority 13 -- `Node` -> `NodeRuntime`,
 runtime-ownership portion; Slice 2C, part of Priority 13 -- the
 `ArtifactRecord` unwrap boundary; Slice 2D, part of Priority 13 -- memory
-and `.context` construction).
+and `.context` construction; Slice 2E, part of Priority 13 -- wrap/commit,
+the firing-tied direction).
 
 Scope for this slice (docs/refactor_priority_order.md, Milestone 2, Slice
 2B row: "`Node` migrated to `NodeRuntime`: run-local ownership of one
@@ -31,7 +32,7 @@ thing on top of that: `NodeRuntime.unwrap(record)`, a pure passthrough
 step (see `reed/execution/artifact_record.py`'s module docstring for that
 boundary's own exact scope).
 
-Slice 2D adds NodeMemory ownership and `.context` construction
+Slice 2D added NodeMemory ownership and `.context` construction
 (docs/refactor_priority_order.md, Priority 5 "Create `NodeMemory`";
 Priority 13's traceability split "context/memory wiring -> 2D";
 docs/node_context_decision.md; docs/architectural_invariants.md #14, #15,
@@ -45,8 +46,9 @@ docs/node_context_decision.md; docs/architectural_invariants.md #14, #15,
                            MemoryType"), memoized so the same object is
                            returned (and can be mutated in place) on every
                            subsequent access.
-        .last_output   -- always None in this slice; nothing commits an
-                           output yet (Slice 2E).
+        .last_output   -- the latest committed domain output, set by
+                           `.commit(record)` (Slice 2E). `None` until this
+                           NodeRuntime's first successful commit.
         .context       -- a fresh NodeContext(memory=.., last_output=..)
                            snapshot built from the two properties above.
 
@@ -70,30 +72,59 @@ across `Run`s (architectural_invariants.md #16) as a direct structural
 consequence of Slice 2B's ownership boundary -- this slice does not need
 to add any additional isolation mechanism of its own.
 
+Slice 2E adds the firing-tied, commit direction (docs/refactor_priority_
+order.md, Milestone 2, Slice 2E row; docs/parcel_boundary_decision.md,
+"Parcel As Internal Envelope" -- `wrap: U -> Parcel[U]`, read here as
+`wrap: DomainValue -> ArtifactRecord[DomainValue]`):
+
+    NodeRuntime
+        .wrap(domain_value)   -- wraps a returned domain value into a
+                                  fresh ArtifactRecord, with this
+                                  NodeRuntime recorded as its producer
+                                  (docs/architectural_decision.md's
+                                  ArtifactProvenance.producer) and its
+                                  version advanced from pending (0) to
+                                  initial (1).
+        .commit(record)       -- the successful-commit path only
+                                  (docs/node_context_decision.md,
+                                  "Transaction Semantics"): stores
+                                  `record` into `self.run.repository`'s
+                                  additive ArtifactRecord storage (see
+                                  `reed/synchronization/depot.py`,
+                                  `set_artifact_record`) and updates
+                                  `self._last_output` to `record.value`
+                                  together, in that order, so both moves
+                                  happen as one call. Failure/rollback
+                                  semantics for a firing that raises
+                                  partway through are explicitly out of
+                                  scope for this slice (see
+                                  `run.py`'s `publish` docstring and the
+                                  SliceContract's stop_conditions) --
+                                  neither target test this slice must
+                                  pass exercises them.
+
+`Run.publish(domain_value)` (`reed/execution/run.py`, Slice 2E) is what
+actually calls `.wrap(...)` and `.commit(...)` as part of one firing; this
+class only owns the two operations themselves, not the decision of when
+to fire.
+
 Explicitly out of scope for this slice (Milestone 2, later slices; see
 `docs/refactor_priority_order.md`'s Priority 13 "Recommended work" items
 3-8, split across 2C-2G by the Priority-To-Slice Traceability table):
 
-    - No argument construction from descriptors, no injecting a
-      constructed `NodeContext` into an actual node-function call (2E) --
-      `.context` is directly constructible/inspectable from `NodeRuntime`
-      for testing and later wiring, but nothing calls a node function
-      with it yet.
-    - No `NodeExecution`, no node-function execution, no `wrap(...)` (the
-      reverse, commit-tied direction), no transactional commit, no
-      `.publish(...)` (2E).
-    - No wiring of `ctx.last_output` to any real committed value --
-      `.last_output` is always `None` in this slice (2E).
     - No `on_output` dispatch (sync or async), no `callback_failures`
       (2F).
     - No stateful-firing serialization (architectural_invariants.md #17,
-      2G) -- nothing in this slice executes a node function at all, so
-      there is no concurrent firing to serialize against yet.
-    - No repository communication. `run.repository` is not read from or
-      written to by anything here -- see
-      `reed/execution/artifact_record.py`'s module docstring for why
-      (`Depot`'s current API cannot hold an `ArtifactRecord`, and nothing
-      needs it to yet, since nothing commits one until Slice 2E).
+      2G) -- `.commit(...)` here is not itself a lock/serialization
+      mechanism; concurrent firings of the same NodeRuntime are not
+      guarded against yet.
+    - No transactional rollback for a firing that fails partway through
+      wrap/commit -- only the successful-commit path is implemented (see
+      above and the SliceContract's stop_conditions for why guessing a
+      rollback mechanism here would be wrong).
+    - No multi-node dispatch/routing, no TriggerPolicy-gated execution
+      eligibility -- both remain `Run.publish(...)`'s concern (2E) and,
+      for TriggerPolicy specifically, out of this slice entirely.
     - No new executors, schedulers, managers, factories, or lifecycle
       frameworks.
 
@@ -101,8 +132,9 @@ Explicitly out of scope for this slice (Milestone 2, later slices; see
 object per (`Run`, `FlowNode`) pair, know which `Run` and which
 `FlowNode` it materializes, unwrap an `ArtifactRecord` into its domain
 value on request, own a private, node-local memory instance and a
-last-committed-output slot (both scoped to itself), and construct a
-`NodeContext` snapshot exposing both.
+last-committed-output slot (both scoped to itself), construct a
+`NodeContext` snapshot exposing both, and wrap/commit a successfully
+produced domain value into the run's repository.
 """
 
 from __future__ import annotations
@@ -110,10 +142,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from reed.composition.node.node_context import NodeContext
+from reed.execution.artifact_record import ArtifactRecord
 
 if TYPE_CHECKING:
     from reed.composition.flow.flow_node import FlowNode
-    from reed.execution.artifact_record import ArtifactRecord
     from reed.execution.run import Run
 
 
@@ -121,16 +153,19 @@ class NodeRuntime:
     """
     One node participation (`FlowNode`) materialized inside one `Run`
     (Slice 2B; `ArtifactRecord` unwrap boundary added by Slice 2C; memory
-    and `.context` construction added by Slice 2D).
+    and `.context` construction added by Slice 2D; wrap/commit added by
+    Slice 2E).
 
     See module docstring for the exact scope: an identity/ownership
-    boundary, a single pure unwrap operation, and now a private,
-    node-local memory instance plus a `.context` snapshot. `NodeRuntime`
-    still owns no execution capability -- it exists so that later slices
-    (2E-2G) have somewhere correct to attach real firing, commit, and
-    callback dispatch behavior, without any of that state ever being
-    stored on `FlowNode` (which remains reusable Flow-local composition
-    metadata) or on `Flow` itself.
+    boundary, a pure unwrap operation, a private, node-local memory
+    instance plus a `.context` snapshot, and now the wrap/commit
+    operations `Run.publish(...)` uses to complete one firing.
+    `NodeRuntime` still owns no execution-eligibility policy and no
+    callback dispatch -- it exists so that later slices (2F-2G) have
+    somewhere correct to attach callback dispatch and stateful-firing
+    serialization, without any of that state ever being stored on
+    `FlowNode` (which remains reusable Flow-local composition metadata)
+    or on `Flow` itself.
     """
 
     def __init__(self, run: Run, flow_node: FlowNode) -> None:
@@ -162,6 +197,47 @@ class NodeRuntime:
         """
         return record.value
 
+    def wrap(self, domain_value: object) -> "ArtifactRecord":
+        """
+        Wrap `domain_value` -- a node function's returned domain value --
+        into a fresh `ArtifactRecord` (Slice 2E).
+
+        This `NodeRuntime` is recorded as the record's producer and its
+        provenance is advanced once (pending (0) -> initial (1) on first
+        firing, matching `ArtifactProvenance.advance`'s existing,
+        regression-tested version mechanics from Slice 2C). This is the
+        "wrap" half of docs/parcel_boundary_decision.md's boundary
+        diagram (`U -> wrap -> Parcel[U]`, read here as `ArtifactRecord`);
+        it does not commit anything by itself -- see `.commit(...)`.
+        """
+        record: ArtifactRecord = ArtifactRecord(value=domain_value)
+        record.provenance.advance(producer=self)
+        return record
+
+    def commit(self, record: "ArtifactRecord") -> None:
+        """
+        Commit `record` -- the successful-commit path only (Slice 2E).
+
+        Stores `record` into `self.run.repository`'s additive,
+        domain-type-keyed `ArtifactRecord` storage
+        (`reed/synchronization/depot.py`, `set_artifact_record`,
+        docs/parcel_boundary_decision.md's "Addendum: Slice 2E
+        ArtifactRecord Commit Storage") and updates `self._last_output`
+        to `record.value`, so that both the repository commit and the
+        local `last_output` transition happen together
+        (docs/node_context_decision.md, "Transaction Semantics":
+        "successful firing -> memory transition and output publication
+        commit together"). Only the successful path is implemented here
+        -- a firing that raises before reaching `.commit(...)` leaves
+        both untouched, which already satisfies "failed firing -> no
+        committed memory transition and no committed output" for that
+        case; a firing that fails *partway through* wrap/commit is
+        explicitly out of scope (see module docstring and the
+        SliceContract's stop_conditions).
+        """
+        self._run.repository.set_artifact_record(record)
+        self._last_output = record.value
+
     @property
     def memory(self) -> object:
         """
@@ -190,8 +266,9 @@ class NodeRuntime:
     def last_output(self) -> object | None:
         """
         The latest successfully committed domain output for this
-        `NodeRuntime` (Slice 2D representation only). Always `None` in
-        this slice: nothing commits an output yet (Slice 2E).
+        `NodeRuntime` (Slice 2D representation; wired to a real
+        committed value by `.commit(...)`, Slice 2E). `None` until this
+        `NodeRuntime` has completed its first successful commit.
 
         Raises `AttributeError` for the same reason and under the same
         condition as `.memory` -- see its docstring.
