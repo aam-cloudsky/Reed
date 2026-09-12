@@ -58,7 +58,7 @@ Explicitly out of scope (this slice and 1E):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from reed.composition.node.artifact_descriptor import ArtifactDescriptor
 from reed.composition.node.domain_node_description import (
@@ -78,7 +78,7 @@ class FlowNode:
 
     definition: DomainNodeDefinition
     trigger_policy: TriggerPolicy = TriggerPolicy.ALL_INPUTS_CHANGED
-    on_output: Callable[[object], object] | None = None
+    on_output: Callable[[Any], object] | None = None
 
     @property
     def consumed_artifacts(self) -> tuple[ArtifactDescriptor, ...]:

@@ -83,13 +83,16 @@ exposed as the top-level `reed.Flow`.
 from __future__ import annotations
 
 import sys
-from typing import Callable
+from typing import Callable, TypeVar
 
 from reed.composition.flow.artifact_dependency_graph import ArtifactDependencyGraph
 from reed.composition.flow.flow_node import FlowNode
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.composition.node.domain_node_description import DomainNodeDescriptionBuilder
 from reed.execution.run import Run
+
+
+OutputT = TypeVar("OutputT")
 
 
 class Flow:
@@ -142,10 +145,10 @@ class Flow:
 
     def add(
         self,
-        function: Callable,
+        function: Callable[..., OutputT],
         *,
         trigger_policy: TriggerPolicy = TriggerPolicy.ALL_INPUTS_CHANGED,
-        on_output: Callable[[object], object] | None = None,
+        on_output: Callable[[OutputT], object] | None = None,
     ) -> FlowNode:
         """
         Register `function` as a Flow-local node participation.
