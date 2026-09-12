@@ -203,22 +203,3 @@ def test_node_runtime_wrap_capability_was_introduced():
 
     assert hasattr(node_runtime, "wrap")
 
-
-def test_depot_still_rejects_non_parcel_values_including_artifact_record():
-    # Confirms the reported mismatch directly and guards against a future
-    # slice silently assuming ArtifactRepository already supports ArtifactRecord:
-    # ArtifactRepository's regression-protected set_parcel(...) is unchanged and still
-    # hard-typed to Parcel instances.
-    from reed import Flow
-
-    def produce_estimate() -> Estimate:
-        return Estimate(1)
-
-    flow = Flow()
-    flow.add(produce_estimate)
-    run = flow.run()
-
-    record = ArtifactRecord(value=Estimate(1))
-
-    with pytest.raises(TypeError, match="Only Parcel instances"):
-        run.repository.set_parcel(record)

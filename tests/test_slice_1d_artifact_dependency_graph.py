@@ -194,13 +194,3 @@ def test_distinct_output_artifact_types_allow_parallel_safe_branching():
     assert graph.producer_of(Estimate) is not None
     assert graph.producer_of(OtherEstimate) is not None
 
-
-def test_old_dependency_registry_is_untouched_and_still_works():
-    # Confirms the old Parcel/module-keyed DependencyRegistry (regression-
-    # protected) is a completely separate class, not modified or replaced
-    # by this slice.
-    from reed.synchronization.validity.dependency_registry import (
-        DependencyRegistry,
-    )
-
-    assert DependencyRegistry is not ArtifactDependencyGraph

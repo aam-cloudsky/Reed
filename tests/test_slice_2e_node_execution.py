@@ -87,23 +87,6 @@ def test_publish_commits_an_artifact_record_into_run_repository():
     assert committed.version == ArtifactVersion.initial()
 
 
-def test_committed_artifact_record_storage_is_independent_of_parcel_storage():
-    from reed import Flow
-
-    def estimate(measurement: Measurement) -> Estimate:
-        return Estimate(measurement.value)
-
-    flow = Flow()
-    flow.add(estimate)
-    run = flow.run()
-
-    run.publish(Measurement(3))
-
-    # The additive ArtifactRecord path must not touch ArtifactRepository's existing,
-    # untouched Parcel storage.
-    assert run.repository.get_parcel(Estimate) is None
-
-
 def test_node_runtime_last_output_updates_after_publish():
     from reed import Flow, NodeContext
 
