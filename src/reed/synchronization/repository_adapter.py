@@ -3,7 +3,7 @@ from enum import Enum, auto
 from typing import Any, Callable, ClassVar, Dict, Optional, TypeAlias, cast
 
 from reed.activation.identifier.identifier import LogisticsId, NodeId, RepositoryAdapterId
-from reed.activation.schema import SchemaBuilder
+from reed.activation.schema import RepositoryAdapterSchemaBuilder
 from reed.activation.status.status import Status
 from reed.activation.status.status_manager import StatusManager
 from reed.synchronization.artifact_repository_messages import (
@@ -46,7 +46,7 @@ class StateFlags:
 
 
 @dataclass(eq=False)
-class RepositoryAdapter(SchemaBuilder):
+class RepositoryAdapter(RepositoryAdapterSchemaBuilder):
     """
     Reactive configuration unit synchronized via ArtifactRepository.
 

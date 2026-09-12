@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from reed.activation.role import Role
-from reed.activation.schema import SchemaBuilder
+from reed.activation.schema import RepositoryAdapterSchemaBuilder
 from reed.synchronization.artifact_repository_messages import (
     ArtifactRepositoryRegistry,
     ArtifactRepositorySet,
@@ -92,7 +92,7 @@ def test_dependency_registry_exposes_upstream_and_downstream_modules():
 
 def test_schema_builder_extracts_parcel_roles_and_produced_dependencies():
     @dataclass(eq=False)
-    class RuntimeSchema(SchemaBuilder):
+    class RuntimeSchema(RepositoryAdapterSchemaBuilder):
         source: SourceParcel = field(
             default=None,
             metadata={"role": Role.CONSUMED},

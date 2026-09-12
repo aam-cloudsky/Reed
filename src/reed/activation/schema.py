@@ -23,11 +23,11 @@ TElement = TypeVar("TElement")
 
 
 @dataclass(frozen=True)
-class Schema(Generic[TElement]):
+class RepositoryAdapterSchema(Generic[TElement]):
     """
-    Compiled structural description of an Outpost.
+    Compiled structural description of a RepositoryAdapter.
 
-    A Schema is produced by inspecting the Outpost declaration and
+    A RepositoryAdapterSchema is produced by inspecting the RepositoryAdapter declaration and
     extracting the structural information required by the logistics layer.
 
     It contains two complementary projections:
@@ -103,22 +103,22 @@ class Schema(Generic[TElement]):
 
 
 @dataclass(eq=False)
-class SchemaBuilder:
+class RepositoryAdapterSchemaBuilder:
     """
-    Compiles and exposes the structural schema declared by an Outpost.
+    Compiles and exposes the structural schema declared by a RepositoryAdapter.
 
     Besides schema compilation, this class provides runtime helpers for
     accessing declared Parcels according to the compiled schema.
     """
 
-    _SCHEMA: ClassVar[Optional["Schema[ParcelType]"]] = None
+    _SCHEMA: ClassVar[Optional["RepositoryAdapterSchema[ParcelType]"]] = None
 
     # ======================================================
     # Public API
     # ======================================================
 
     @classmethod
-    def schema(cls) -> "Schema[ParcelType]":
+    def schema(cls) -> "RepositoryAdapterSchema[ParcelType]":
 
         if cls._SCHEMA is None:
             cls._SCHEMA = cls._build_schema()
@@ -126,7 +126,7 @@ class SchemaBuilder:
         return cls._SCHEMA
 
     @classmethod
-    def rebuild_schema(cls) -> "Schema[ParcelType]":
+    def rebuild_schema(cls) -> "RepositoryAdapterSchema[ParcelType]":
         cls._SCHEMA = cls._build_schema()
         return cls._SCHEMA
 
@@ -135,15 +135,15 @@ class SchemaBuilder:
     # ======================================================
 
     @property
-    def _schema(self) -> Schema[ParcelType]:
+    def _schema(self) -> RepositoryAdapterSchema[ParcelType]:
         return type(self).schema()
 
     @classmethod
-    def _build_schema(cls) -> "Schema[ParcelType]":
+    def _build_schema(cls) -> "RepositoryAdapterSchema[ParcelType]":
 
         types_by_role = cls._build_types_by_role()
 
-        return Schema(
+        return RepositoryAdapterSchema(
             types_by_role=types_by_role,
             descriptors=cls._build_descriptors(types_by_role),
         )
