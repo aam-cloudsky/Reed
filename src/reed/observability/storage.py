@@ -14,19 +14,22 @@ CSV is the V1 implementation; `RecordingStore`/`ProvenanceStore` are
 behind the same interface, never a change to `ctx.record()` or to what a
 `Recording` means (docs/observability_goals.md Section 6).
 
-Durability boundary (Slice O3c; docs/observability_goals.md Section 5):
-`CSVRecordingStore.append`/`CSVProvenanceStore.append` flush and fsync
-synchronously, on every call -- stronger than the documented boundary
-("durable when the NodeExecution exits"), not weaker: a Recording is
-durable the instant `ctx.record(...)` accepts it, before the Node body
-even returns. This is a deliberate V1 simplicity/latency trade-off
-(no batching), not a violation of docs/observability_non_goals.md
-Section 5 ("no fsync per ctx.record() call" was a caution about forcing
-this trade-off as a workaround for an unqualified "never lossy" claim --
-here it is a documented, chosen implementation, not a patch over a
-broken guarantee). Batching before the boundary is legitimate future
-work if hot-path latency becomes a concern; it is not required for
-Milestone O3's definition of done.
+Durability boundary (corrected at Milestone O7, Slice O7c; docs/observability_goals.md
+Section 5; docs/observability_non_goals.md Section 5): `CSVRecordingStore.append_batch(...)`
+writes every `Recording` in one `NodeExecution`'s batch and flushes+fsyncs **once**, at the
+end of the batch -- not once per `ctx.record()` call. The original O3c implementation
+flushed and fsynced synchronously on every single `append(...)` call and rationalized this
+as "stronger than the documented boundary, not weaker" -- but `observability_non_goals.md`
+Section 5 explicitly names and forbids exactly this: "Do not 'fix' this by adding an fsync
+per ctx.record() call... That destroys the hot-path latency the synchronous, non-blocking
+call is designed to protect." The per-call-fsync implementation was a genuine contract
+violation, not a legitimate stronger guarantee, and is corrected here (Milestone O7's
+independent post-O6 audit).
+
+`CSVProvenanceStore.append(...)` keeps its original one-fsync-per-call behavior: Provenance
+events are not the flagged hot path (`ctx.record()` specifically, invariant #13/#26) -- there
+are at most two Provenance events per firing (`"used"`/`"generated"`), emitted directly by
+`Run`, never called an unbounded number of times per firing the way `ctx.record()` can be.
 """
 
 from __future__ import annotations
@@ -71,6 +74,7 @@ SCHEMA_VERSION = 1
 
 class RecordingStore(Protocol):
     def append(self, recording: Recording) -> None: ...
+    def append_batch(self, recordings: "list[Recording]") -> None: ...
 
 
 class ProvenanceStore(Protocol):
@@ -92,6 +96,23 @@ def _append_csv_row(path: Path, row: list[object]) -> None:
         os.fsync(handle.fileno())
 
 
+def _recording_row(recording: Recording) -> list[object]:
+    return [
+        recording.instrument_id,
+        recording.name,
+        recording.value,
+        recording.kind or "",
+        recording.unit or "",
+        recording.execution_id,
+        recording.flow_id,
+        recording.node_id,
+        recording.node_execution_id,
+        recording.execution_seq,
+        json.dumps(recording.attributes) if recording.attributes else "",
+        recording.timestamp,
+    ]
+
+
 class CSVRecordingStore:
     """V1 `RecordingStore`: one append-only `recordings.csv` per Execution."""
 
@@ -104,23 +125,36 @@ class CSVRecordingStore:
         return self._path
 
     def append(self, recording: Recording) -> None:
-        _append_csv_row(
-            self._path,
-            [
-                recording.instrument_id,
-                recording.name,
-                recording.value,
-                recording.kind or "",
-                recording.unit or "",
-                recording.execution_id,
-                recording.flow_id,
-                recording.node_id,
-                recording.node_execution_id,
-                recording.execution_seq,
-                json.dumps(recording.attributes) if recording.attributes else "",
-                recording.timestamp,
-            ],
-        )
+        """
+        Append and durably flush a single `Recording` immediately.
+
+        Retained for direct/ad hoc use and for `ProvenanceStore` parity,
+        but `NodeRuntime` (Milestone O7, Slice O7c) no longer calls this
+        per `ctx.record()` call on the Node hot path -- see
+        `append_batch(...)`.
+        """
+        self.append_batch([recording])
+
+    def append_batch(self, recordings: "list[Recording]") -> None:
+        """
+        Append every `Recording` in `recordings` and flush+fsync **once**,
+        after the last row -- the durability boundary is one NodeExecution's
+        whole batch, not each individual `ctx.record()` call (Milestone O7,
+        Slice O7c; docs/observability_goals.md Section 5).
+
+        A no-op for an empty batch: no file write, no fsync, when a
+        firing made no `ctx.record(...)` calls at all.
+        """
+        if not recordings:
+            return
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._path, "a", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            for recording in recordings:
+                writer.writerow(_recording_row(recording))
+            handle.flush()
+            os.fsync(handle.fileno())
 
 
 class CSVProvenanceStore:

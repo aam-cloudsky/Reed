@@ -200,6 +200,13 @@ class NodeRuntime:
         # so one running counter per NodeRuntime is the correct scope: it
         # need not be keyed by domain type.
         self._provenance = ArtifactProvenance()
+        # Milestone O7, Slice O7c: per-NodeExecution Recording batch,
+        # keyed by node_execution_id -- accumulated in memory during a
+        # firing and flushed as one batch (one fsync) at that firing's
+        # own durability boundary (`.flush_recordings(...)`, called from
+        # `Run._fire`'s `finally` block), not written through to the
+        # store on every individual `ctx.record()` call.
+        self._pending_recordings: dict[str, list[Recording]] = {}
 
     @property
     def run(self) -> Run:
@@ -431,12 +438,32 @@ class NodeRuntime:
         )
         self._recordings.append(recording)
         if self._run.recording_store is not None:
-            # Milestone O3, Slice O3b/O3c: durable persistence, opt-in via
-            # Run(storage_root=...). Synchronous, flush+fsync per call --
-            # see storage.py's module docstring for why this exceeds
-            # rather than merely meets the durability boundary.
-            self._run.recording_store.append(recording)
+            # Milestone O7, Slice O7c: buffer in memory for this firing;
+            # `.flush_recordings(...)` writes the whole batch, with one
+            # fsync, at this firing's own NodeExecution durability
+            # boundary -- not on every individual ctx.record() call (see
+            # storage.py's module docstring for the corrected contract).
+            self._pending_recordings.setdefault(
+                identity.node_execution_id, []
+            ).append(recording)
         return recording
+
+    def flush_recordings(self, node_execution_id: str) -> None:
+        """
+        Flush and durably persist every `Recording` buffered for
+        `node_execution_id` as one batch (Milestone O7, Slice O7c) --
+        the NodeExecution durability boundary (docs/observability_goals.md
+        Section 5; architectural invariants #20/#21). Called from
+        `Run._fire`'s `finally` block, so it runs whether the firing
+        succeeded or raised. A no-op if this firing made no
+        `ctx.record(...)` calls (nothing buffered) or if no
+        `recording_store` is configured (`storage_root` was not passed
+        to `Flow.run(...)`).
+        """
+        batch = self._pending_recordings.pop(node_execution_id, None)
+        if not batch or self._run.recording_store is None:
+            return
+        self._run.recording_store.append_batch(batch)
 
     def _resolve_instrument(
         self, instrument_or_name: "Instrument | str", *, unit: str | None

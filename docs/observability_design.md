@@ -1766,3 +1766,77 @@ The only remaining explicitly open, non-blocking item across the whole build is 
 narrowed registration-order-forces-new-`flow_id` question (Section 18.4/`observability_
 goals.md` Section 10) -- accepted as a known limitation, not resolved, per Slice O1a's own
 scope.
+
+## Round 17 (Milestone O7, Slice O7c): Recording durability boundary corrected -- per-call fsync removed from the hot path
+
+### 29.1 The defect: O3c's per-call fsync contradicted its own authoritative documents
+
+`observability_goals.md` Section 5 states the durability boundary explicitly: "Recordings
+accepted during a `NodeExecution` are guaranteed to be durably flushed when that
+`NodeExecution` exits... Flush happens in a `finally`-equivalent block wrapping the Node
+body." `observability_non_goals.md` Section 5 goes further and explicitly forbids the exact
+thing the original O3c implementation did: "Do not 'fix' this by adding an `fsync` per
+`ctx.record()` call... That destroys the hot-path latency the synchronous, non-blocking call
+is designed to protect." Architectural invariants #20/#21/#26 say the same thing from three
+angles: the boundary is NodeExecution exit, a crash before it may lose the in-flight batch,
+and remote exporters (a proxy for "expensive I/O") never belong on the Node hot path.
+
+The original O3c implementation (`CSVRecordingStore.append(...)` calling `flush()`/
+`os.fsync(...)` on every single call, invoked once per `ctx.record(...)` call from
+`NodeRuntime.accept_recording`) violated all of the above, and Round 8/Section 20.2 of this
+design record incorrectly rationalized it as "stronger than the documented boundary, not
+weaker" -- that framing is retracted. A guarantee stronger than the documented contract, at
+the cost of the specific hot-path property the contract's own non-goal names and forbids
+trading away, is not "extra safety" -- it is a different, unauthorized trade-off.
+
+### 29.2 The fix: per-NodeExecution batching, one fsync per firing
+
+`NodeRuntime` now buffers `Recording`s per firing (`self._pending_recordings: dict[node_execution_id,
+list[Recording]]`), populated by `accept_recording(...)` exactly as before except that the
+recording is appended to this firing's buffer instead of being written through to the store
+immediately. `Run._fire(...)`'s node-function call is wrapped in an inner `try`/`finally`
+whose `finally` calls `node_runtime.flush_recordings(identity.node_execution_id)` --
+covering both the success path and the exception path (there is no Node-level cancellation
+path in the current synchronous execution model to cover; see Section 29.4). `flush_recordings(...)`
+pops that firing's buffer and, if non-empty and a `recording_store` is configured, calls the
+new `CSVRecordingStore.append_batch(recordings)`, which writes every row and flushes+fsyncs
+**once**, after the last one. An empty batch (a firing that made no `ctx.record(...)` calls)
+performs no file write and no fsync at all.
+
+`CSVRecordingStore.append(recording)` (single-row) is retained as a thin wrapper around
+`append_batch([recording])`, for direct/ad hoc callers -- `NodeRuntime` itself no longer
+calls it on the hot path.
+
+`CSVProvenanceStore.append(...)` is deliberately left unchanged (one fsync per call): the
+audit's own scope is `ctx.record()`'s hot path specifically (invariant #13/#26,
+`observability_non_goals.md` Section 5's own wording), and Provenance events are not a
+repeated hot-path call -- at most one `"used"` and one `"generated"` event per firing,
+emitted directly by `Run`, never called an unbounded number of times inside a Node body the
+way `ctx.record()` can be.
+
+### 29.3 Why per-NodeExecution batching, not a Run-wide or global batch
+
+Batching at any coarser scope than one NodeExecution (e.g. flushing only at the end of a
+whole `Run`, or on a timer) would widen the window described by invariant #21 ("a hard
+process failure before that boundary may lose the in-flight batch") beyond what
+`observability_goals.md` Section 5 actually promises -- the contract's boundary is
+NodeExecution exit, not Run exit. Keying the buffer by `node_execution_id` (rather than, say,
+one buffer per NodeRuntime, flushed only when the whole Run ends) is what makes "boundary =
+NodeExecution exit" true in the implementation, not merely in the docstring.
+
+### 29.4 Cancellation: not yet a real path to cover
+
+`observability_goals.md` Section 5 mentions cancellation because a future async/parallel
+execution model (Section 14 of the human instruction that opened Milestone O7) will need
+Node firings that can be cancelled mid-flight. Reed's current `Run._fire(...)` calls the node
+function synchronously with no `asyncio` task wrapping it (only `on_output` dispatch uses
+`asyncio.gather`, unrelated to the Node body itself) -- there is no cancellation of a Node
+firing to actually test today. The `finally`-wrapped flush already covers "the Node body
+raised" (the one exceptional exit path that exists now); it will also cover a future
+`asyncio.CancelledError` unchanged, since `CancelledError` is a `BaseException` that
+propagates through a `finally` block exactly like any other exception. No further design
+work is required here now; this is noted rather than silently left unaddressed.
+
+### 29.5 Status
+
+Slice O7c complete. No new open design questions surfaced.

@@ -14,11 +14,10 @@ meaningful progress.
 
 ## Current slice
 
-**O7c — IN PROGRESS.**
+**O7d — IN PROGRESS.**
 
-Milestone O7 (Post-Implementation Audit and Terminal Presentation Control) opened
-2026-09-13 per explicit human instruction, after O1-O6 were already complete. O7a (audit
-baseline) and O7b (Artifact version identity fix) are done. See
+O7a-O7c are done (audit baseline, Artifact version identity fix, Recording durability
+hot-path fix). Next: O7d, the terminal presentation policy/API. See
 `docs/observability_harness.md`'s Milestone O7 table for the full slice list.
 
 ## Baseline verification
@@ -417,6 +416,68 @@ independently). Full suite: 210 passed (206 + 4 new); Ruff clean.
 generations"); `docs/observability_invariants.md` #22 ("generation and usage are distinct
 provenance events") and #24 ("each Artifact type has exactly one producer within a Flow");
 direct reproduction via `examples/observability_example.py`'s own output.
+
+### O7c — Recording durability boundary corrected (2026-09-13)
+
+**Decision:** Batch `Recording`s per NodeExecution in memory; flush+fsync once per firing
+(in a `finally` block covering success and exception), not once per `ctx.record()` call.
+
+**Why:** Confirmed contract violation. `observability_non_goals.md` Section 5 explicitly
+forbids "adding an fsync per ctx.record() call" to close the durability-boundary gap,
+precisely because it "destroys the hot-path latency the synchronous, non-blocking call is
+designed to protect" -- yet that is exactly what O3c's `CSVRecordingStore.append(...)` did
+(flush+fsync on every single call). The design record's own Round 8/Section 20.2 had
+rationalized this as "stronger, not weaker" -- a self-consistency check against the
+non-goals document shows that framing does not hold: exceeding a documented guarantee at
+the cost of the specific property its own non-goal protects is not "extra safety," it is an
+unauthorized trade-off.
+
+**Alternatives considered:**
+1. Leave per-call fsync in place (rejected -- directly contradicts non_goals §5's explicit
+   prohibition; not a defensible reading of "stronger, not weaker").
+2. Batch at the whole-`Run` level, flushing once at Run end (rejected -- widens the
+   durability boundary invariant #21 actually promises: "a hard process failure before
+   *that boundary* may lose the in-flight batch," where *that boundary* is NodeExecution
+   exit specifically, not Run exit).
+3. Batch per NodeExecution (`node_execution_id`), flush in a `finally` around the Node body.
+   **Chosen** -- the only option that makes "boundary = NodeExecution exit" true in the
+   implementation, not merely asserted in a docstring.
+
+**Advantages:** Restores the documented hot-path latency property; keeps the exact boundary
+semantics invariants #20/#21 already commit to; empty-batch firings (no `ctx.record()`
+calls) perform zero file I/O, not even an empty write.
+
+**Disadvantages/risks:** `CSVRecordingStore.append(...)` (single-row) is retained for direct
+callers, but `NodeRuntime` no longer uses it on the hot path -- a future direct caller of
+`.append(...)` still pays one fsync per call, which is correct for that (non-hot-path) use
+but worth remembering if `NodeRuntime` is ever refactored to call it directly again by
+mistake.
+
+**Cancellation:** Not yet a real path to exercise -- `Run._fire(...)`'s Node-body call is
+fully synchronous today (Milestone O7 is not adding parallelism, per its own scope); the
+`finally`-wrapped flush already covers the one exceptional exit path that exists (the Node
+raising), and will cover a future `asyncio.CancelledError` unchanged once async firing
+exists, since `CancelledError` propagates through `finally` like any exception. Noted as a
+verified-by-construction future-compatibility point, not deferred work.
+
+**Files changed:** `src/reed/observability/storage.py` (new `CSVRecordingStore.append_batch(...)`;
+`RecordingStore` Protocol gains `append_batch`; `.append(...)` becomes a thin wrapper),
+`src/reed/execution/node_runtime.py` (`self._pending_recordings` buffer; `accept_recording(...)`
+buffers instead of writing through; new `.flush_recordings(node_execution_id)`),
+`src/reed/execution/run.py` (`_fire(...)`'s inner `try`/`finally` calls
+`node_runtime.flush_recordings(...)`).
+
+**Tests:** `tests/test_observability_o7c_durability.py` (4 tests, written and confirmed
+against the pre-fix baseline first via `os.fsync` call-counting: multiple `ctx.record()`
+calls in one firing fsync once for the Recording batch (plus one for that firing's
+"generated" Provenance event, out of this slice's scope); recordings durable after a
+successful firing; recordings still flush when the Node raises; a firing with no
+`ctx.record()` calls performs zero Recording-related fsyncs (only the Provenance event's
+own fsync remains)). Full suite: 214 passed (210 + 4 new); Ruff clean.
+
+**Evidence:** `docs/observability_goals.md` Section 5 (durability boundary contract, quoted
+verbatim); `docs/observability_non_goals.md` Section 5 (explicit prohibition, quoted
+verbatim); architectural invariants #20, #21, #26.
 
 ## Deviations from the design record
 

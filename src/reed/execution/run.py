@@ -593,6 +593,13 @@ class Run:
         `"node_finished"` `TraceEvent` after it commits -- unconditional,
         unlike Provenance/Recordings, since Level 1 has no opt-in
         (design record Section 11.1; `self._trace` is always constructed).
+
+        Milestone O7 (Slice O7c): flushes this firing's buffered
+        `Recording`s (`node_runtime.flush_recordings(...)`) in a `finally`
+        block covering the node function call -- the NodeExecution
+        durability boundary applies whether the firing succeeds or
+        raises (docs/observability_goals.md Section 5), not only on the
+        success path.
         """
         node_runtime = self.node_runtime(flow_node.definition.function)
 
@@ -604,10 +611,13 @@ class Run:
         if firing_lock is not None:
             firing_lock.acquire()
         try:
-            result = flow_node.definition.function(**call_kwargs)
+            try:
+                result = flow_node.definition.function(**call_kwargs)
 
-            record = node_runtime.wrap(result)
-            node_runtime.commit(record)
+                record = node_runtime.wrap(result)
+                node_runtime.commit(record)
+            finally:
+                node_runtime.flush_recordings(identity.node_execution_id)
         finally:
             if firing_lock is not None:
                 firing_lock.release()
