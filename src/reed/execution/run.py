@@ -183,6 +183,7 @@ from pathlib import Path
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.execution.node_runtime import NodeRuntime
 from reed.observability.identity import NodeExecutionIdentity
+from reed.observability.provenance import ProvenanceEvent
 from reed.observability.storage import (
     CSVProvenanceStore,
     CSVRecordingStore,
@@ -192,6 +193,9 @@ from reed.observability.storage import (
     write_manifest,
 )
 from reed.synchronization.artifact_repository import ArtifactRepository
+
+if TYPE_CHECKING:
+    from reed.execution.artifact_record import ArtifactRecord
 from reed.transportation.bus import Bus
 
 if TYPE_CHECKING:
@@ -413,8 +417,9 @@ class Run:
                     # last firing yet).
                     continue
 
-                call_kwargs = self._build_call_kwargs(flow_node)
-                result = self._fire(flow_node, call_kwargs)
+                identity = self._begin_node_execution(flow_node)
+                call_kwargs = self._build_call_kwargs(flow_node, identity)
+                result = self._fire(flow_node, call_kwargs, identity)
                 pending.append(result)
 
                 if is_first_iteration:
@@ -476,7 +481,9 @@ class Run:
         # TriggerPolicy.ANY_INPUT_CHANGED
         return True
 
-    def _build_call_kwargs(self, flow_node: "FlowNode") -> dict[str, object]:
+    def _build_call_kwargs(
+        self, flow_node: "FlowNode", identity: NodeExecutionIdentity
+    ) -> dict[str, object]:
         """
         Build `flow_node`'s full call-argument set from its last-known
         values (Slice 2I) -- one value per consumed parameter, using
@@ -493,7 +500,6 @@ class Run:
 
         if flow_node.context is not None:
             node_runtime = self.node_runtime(flow_node.definition.function)
-            identity = self._begin_node_execution(flow_node)
             recorder = functools.partial(node_runtime.accept_recording, identity)
             call_kwargs[flow_node.context.parameter_name] = (
                 node_runtime.build_context(identity, recorder)
@@ -506,12 +512,12 @@ class Run:
         Mint the observability identity for one Node firing (Milestone
         O1, Slice O1d/O1e/O1f).
 
-        Called from `._build_call_kwargs(...)`, immediately before the
-        `NodeContext` snapshot that will be injected into this firing is
-        built -- not from `._fire(...)` -- because the context object is
-        already fully constructed by the time `._fire(...)` receives
-        `call_kwargs`; the identity must exist before that point to be
-        attached to it (docs/observability_design.md Section 18).
+        Called once per firing, from the `publish(...)` cascade loop,
+        before `._build_call_kwargs(...)` -- every firing gets an
+        identity, whether or not its Node declares a `NodeContext`
+        parameter, so Milestone O4's provenance events have a
+        `node_execution_id`/`execution_seq` to attach to regardless
+        (docs/observability_design.md Section 18/21).
 
         `node_execution_id` is a fresh uuid4 per call (one per firing,
         never reused). `execution_seq` is this `Run`'s own monotonic
@@ -529,7 +535,12 @@ class Run:
             execution_seq=self._execution_seq_counter,
         )
 
-    def _fire(self, flow_node: "FlowNode", call_kwargs: dict[str, object]) -> object:
+    def _fire(
+        self,
+        flow_node: "FlowNode",
+        call_kwargs: dict[str, object],
+        identity: NodeExecutionIdentity,
+    ) -> object:
         """
         Fire one `FlowNode` with `call_kwargs` as its full call
         arguments (Slice 2E; generalized to multi-input joins by Slice
@@ -545,8 +556,19 @@ class Run:
         clears `flow_node`'s freshness set so a later partial update
         round does not immediately re-trigger it. Returns the produced
         domain value (`record.value`).
+
+        Milestone O4 (Slices O4b/O4c): emits a `"used"` provenance event
+        for each of `flow_node`'s consumed artifact types that already
+        has a committed `ArtifactRecord` (nothing to report the first
+        time a type is consumed with no prior producer), before calling
+        the node function, and a `"generated"` event for the artifact
+        this firing itself commits, after `.commit(...)` succeeds. Both
+        are no-ops when this `Run` has no `provenance_store` configured
+        (`storage_root` was not passed to `Flow.run(...)`).
         """
         node_runtime = self.node_runtime(flow_node.definition.function)
+
+        self._emit_used_provenance_events(flow_node, identity)
 
         firing_lock = node_runtime.firing_lock
 
@@ -561,12 +583,65 @@ class Run:
             if firing_lock is not None:
                 firing_lock.release()
 
+        self._emit_generated_provenance_event(record, identity)
+
         if flow_node.trigger_policy is TriggerPolicy.ALL_INPUTS_CHANGED:
             self._fresh_since_last_firing[flow_node] = set()
 
         self._dispatch_on_output(flow_node, record.value)
 
         return record.value
+
+    @staticmethod
+    def _artifact_id(domain_type: type) -> str:
+        """
+        Milestone O4: an Artifact type's provenance identity --
+        deliberately the same `module.qualname` derivation
+        `FlowNode.node_id` uses (Section 18), for the same reason: stable
+        across process runs, no user-supplied identifier required.
+        """
+        return f"{domain_type.__module__}.{domain_type.__qualname__}"
+
+    def _emit_used_provenance_events(
+        self, flow_node: "FlowNode", identity: NodeExecutionIdentity
+    ) -> None:
+        if self._provenance_store is None:
+            return
+
+        for descriptor in flow_node.consumed_artifacts:
+            existing = self._repository.get_artifact_record(descriptor.domain_type)
+            if existing is None:
+                # Nothing produced this type yet -- no "used" event to
+                # emit (there is no artifact_version to report).
+                continue
+
+            self._provenance_store.append(
+                ProvenanceEvent(
+                    event_type="used",
+                    artifact_id=self._artifact_id(descriptor.domain_type),
+                    artifact_version=existing.version.number,
+                    node_execution_id=identity.node_execution_id,
+                    node_id=identity.node_id,
+                    execution_seq=identity.execution_seq,
+                )
+            )
+
+    def _emit_generated_provenance_event(
+        self, record: "ArtifactRecord", identity: NodeExecutionIdentity
+    ) -> None:
+        if self._provenance_store is None:
+            return
+
+        self._provenance_store.append(
+            ProvenanceEvent(
+                event_type="generated",
+                artifact_id=self._artifact_id(type(record.value)),
+                artifact_version=record.version.number,
+                node_execution_id=identity.node_execution_id,
+                node_id=identity.node_id,
+                execution_seq=identity.execution_seq,
+            )
+        )
 
     def publish_many(self, domain_values: "list[object]") -> None:
         """

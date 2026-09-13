@@ -113,9 +113,9 @@ commit path.
 
 | Slice | Delivers |
 |---|---|
-| O4a | `provenance.csv` schema: normalized `generated`/`used` event log (design record §8, round 4 — not a producer/consumer-pair row). |
-| O4b | Wire emission of `generated` events from the `ArtifactRepository` commit path. |
-| O4c | Wire emission of `used` events from artifact-consumption at Node-execution start. |
+| O4a | DONE — `provenance.csv` schema (`ProvenanceEvent`) already existed from O3a; O4a's remaining scope (identity minted for every firing, not only context-declaring Nodes) completed as a prerequisite refinement, design record §21.1. |
+| O4b | DONE — `generated` events wired via `Run._emit_generated_provenance_event(...)`, called after `node_runtime.commit(record)` succeeds. Design record §21.2. |
+| O4c | DONE — `used` events wired via `Run._emit_used_provenance_events(...)`, called before the node function runs, for each consumed artifact type with an existing committed `ArtifactRecord`. Design record §21.2. |
 
 ### Milestone O5 — Execution Trace and Terminal Renderer ("bring back what Issue #4 removed,
 on the new foundation")
@@ -145,16 +145,13 @@ scope).
 
 ## Current slice
 
-**O4a — NOT STARTED.** Milestones O1, O2, and O3 (Local Recording Store) are complete —
-see `docs/observability_implementation_state.md` for the full completed-slice record.
-`RecordingStore`/`ProvenanceStore`, `CSVRecordingStore`/`CSVProvenanceStore`,
-`manifest.json`, and `instruments.json` are implemented (`src/reed/observability/storage.py`)
-and covered by `tests/test_observability_o3_storage.py`. Durable storage is opt-in via
-`Flow.run(storage_root=...)` (design record Section 20.1); the durability boundary is
-satisfied by synchronous per-call flush+fsync, exceeding rather than merely meeting the
-contract (Section 20.2). The next slice is O4a: wiring `provenance.csv` event emission
-(`ProvenanceEvent`/`CSVProvenanceStore` already exist as of O3a) into the
-`ArtifactRepository` commit path (O4b) and consumption sites (O4c).
+**O5a — NOT STARTED.** Milestones O1 (Identity), O2 (Instrument/Recording), O3 (Local
+Recording Store), and O4 (Provenance) are complete — 177 tests passing, Ruff clean. The
+`generated`/`used` provenance event wiring (O4b/O4c) is in place per design record §21.2, and
+identity is now minted for every Node firing regardless of whether it declares a
+`NodeContext` parameter (design record §21.1). The next slice is O5a: an in-memory ring
+buffer per `Run` for the Level 1 Execution Trace (design record §11.1), not required to be
+durable.
 
 ## Open questions requiring decision (tracked, not yet resolved)
 

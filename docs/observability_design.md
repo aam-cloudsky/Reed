@@ -1480,3 +1480,62 @@ never recorded; there is no longer a window between "recorded" and "durable" to 
 at all, because that window is now zero). If hot-path latency becomes a real concern for a
 high-frequency-recording Node, buffering with an explicit flush-at-boundary is legitimate
 future work, deferred rather than designed here.
+
+## Round 9 (Milestone O4, Slices O4a-O4c): Provenance event wiring
+
+### 21.1 Identity is minted for every firing, not only Nodes that declare `NodeContext`
+
+Section 18/Slice O1f originally scoped `NodeExecutionIdentity` minting to "extend
+`NodeContext` with the narrow, read-only identity bundle" — which, in the `Run._fire(...)`
+implementation at the time, meant `_begin_node_execution(...)` was only ever called from
+inside `_build_call_kwargs(...)`'s `if flow_node.context is not None:` branch. A Node with no
+`NodeContext` parameter never had an identity minted for its firing at all.
+
+Milestone O4 needs a `node_execution_id`/`node_id`/`execution_seq` to attach to every
+Provenance event, for every firing, whether or not that Node ever asked for a `NodeContext`
+handle — Provenance is about what the *Run* did, not about what a Node chose to look at. So
+`Run.publish(...)`'s cascade loop now calls `self._begin_node_execution(flow_node)`
+unconditionally, once per firing, before `_build_call_kwargs(...)` and `_fire(...)`, and
+passes the resulting `identity` into both as a parameter rather than letting
+`_build_call_kwargs(...)` mint it conditionally as a side effect.
+
+This is a refinement of Section 18/21's original scope, not a reversal: `NodeContext.identity`
+is still only *visible* to Nodes that declare a `NodeContext` parameter (nothing changes
+there); what changes is that the identity now always exists, for every firing, regardless of
+whether anything reads it via `ctx.identity`. `execution_seq` was already a Run-wide
+monotonic counter (Section 13.1) incremented per firing; this change makes that increment
+unconditional too, so `execution_seq` now advances once per firing for every Node, not only
+for Nodes with a declared context.
+
+### 21.2 "generated"/"used" events wired at the same two points the design already named
+
+Section 13.2/`observability_goals.md`'s Provenance section already specified: a "generated"
+event when a firing's own output is committed, and a "used" event for each already-committed
+consumed artifact type a firing reads. `Run._fire(...)` now emits exactly these:
+
+- `_emit_used_provenance_events(flow_node, identity)`, called before the node function runs,
+  iterates `flow_node.consumed_artifacts` and looks up
+  `self._repository.get_artifact_record(descriptor.domain_type)` for each; if a committed
+  record already exists, a `"used"` `ProvenanceEvent` is appended carrying that record's
+  `version.number`. If no record exists yet (nothing has produced that type before), nothing
+  is emitted — there is no `artifact_version` to report, matching Section 13.2's "nothing to
+  report the first time a type is consumed with no prior producer."
+- `_emit_generated_provenance_event(record, identity)`, called after `node_runtime.commit(record)`
+  succeeds, appends a `"generated"` `ProvenanceEvent` for the artifact this firing itself
+  just committed.
+
+Both are no-ops when `self._provenance_store is None` (Milestone O3's opt-in `storage_root=`
+decision, Section 20.1, applies identically here — no `storage_root` means no Provenance
+events are constructed or written at all, not merely that they're discarded).
+
+`ProvenanceEvent.artifact_id` is derived via a new `Run._artifact_id(domain_type) -> str`
+static helper using the same `f"{domain_type.__module__}.{domain_type.__qualname__}"`
+derivation `FlowNode.node_id` uses (Section 18.1) — deliberately, for the same reason: stable
+across process runs, no user-supplied identifier required, no new identity mechanism
+introduced for artifact types.
+
+### 21.3 Status
+
+Milestone O4 (Slices O4a-O4c) complete. No new open design questions surfaced. The narrowed
+registration-order-forces-new-`flow_id` question (Section 18.4/`observability_goals.md`
+Section 10) remains the only explicitly open, non-blocking item.

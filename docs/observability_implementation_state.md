@@ -14,12 +14,12 @@ meaningful progress.
 
 ## Current slice
 
-**O4a — NOT STARTED.**
+**O5a — NOT STARTED.**
 
-Milestones O1, O2, and O3 are complete (continuous execution authorized). Next: wire
-`provenance.csv` event emission into the `ArtifactRepository` commit path (O4b) and
-consumption sites (O4c) -- the schema (`ProvenanceEvent`/`CSVProvenanceStore`) already
-exists as of O3a. See `docs/observability_harness.md` for the full milestone/slice table.
+Milestones O1, O2, O3, and O4 (Provenance) are complete (continuous execution authorized).
+Next: O5a, an in-memory ring buffer per `Run` for the Level 1 Execution Trace (design record
+§11.1), not required to be durable. See `docs/observability_harness.md` for the full
+milestone/slice table.
 
 ## Baseline verification
 
@@ -30,6 +30,8 @@ Run before Milestone O1 (2026-09-13): `uv run pytest -q -o addopts=''` → 145 p
 `uv run ruff check src tests` → all checks passed.
 Re-run after O2 (2026-09-13): 167 passed (156 + 11 new O2 tests); ruff clean.
 Re-run after O3 (2026-09-13): 172 passed (167 + 5 new O3 tests); ruff clean.
+Re-run after O4 (2026-09-13): 177 passed (172 + 6 new O4 tests); ruff clean (one
+forward-ref lint error fixed: `ArtifactRecord` type hint needed a `TYPE_CHECKING` import).
 
 ## Completed slices
 
@@ -211,6 +213,30 @@ round/section, and only then is it marked resolved here.
 - Follow-up filed as future work (if any): batching/deferred-flush as a latency optimization
   if a high-frequency-recording Node ever needs it (§20.2); a process-wide default
   `storage_root` (§20.1).
+
+### O4a-O4c — Provenance event wiring (2026-09-13)
+- observability_design.md section(s) implemented: written back as new Section 21 (Round 9):
+  (21.1) identity is now minted for every Node firing, not only Nodes that declare a
+  `NodeContext` parameter -- a refinement of Section 18/O1f's original scope, required
+  because Provenance events need identity for every firing; (21.2) `generated`/`used`
+  `ProvenanceEvent`s wired at the two points the design already named (after commit; before
+  the node function runs, for already-committed consumed types).
+- Files changed: `src/reed/execution/run.py` (`publish(...)`'s cascade loop now calls
+  `_begin_node_execution(...)` unconditionally and passes `identity` into
+  `_build_call_kwargs(...)`/`_fire(...)`; new `_artifact_id(...)`,
+  `_emit_used_provenance_events(...)`, `_emit_generated_provenance_event(...)`; new
+  `TYPE_CHECKING`-guarded `ArtifactRecord` import for the type hint).
+- Tests: `tests/test_observability_o4_provenance.py` (6 tests: no-op with no storage_root,
+  generated event on first firing, used event when a prior record exists, events carry
+  identity fields, context-free Nodes still fire and get identity). Full suite: 177 passed;
+  Ruff clean.
+- Deviations from the slice plan (if any): none of substance -- O4a's "schema" work had
+  already landed in O3a as `ProvenanceEvent`; this slice's actual O4a-scoped work was the
+  identity-minting restructuring described in design record §21.1, which the original
+  harness row for O4a did not anticipate but was required for O4b/O4c to be meaningful for
+  context-free Nodes.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none.
 
 ## Deviations from the design record
 
