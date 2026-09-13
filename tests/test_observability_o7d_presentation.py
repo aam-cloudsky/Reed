@@ -32,18 +32,23 @@ class Estimate:
         self.value = value
 
 
+from reed.observability.instrument import Instrument, InstrumentKind
+
+
+class Speed(Instrument[int]):
+    kind = InstrumentKind.GAUGE
+    unit = "m/s"
+
+
 def _make_flow():
     from reed import Flow, NodeContext
-    from reed.observability.instrument import Instrument
-
-    speed = Instrument(name="speed", kind="gauge", unit="m/s")
 
     def produce(ctx: NodeContext[None, Estimate], measurement: Measurement) -> Estimate:
-        ctx.record("speed", measurement.value)
+        ctx.record(Speed, measurement.value)
         return Estimate(measurement.value)
 
     flow = Flow()
-    flow.add(produce, instruments=[speed])
+    flow.add(produce)
     return flow, produce
 
 
@@ -102,7 +107,7 @@ def test_errors_only_reports_a_node_error():
 def test_instruments_mode_does_not_expose_propagation():
     flow, produce = _make_flow()
     output = _console_output(flow, "instruments")
-    assert "speed" in output
+    assert Speed.instrument_name() in output
     assert "->" not in output  # no propagation arrows
 
 
@@ -116,7 +121,7 @@ def test_verbose_mode_exposes_propagation_and_instruments_and_timings():
     flow, produce = _make_flow()
     output = _console_output(flow, "verbose")
     assert "produce" in output
-    assert "speed" in output
+    assert Speed.instrument_name() in output
     assert "ms" in output  # timings dimension
 
 

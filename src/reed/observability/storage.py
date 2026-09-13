@@ -211,49 +211,68 @@ def write_manifest(
     return manifest_path
 
 
-def write_instruments_manifest_if_absent(
+def merge_discovered_instruments(
     root: Path,
     *,
     flow_id: str,
-    nodes: "list[tuple[str, str, tuple[Instrument, ...]]]",
+    node_id: str,
+    node_name: str,
+    instruments: "list[tuple[str, str, str, str]]",
 ) -> Path:
     """
-    Write `<root>/flows/<flow_id>/instruments.json` (Slice O3e), unless it
-    already exists -- write-once-if-absent, never rewritten by an ordinary
-    run (Section 17.3's resolved concurrency concern).
+    Merge newly-*discovered* Instrument bindings into
+    `<root>/flows/<flow_id>/instruments.json` (Slice O3e; redesigned at
+    Milestone O7, Slice O7i).
 
-    `nodes` is `[(node_id, node_name, instruments), ...]`.
+    Prior to O7i this manifest was written once, up front, from a Flow's
+    prospectively *declared* `instruments=[...]` (write-once-if-absent --
+    there was nothing more to learn after the first Run, since every
+    Instrument was already known statically). O7i removed prospective
+    declaration entirely: Instruments are now discovered dynamically, the
+    first time a Node actually calls `ctx.record(SomeInstrument, value)`
+    (docs/observability_goals.md Section 2.3, superseded by
+    `reed.observability.instrument`'s module docstring) -- so this
+    manifest can only ever be as complete as what has actually been
+    observed across every Run of this `flow_id` so far, and must be
+    **merged**, not written once, as new Runs discover Instrument
+    bindings no earlier Run happened to exercise.
+
+    `instruments` is `[(name, kind, unit, description), ...]` -- the
+    Instrument bindings this one node_id newly discovered (already
+    filtered by the caller, `NodeRuntime`/`Run`, to bindings not
+    previously known to this NodeRuntime this Run; still merged
+    idempotently here in case a different Run already recorded the same
+    binding, since NodeRuntime's own dedup is scoped to one Run only).
     """
     flow_dir = root / "flows" / flow_id
     flow_dir.mkdir(parents=True, exist_ok=True)
     instruments_path = flow_dir / "instruments.json"
 
     if instruments_path.exists():
-        return instruments_path
+        content = json.loads(instruments_path.read_text())
+    else:
+        content = {"flow_id": flow_id, "schema_version": SCHEMA_VERSION, "nodes": {}}
 
-    instruments_path.write_text(
-        json.dumps(
-            {
-                "flow_id": flow_id,
-                "schema_version": SCHEMA_VERSION,
-                "nodes": {
-                    node_id: {
-                        "node_name": node_name,
-                        "instruments": [
-                            {
-                                "name": instrument.name,
-                                "kind": instrument.kind,
-                                "unit": instrument.unit,
-                                "description": instrument.description,
-                            }
-                            for instrument in instruments
-                        ],
-                    }
-                    for node_id, node_name, instruments in nodes
-                },
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
+    node_entry = content["nodes"].setdefault(
+        node_id, {"node_name": node_name, "instruments": []}
     )
+    existing_names = {inst["name"] for inst in node_entry["instruments"]}
+    changed = False
+    for name, kind, unit, description in instruments:
+        if name in existing_names:
+            continue
+        node_entry["instruments"].append(
+            {"name": name, "kind": kind, "unit": unit, "description": description}
+        )
+        existing_names.add(name)
+        changed = True
+
+    # Only rewrite the file if something is actually new -- a second Run
+    # of the same Flow that rediscovers only already-known bindings (its
+    # own NodeRuntime's per-Run dedup does not know what an earlier Run
+    # already wrote here) must not touch the file's mtime/content, so
+    # that a caller can tell "nothing new was learned" from the file
+    # system alone.
+    if changed or not instruments_path.exists():
+        instruments_path.write_text(json.dumps(content, indent=2), encoding="utf-8")
     return instruments_path

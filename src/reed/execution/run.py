@@ -196,7 +196,7 @@ from reed.observability.storage import (
     CSVRecordingStore,
     ProvenanceStore,
     RecordingStore,
-    write_instruments_manifest_if_absent,
+    merge_discovered_instruments,
     write_manifest,
 )
 from reed.synchronization.artifact_repository import ArtifactRepository
@@ -254,19 +254,18 @@ class Run:
         # writing files to disk).
         self._recording_store: RecordingStore | None = None
         self._provenance_store: ProvenanceStore | None = None
+        self._storage_root: Path | None = None
         if storage_root is not None:
             root = Path(storage_root)
+            self._storage_root = root
             write_manifest(
                 root, execution_id=self._execution_id, flow_id=flow.flow_id
             )
-            write_instruments_manifest_if_absent(
-                root,
-                flow_id=flow.flow_id,
-                nodes=[
-                    (fn.node_id, fn.node_name, fn.instruments)
-                    for fn in flow.flow_nodes
-                ],
-            )
+            # Milestone O7, Slice O7i: instruments.json is no longer
+            # written up front from prospectively declared Instruments --
+            # there is nothing to write yet at Run-construction time.
+            # `.record_discovered_instruments(...)` merges bindings in as
+            # NodeRuntimes discover them during execution.
             run_dir = root / "runs" / self._execution_id
             self._recording_store = CSVRecordingStore(run_dir / "recordings.csv")
             self._provenance_store = CSVProvenanceStore(run_dir / "provenance.csv")
@@ -337,6 +336,39 @@ class Run:
     def provenance_store(self) -> "ProvenanceStore | None":
         """This `Run`'s `ProvenanceStore` (Milestone O4), or `None` -- see `.recording_store`."""
         return self._provenance_store
+
+    def record_discovered_instruments(
+        self,
+        *,
+        node_id: str,
+        node_name: str,
+        instruments: "list[type]",
+    ) -> None:
+        """
+        Merge newly-discovered Instrument bindings for `node_id` into
+        this Flow's `instruments.json` manifest (Milestone O7, Slice
+        O7i). Called from `NodeRuntime.flush_recordings(...)` -- see
+        that method's docstring for why this stays proportional to
+        genuinely new bindings, not once per `ctx.record(...)` call.
+        A no-op if this Run has no `storage_root` configured.
+        """
+        if self._storage_root is None:
+            return
+        merge_discovered_instruments(
+            self._storage_root,
+            flow_id=self._flow.flow_id,
+            node_id=node_id,
+            node_name=node_name,
+            instruments=[
+                (
+                    instrument.instrument_name(),
+                    instrument.kind.value,
+                    instrument.unit,
+                    instrument.description,
+                )
+                for instrument in instruments
+            ],
+        )
 
     @property
     def presenter(self):

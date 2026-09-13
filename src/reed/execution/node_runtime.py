@@ -145,7 +145,7 @@ from typing import TYPE_CHECKING
 from reed.composition.node.node_context import NodeContext
 from reed.execution.artifact_record import ArtifactProvenance, ArtifactRecord
 from reed.observability.identity import NodeExecutionIdentity
-from reed.observability.instrument import Instrument
+from reed.observability.instrument import Instrument, InstrumentKind
 from reed.observability.recording import Recording, ScalarValue
 
 if TYPE_CHECKING:
@@ -183,12 +183,16 @@ class NodeRuntime:
         # lazy-mode registry that makes "first observed kind/unit wins"
         # enforceable (docs/observability_goals.md Section 2.3).
         self._recordings: list[Recording] = []
-        # name -> authoritative unit for a lazily-declared (undeclared
-        # Instrument) name -- Slice O2d's "first observed unit wins" rule.
-        self._lazy_units: dict[str, str | None] = {}
-        self._declared_instruments: dict[str, Instrument] = {
-            instrument.name: instrument for instrument in flow_node.instruments
-        }
+        # Milestone O7, Slice O7i: Instruments are discovered dynamically
+        # -- there is nothing to pre-populate here anymore (no more
+        # `flow_node.instruments`). `_observed_instruments` remembers
+        # every distinct Instrument subclass this NodeRuntime has already
+        # seen this Run, keyed by `instrument_name()`, purely so a
+        # second `ctx.record(SomeInstrument, ...)` call for the same
+        # Instrument does not repeat the (cheap, but non-zero) manifest
+        # bookkeeping done on first discovery -- see `.flush_recordings`.
+        self._observed_instruments: dict[str, "type[Instrument]"] = {}
+        self._newly_observed_this_firing: list["type[Instrument]"] = []
 
         # Milestone O7, Slice O7b: a running `ArtifactProvenance` owned by
         # this NodeRuntime, advanced (never replaced) on every `.wrap(...)`
@@ -380,32 +384,26 @@ class NodeRuntime:
     def accept_recording(
         self,
         identity: NodeExecutionIdentity,
-        instrument_or_name: "Instrument | str",
+        instrument: "type[Instrument]",
         value: ScalarValue,
         *,
-        unit: str | None = None,
         attributes: dict[str, ScalarValue] | None = None,
     ) -> Recording:
         """
-        Validate and accept one `ctx.record(...)` call (Milestone O2,
-        Slice O2c/O2d), bound (via `functools.partial`) into the
-        `NodeContext.record`-facing recorder built by
-        `Run._build_call_kwargs` for one firing's `identity`.
+        Validate and accept one `ctx.record(instrument, value)` call
+        (Milestone O2, Slice O2c/O2d; redesigned at Milestone O7, Slice
+        O7i for typed Instrument Definitions), bound (via
+        `functools.partial`) into the `NodeContext.record`-facing
+        recorder built by `Run._build_call_kwargs` for one firing's
+        `identity`.
 
-        Two modes (docs/observability_goals.md Section 2.3):
-
-        - Declared mode (`self._flow_node.instruments` non-empty): an
-          `Instrument` instance, or a plain string matching a declared
-          Instrument's `name`, resolves to that Instrument. A name not
-          among the declared Instruments is an error at first call -- no
-          silent ad hoc registration once a Node has opted into explicit
-          declarations.
-        - Lazy mode (`self._flow_node.instruments` empty): a plain string
-          `name` is accepted with no prior declaration. The first
-          observed `unit` for a given `name` is authoritative; a later
-          call for the same `name` with a different `unit` raises
-          `ValueError`. `kind` is `None` in lazy mode (there was never an
-          `Instrument` to declare one).
+        `instrument` must be an `Instrument` subclass (never an
+        instance) -- see `reed.observability.instrument`'s module
+        docstring. There is no more declared-vs-lazy distinction: every
+        Instrument is discovered dynamically, the first time a Node
+        actually calls `ctx.record(instrument, value)`, never
+        prospectively declared through `Flow.add(...)` (which no longer
+        accepts an `instruments=` parameter at all).
 
         `value` must be scalar (`str | int | float | bool`) --
         docs/observability_non_goals.md Section 3.
@@ -419,9 +417,8 @@ class NodeRuntime:
                 "ctx.record(...) calls with dot-segmented names instead)."
             )
 
-        name, kind, resolved_unit = self._resolve_instrument(
-            instrument_or_name, unit=unit
-        )
+        name, kind, resolved_unit, description = self._resolve_instrument(instrument)
+        self._newly_observed_this_firing_note(instrument, name)
 
         recording = Recording(
             instrument_id=f"{identity.flow_id}.{identity.node_id}.{name}",
@@ -463,89 +460,79 @@ class NodeRuntime:
         `ctx.record(...)` calls (nothing buffered) or if no
         `recording_store` is configured (`storage_root` was not passed
         to `Flow.run(...)`).
+
+        Milestone O7, Slice O7i: also flushes any newly-*discovered*
+        Instrument bindings observed during this firing into the Flow's
+        `instruments.json` manifest (`Run.record_discovered_instruments`),
+        at the same durability boundary -- proportional only to how many
+        genuinely new (node_id, Instrument) bindings this firing
+        introduced (usually zero after the first firing of a given
+        Node/Instrument pair), never once per `ctx.record(...)` call, so
+        this stays off the hot path the same way Recording persistence
+        does (architectural invariant #26).
         """
+        newly_observed = self._newly_observed_this_firing
+        self._newly_observed_this_firing = []
+        if newly_observed and self._run.recording_store is not None:
+            self._run.record_discovered_instruments(
+                node_id=self._flow_node.node_id,
+                node_name=self._flow_node.node_name,
+                instruments=newly_observed,
+            )
+
         batch = self._pending_recordings.pop(node_execution_id, None)
         if not batch or self._run.recording_store is None:
             return
         self._run.recording_store.append_batch(batch)
 
+    def _newly_observed_this_firing_note(
+        self, instrument: "type[Instrument]", name: str
+    ) -> None:
+        """Record that `instrument` was newly discovered this Run, if it was."""
+        if name not in self._observed_instruments:
+            self._observed_instruments[name] = instrument
+            self._newly_observed_this_firing.append(instrument)
+
     def _resolve_instrument(
-        self, instrument_or_name: "Instrument | str", *, unit: str | None
-    ) -> tuple[str, str | None, str | None]:
+        self, instrument: "type[Instrument]"
+    ) -> tuple[str, str, str, str]:
         """
-        Returns `(name, kind, unit)` -- `kind` is `None` in lazy mode.
+        Returns `(name, kind, unit, description)` for `instrument`
+        (Milestone O7, Slice O7i -- typed Instrument Definitions,
+        discovered dynamically; see `reed.observability.instrument`'s
+        module docstring).
 
-        Milestone O7 (Instrument API self-containment audit): the
-        preferred declared-mode style is a plain string name
-        (`ctx.record("temperature", value)`) -- the schema lives entirely
-        in `flow.add(node, instruments=[...])`, so the Node body needs no
-        reference to any `Instrument` object at all, and the same Node
-        function can be composed into a different Flow with a differently
-        declared schema for the same names. Passing an `Instrument`
-        *object* is still accepted for backward compatibility, but it is
-        always validated against this FlowNode's own declared schema
-        (never trusted directly) -- an Instrument object that was never
-        declared via `instruments=[...]`, or whose `kind`/`unit` contradicts
-        what was actually declared for that name, is rejected. Silently
-        trusting an ad hoc Instrument object would let it bypass the
-        FlowNode's own declared schema entirely, which is exactly the kind
-        of undeclared-name error declared mode already exists to catch.
+        `instrument` must be an `Instrument` **subclass** with `kind`/
+        `unit` class attributes -- both are validated eagerly by
+        `Instrument.__init_subclass__` for the common case (a concrete
+        leaf class with a typo'd or missing attribute), but that check is
+        skipped for an intermediate subclass that itself sets neither;
+        this is the fallback that catches such a class if it is ever
+        actually passed to `ctx.record(...)`.
         """
-        if isinstance(instrument_or_name, Instrument):
-            instrument = instrument_or_name
-            declared = self._declared_instruments.get(instrument.name)
-            if declared is None:
-                raise ValueError(
-                    f"Instrument {instrument.name!r} passed to ctx.record(...) "
-                    "was not declared via flow.add(node, instruments=[...]) for "
-                    "this Node -- pass the plain name string instead "
-                    f"(ctx.record({instrument.name!r}, ...)) once it is "
-                    "declared, or add it to instruments=[...]."
-                )
-            if declared.kind != instrument.kind or declared.unit != instrument.unit:
-                raise ValueError(
-                    f"Instrument object passed to ctx.record(...) for "
-                    f"{instrument.name!r} (kind={instrument.kind!r}, "
-                    f"unit={instrument.unit!r}) does not match this Node's "
-                    f"declared Instrument (kind={declared.kind!r}, "
-                    f"unit={declared.unit!r}) -- pass the plain name string "
-                    f"instead (ctx.record({instrument.name!r}, ...)) to always "
-                    "resolve against the declared schema."
-                )
-            return declared.name, declared.kind, declared.unit
+        if not (isinstance(instrument, type) and issubclass(instrument, Instrument)):
+            raise TypeError(
+                "ctx.record(...) expects an Instrument *subclass* (the "
+                "Instrument Definition itself, e.g. ctx.record(Temperature, "
+                "value) -- not an instance, and not a plain string). Got "
+                f"{instrument!r}."
+            )
+        if not hasattr(instrument, "kind") or not isinstance(
+            instrument.kind, InstrumentKind
+        ):
+            raise TypeError(
+                f"{instrument.__name__} must declare kind: InstrumentKind as "
+                "a class attribute (docs/observability_non_goals.md Section "
+                "2 -- no Histogram, no arbitrary kind values)."
+            )
+        if not hasattr(instrument, "unit") or not isinstance(instrument.unit, str):
+            raise TypeError(
+                f"{instrument.__name__} must declare unit: str as a class "
+                "attribute."
+            )
 
-        name = instrument_or_name
-
-        if self._declared_instruments:
-            if name not in self._declared_instruments:
-                raise ValueError(
-                    f"{name!r} is not among this Node's declared instruments "
-                    f"({sorted(self._declared_instruments)!r}) -- calling "
-                    "ctx.record(...) with an undeclared name is an error once "
-                    "a Node has opted into explicit instruments=[...] "
-                    "(docs/observability_goals.md Section 2.3)."
-                )
-            declared = self._declared_instruments[name]
-            return declared.name, declared.kind, declared.unit
-
-        # Lazy mode: first observed unit for `name` is authoritative
-        # (docs/observability_goals.md Section 2.3); `kind` is always
-        # `None` here -- there was never an Instrument declared to carry
-        # one.
-        if name in self._lazy_units:
-            existing_unit = self._lazy_units[name]
-            if unit is not None and existing_unit != unit:
-                raise ValueError(
-                    f"ctx.record({name!r}, ...) was first observed with "
-                    f"unit={existing_unit!r}; a later call supplied a "
-                    f"different unit={unit!r}. The first observed unit for a "
-                    "lazily-declared name is authoritative "
-                    "(docs/observability_goals.md Section 2.3)."
-                )
-            return name, None, existing_unit
-
-        self._lazy_units[name] = unit
-        return name, None, unit
+        name = instrument.instrument_name()
+        return name, instrument.kind.value, instrument.unit, instrument.description
 
     def build_context(
         self,

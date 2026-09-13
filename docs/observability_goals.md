@@ -27,92 +27,87 @@ persistence; Flow is the logical unit of aggregation and analysis.**
 
 ## 2. Desired public API
 
+**Superseded by Milestone O7, Slice O7i (typed Instrument Definitions, discovered
+dynamically).** The sections below describe the *current* API; see design record §34 for
+the full rationale and the prior (O1-O7h) declared/lazy-mode API it replaced.
+
 ### 2.1 Declaring an Instrument
 
-```python
-speed = Instrument(
-    name="speed",
-    kind="gauge",           # "gauge" | "counter" | "updown_counter"
-    unit="m/s",
-    description="Aircraft ground speed",
-)
-```
-
-`kind`, `unit`, and `description` are declared once, not repeated on every call.
-
-### 2.2 Attaching Instruments to a Node
+An Instrument Definition is a typed `Instrument[T]` subclass -- never instantiated:
 
 ```python
-flow.add(
-    update_aircraft,
-    instruments=[speed, altitude],
-)
+class Speed(Instrument[float]):
+    kind = InstrumentKind.GAUGE      # GAUGE | COUNTER | UPDOWN_COUNTER
+    unit = "m/s"
+    description = "Aircraft ground speed"
 ```
 
-This is the **primary, recommended path**. It gives Reed the full observability surface of
-a Flow before any execution runs — every Instrument a Node will ever emit, with its
-`kind`/`unit`/`description` — which is what makes a `reed describe <flow>`-style
-introspection tool possible.
+`kind`, `unit`, and `description` are declared once, as class attributes, not repeated on
+every call. `kind`/`unit` are validated eagerly, at class-definition time
+(`Instrument.__init_subclass__`), so a malformed Instrument fails at import time.
 
-A Node may omit `instruments=` entirely and use `ctx.record(name, value, ...)` with a plain
-string name instead (see 2.4) — pure lazy/prototyping mode, no explicit `Instrument` object
-required.
+### 2.2 There is no separate "attach to a Node" step
+
+`Flow.add(...)` has **no** `instruments=` parameter. An Instrument's relationship to a Node
+is discovered dynamically -- the first time that Node's body actually calls
+`ctx.record(SomeInstrument, value)` during a real `Run` -- never declared prospectively.
+Reed does not recover this information via `AST` inspection of a Node's source (no
+reflection-based static discovery); `reed describe <flow>` therefore reports only which
+Nodes exist without execution, and reports actual Instrument bindings only from a past Run's
+manifest (`reed describe --manifest`, `describe_instruments_manifest`).
+
+This removes the earlier (O1-O7h) tension entirely: there was never a good reason for a
+Node's declared Instrument schema to be redundant with the type the Node's own body already
+references -- an Artifact's type is its own definition, with no second `flow.add(...,
+produces=[...])` step, and an Instrument now follows the identical principle.
 
 ### 2.3 Recording an observation
 
-**Preferred style (Milestone O7 self-containment audit):** reference a declared Instrument
-by its plain string name, not the `Instrument` object itself:
+The Instrument Definition itself -- the class, never an instance -- is the value passed to
+`ctx.record(...)`:
 
 ```python
 def update_aircraft(ctx, aircraft):
     ...
-    ctx.record("speed", aircraft.speed)
+    ctx.record(Speed, aircraft.speed)
 ```
 
-`ctx.record("speed", ...)` resolves purely against `update_aircraft`'s own FlowNode-declared
-schema (`flow.add(update_aircraft, instruments=[speed, altitude])`) -- the Node body needs no
-import of, or reference to, the `speed` object at all. This keeps the Node function
-self-contained: it depends only on a name it and the composition call agree on, the same way
-a logger call depends on a string key, not on a shared global object. It also means the same
-Node function can be composed into a different Flow with a differently-configured Instrument
-for the same name (different `unit`, say) with zero change to the Node body.
-
-Passing the `Instrument` object itself still works, for callers who prefer it (e.g. to reuse
-one Python object as the single source of truth for a name used in several places):
-
-```python
-ctx.record(speed, aircraft.speed)
-```
-
-but it is always validated against the FlowNode's own declared schema, never trusted
-directly -- an `Instrument` object that was never declared via `instruments=[...]`, or whose
-`kind`/`unit` contradicts what was actually declared for that name, raises `ValueError`
-rather than silently overriding the declaration.
-
-or, in lazy mode:
-
-```python
-ctx.record(name="reason", value="conflict avoidance")
-```
+There is no plain-string name path and no `Instrument` *instance* path anymore (both existed
+in O1-O7h and are removed by O7i, not kept alongside the new one) -- `ctx.record(...)`
+requires an `Instrument` subclass. A Node references its Instrument exactly once, in its own
+body; there is no second place that reference could drift out of sync with.
 
 Rules:
 - `ctx.record(...)` returns immediately (synchronous call, asynchronous persistence — see
   Section 5).
 - `value` is **scalar only**: `str | int | float | bool`. No mappings, no dataclasses, no
   nested structures.
-- A compound fact (e.g. a 3D velocity) is multiple explicit calls with dot-segmented names
-  (`velocity.x`, `velocity.y`, `velocity.z`) — never a single call with a nested value, and
-  never automatic array-splitting by Reed.
-- If a Node declared an explicit `instruments=` list, calling `ctx.record(...)` with a name
-  not in that list is an error at first call — no silent ad hoc registration once a Node has
-  opted into explicit declarations.
-- In lazy mode, the first observed `kind`/`unit` for a given `name` is authoritative; a
-  later call for the same `name` with a different `unit` raises.
+- A compound fact (e.g. a 3D velocity) is multiple explicit calls against multiple
+  Instrument subclasses (`VelocityX`, `VelocityY`, `VelocityZ`) — never a single call with a
+  nested value, and never automatic array-splitting by Reed.
+- Every Recording has a concrete `kind`, taken from its Instrument Definition -- there is no
+  more `kind=None` "lazy fact with no Instrument behind it" path (Slice O2e's original
+  resolution is superseded; a non-metric fact is simply not modeled as an Instrument at all
+  in the O7i API).
+- `Instrument[T]`'s generic parameter lets a static type checker (Pylance/Pyright) verify
+  `ctx.record(SomeInstrument, value)`'s `value` matches `SomeInstrument`'s declared `T`, as
+  far as Python's type system reasonably permits, through `NodeContext.record`'s own generic
+  signature -- see `reed.observability.instrument`'s "Typing" section for why this is not
+  additionally re-checked at runtime.
 - `ctx.record()` never accepts or exposes OTel/Grafana vocabulary directly
   (`ctx.metrics.gauge(...)`, `ctx.otel.span(...)`, `ctx.grafana.add_chart(...)` do not
   exist). The only vocabulary on `ctx` is Reed's own.
 - `ctx.record()` contains only information explicitly recorded by application code —
   exceptions and cancellations are never injected into it (Section 6).
+
+### 2.3a Instrument Definition vs. Instrument Binding
+
+The same `Instrument` subclass may be reused by more than one Node (in the same Flow or
+across Flows) without conflict: a `Recording`'s identity is never the bare Instrument
+Definition alone, but the **Instrument Binding** -- `(flow_id, node_id, Instrument)` --
+exactly mirroring how the same Artifact domain type may have only one producer *within one
+Flow* (architectural invariant #24) while remaining an ordinary, freely reusable Python type
+across Flows.
 
 ### 2.4 Node identity is separate from its display name
 

@@ -91,7 +91,6 @@ from reed.composition.flow.flow_node import FlowNode
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.composition.node.domain_node_description import DomainNodeDescriptionBuilder
 from reed.execution.run import Run
-from reed.observability.instrument import Instrument
 from reed.observability.presentation import PresentationPolicy
 
 
@@ -199,7 +198,6 @@ class Flow:
         *,
         trigger_policy: TriggerPolicy = TriggerPolicy.ALL_INPUTS_CHANGED,
         on_output: Callable[[OutputT], object] | None = None,
-        instruments: "list[Instrument] | tuple[Instrument, ...] | None" = None,
     ) -> FlowNode:
         """
         Register `function` as a Flow-local node participation.
@@ -258,7 +256,6 @@ class Flow:
             definition=definition,
             trigger_policy=trigger_policy,
             on_output=on_output,
-            instruments=tuple(instruments) if instruments is not None else (),
         )
 
         self._dependency_graph.register(flow_node)

@@ -20,26 +20,28 @@ class Estimate:
 
 def _make_flow_with_recording():
     from reed import Flow, NodeContext
-    from reed.observability.instrument import Instrument
+    from reed.observability.instrument import Instrument, InstrumentKind
 
-    speed = Instrument(name="speed", kind="gauge", unit="m/s")
+    class Speed(Instrument[int]):
+        kind = InstrumentKind.GAUGE
+        unit = "m/s"
 
     def produce(
         ctx: NodeContext[None, Estimate],
         measurement: Measurement,
     ) -> Estimate:
-        ctx.record(speed, measurement.value)
+        ctx.record(Speed, measurement.value)
         return Estimate(measurement.value * 2)
 
     flow = Flow()
-    flow.add(produce, instruments=[speed])
-    return flow, produce
+    flow.add(produce)
+    return flow, produce, Speed
 
 
 def test_render_replay_table_interleaves_recordings_and_provenance(tmp_path):
     from reed.observability.replay import render_replay_table
 
-    flow, produce = _make_flow_with_recording()
+    flow, produce, Speed = _make_flow_with_recording()
     root = tmp_path / ".reed"
     run = flow.run(storage_root=str(root))
     run.publish(Measurement(1))
@@ -53,7 +55,7 @@ def test_render_replay_table_interleaves_recordings_and_provenance(tmp_path):
 def test_load_recordings_and_provenance_read_back_rows(tmp_path):
     from reed.observability.replay import load_provenance, load_recordings
 
-    flow, produce = _make_flow_with_recording()
+    flow, produce, Speed = _make_flow_with_recording()
     root = tmp_path / ".reed"
     run = flow.run(storage_root=str(root))
     run.publish(Measurement(1))
@@ -63,7 +65,7 @@ def test_load_recordings_and_provenance_read_back_rows(tmp_path):
     provenance = load_provenance(run_dir)
 
     assert len(recordings) == 1
-    assert recordings[0]["name"] == "speed"
+    assert recordings[0]["name"] == Speed.instrument_name()
     assert len(provenance) == 1
     assert provenance[0]["event_type"] == "generated"
 
@@ -80,7 +82,7 @@ def test_print_replay_renders_detail_text(tmp_path):
 
     from reed.observability.replay import print_replay
 
-    flow, produce = _make_flow_with_recording()
+    flow, produce, Speed = _make_flow_with_recording()
     root = tmp_path / ".reed"
     run = flow.run(storage_root=str(root))
     run.publish(Measurement(1))
@@ -90,5 +92,5 @@ def test_print_replay_renders_detail_text(tmp_path):
     print_replay(run_dir, console=console)
     output = console.export_text()
 
-    assert "speed=1" in output
+    assert f"{Speed.instrument_name()}=1" in output
     assert "generated" in output

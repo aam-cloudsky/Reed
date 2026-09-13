@@ -2164,3 +2164,112 @@ replace the real error.
 Slice O7g's invariant audit is otherwise clean (see the full invariant-by-invariant audit
 in the final report); this was the one genuine gap found and it is now fixed. 2 new tests
 (`tests/test_observability_o7g_presenter_isolation.py`), full suite 235 passed, Ruff clean.
+
+## Round 22 (Milestone O7, Slice O7i): typed Instrument Definitions, discovered dynamically
+
+### 34.1 The decision, prompted mid-turn by the user
+
+The user's own audit of the acceptance example, requested after O7h landed, went further
+than O7h's fix: even a self-contained `ctx.record("temperature", value)` still required a
+Node's Instrument schema to be declared a *second* time, in a completely different place
+(`flow.add(node, instruments=[temperature])`), duplicating a fact the Node's own body already
+determines. This is the same shape of problem Reed already solved for Artifacts: a Node's
+produced/consumed Artifact types are read directly off the function's own signature, with no
+second `flow.add(..., produces=[...])` declaration -- the Python type itself is the single
+source of truth. Instruments had never followed that precedent.
+
+**Decision:** `Instrument[T]` becomes a typed, `Generic[T]` base class; a concrete Instrument
+is a subclass (`class Temperature(Instrument[float]): kind = ...; unit = ...`), never
+instantiated. `ctx.record(Temperature, value)` passes the class itself. `Flow.add(...)` no
+longer accepts `instruments=` at all -- Instruments are discovered dynamically, the first
+time a Node's body actually calls `ctx.record(SomeInstrument, value)` in a real `Run`, never
+declared prospectively by the Flow.
+
+### 34.2 Why not recover static Instrument knowledge via AST inspection
+
+The user's own instruction was explicit: "Do not use AST inspection to recover static
+discovery." Evaluated anyway, for completeness: parsing a Node function's source to find
+`ctx.record(X, ...)` call sites is fragile (conditional recording, recording inside a helper
+function the Node calls, dynamically selected Instrument classes) and reintroduces exactly
+the kind of reflection-based magic `observability_non_goals.md`'s general posture already
+rejects elsewhere (no inferring OTel export mappings from Python types, Section 4). Runtime
+discovery is simple, always correct (it reflects what actually happened, not what static
+analysis guesses might happen), and consistent with Reed's existing precedent that
+`describe`'s static report (`describe_flow`) and its retrospective report
+(`describe_instruments_manifest`, sourced from a past Run's manifest) are two different,
+honestly-scoped views -- Slice O7f already established this same distinction for the
+"declared vs. lazy" case this redesign now generalizes away.
+
+### 34.3 Instrument Definition vs. Instrument Binding
+
+`Instrument.instrument_name()` (`f"{cls.__module__}.{cls.__qualname__}"`) gives every
+Instrument subclass a stable, unique name derived from the class itself -- no separate
+`name=` string to keep in sync. Reusing the same `Instrument` subclass across multiple Nodes
+does not conflate their Recordings, because `Recording.instrument_id` was already
+`f"{flow_id}.{node_id}.{name}"` before this redesign (Milestone O2) -- the "Instrument
+Binding" the user asked to distinguish internally already existed structurally as this
+composite id; O7i's contribution is naming it explicitly and confirming no additional state
+is needed to keep bindings distinct, mirroring architectural invariant #24's "one producer
+per Artifact type per Flow" scoping for Artifacts.
+
+### 34.4 Typing
+
+`NodeContext.record(self, instrument: type[Instrument[T]], value: T, ...)` lets Pylance/
+Pyright flag `ctx.record(Temperature, "not a float")` as a type error through ordinary
+generic-parameter inference -- evaluated against re-checking the `T`/`value` relationship at
+runtime too (via `__orig_bases__` inspection): rejected, because a static checker already
+catches the mismatch before the program runs, and Reed's own scalar-type check
+(`docs/observability_non_goals.md` Section 3) already guards the one thing that must hold at
+runtime regardless of `T` (scalar-only, never a compound value).
+
+### 34.5 What changed, mechanically
+
+- `instrument.py`: full rewrite -- `InstrumentKind` (`Enum`, was a `Literal`),
+  `Instrument(Generic[T])` with `__init_subclass__` validation and `.instrument_name()`.
+- `node_context.py`: `NodeContext.record(...)` signature narrowed to `instrument: type[
+  Instrument[T]]`; `unit=` override parameter removed (no longer meaningful -- `unit` is a
+  class attribute now, not re-suppliable per call).
+- `node_runtime.py`: `_declared_instruments`/`_lazy_units` removed; `_resolve_instrument(...)`
+  rewritten to validate an `Instrument` subclass directly (`issubclass` + `kind`/`unit`
+  attribute checks) instead of resolving against a per-FlowNode declared dict;
+  `accept_recording(...)`/`flush_recordings(...)` gained instrument-discovery bookkeeping
+  (`_observed_instruments`, `_newly_observed_this_firing`) that merges newly-discovered
+  bindings into `instruments.json` at the same NodeExecution durability boundary Recordings
+  already flush at (proportional only to genuinely new bindings, never once per
+  `ctx.record(...)` call -- keeps this off the hot path, architectural invariant #26).
+- `flow_node.py`/`flow_composition.py`: `instruments`/`instruments=` removed entirely.
+- `storage.py`: `write_instruments_manifest_if_absent` (write-once) replaced by
+  `merge_discovered_instruments` (read-modify-write, only rewriting the file when a
+  genuinely new binding is added -- verified by a test that a second Run rediscovering
+  already-known bindings does not touch the file's mtime/content).
+- `run.py`: `Run.record_discovered_instruments(...)` added; the instruments-manifest write
+  moved from `__init__` (writing every declared Instrument up front) to being called from
+  `NodeRuntime.flush_recordings(...)` as Instruments are actually discovered.
+- `describe.py`: `describe_flow` can no longer report per-Node Instrument declarations at
+  all (there are none) -- every row now reads `DISCOVERED_AT_RUNTIME_LABEL`
+  (`LAZY_CAPABLE_LABEL` kept as a backward-compatible alias). `describe_instruments_manifest`
+  is now the primary way to see real Instrument bindings, and correctly shows no row at all
+  for a Node that has never recorded anything in any past Run (there is no static declaration
+  left to fall back on describing).
+
+### 34.6 Regression and migration
+
+Every existing observability test that referenced the old `Instrument(name=..., kind=...,
+unit=...)` dataclass, `flow.add(node, instruments=[...])`, or a plain-string
+`ctx.record(name, value)` call was rewritten to the new API (O2, O3, O5c, O6a, O6b, O6c, O7c,
+O7d, O7f, O7g's instrument-touching test, and a full rewrite of O7h's test file, which now
+documents its own supersession rather than testing removed behavior). `examples/
+observability_example.py` was rewritten end-to-end and now also demonstrates all six
+`observability=` presets over the same Flow, verifying identical domain results across all
+six and that `observability="silent"` with `storage_root=...` still persists Recordings.
+Full suite: 228 passed (down from 235 -- net effect of test consolidation during the
+rewrite, not reduced coverage: O7h's 4 old tests collapsed to 1 documenting supersession,
+O6b's 3 tests collapsed to match the new uniform describe_flow contract, O7f's file dropped
+its two now-inapplicable describe assertions since O6b already covers describe_flow/
+describe_instruments_manifest directly). Ruff clean (`src tests examples`).
+
+### 34.7 Status
+
+Slice O7i complete. This is a genuine breaking API change (`Instrument`, `ctx.record(...)`,
+`Flow.add(...)`), deliberately -- per the user's own instruction: "Remove the old
+declared-mode API rather than maintaining two competing public APIs."

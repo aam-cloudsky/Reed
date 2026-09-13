@@ -150,5 +150,4 @@ def test_flow_node_has_no_dedicated_identity_field():
         "definition",
         "trigger_policy",
         "on_output",
-        "instruments",
     }

@@ -81,6 +81,9 @@ from typing import Callable
 
 from reed.observability.identity import NodeExecutionIdentity
 from reed.observability.instrument import Instrument
+from typing import TypeVar
+
+InstrumentValueT = TypeVar("InstrumentValueT", bound="str | int | float | bool")
 from reed.observability.recording import Recording, ScalarValue
 
 MemoryType = TypeVar("MemoryType")
@@ -156,20 +159,28 @@ class NodeContext(Generic[MemoryType, OutputType]):
 
     def record(
         self,
-        instrument_or_name: "Instrument | str",
-        value: ScalarValue,
+        instrument: "type[Instrument[InstrumentValueT]]",
+        value: InstrumentValueT,
         *,
-        unit: str | None = None,
         attributes: dict[str, ScalarValue] | None = None,
     ) -> Recording:
         """
-        Record one observation (Milestone O2, Slice O2c/O2d;
-        docs/observability_goals.md Section 2.3).
+        Record one observation of `instrument` (Milestone O2, Slice
+        O2c/O2d; redesigned at Milestone O7, Slice O7i).
 
-        `value` is scalar only (docs/observability_non_goals.md Section
-        3). Pass a declared `Instrument` (or its `name` string, if this
-        Node declared an `instruments=` list) for the declared path, or
-        a plain string `name` with no prior declaration for lazy mode.
+        `instrument` is an `Instrument[T]` **subclass** -- the Instrument
+        Definition itself, never instantiated (`ctx.record(Temperature,
+        ...)`, not `ctx.record(Temperature(), ...)`). There is no
+        separate declaration step: passing an `Instrument` subclass here
+        is itself how Reed discovers, at execution time, that this
+        (flow_id, node_id, Instrument) binding exists -- see
+        `reed.observability.instrument`'s module docstring, "Instrument
+        Definition vs. Instrument Binding". `value` is scalar only
+        (docs/observability_non_goals.md Section 3) and should match the
+        Instrument's declared `T` (a static type checker can verify this
+        through this method's own generic signature; see
+        `instrument.py`'s "Typing" section for why this is not also
+        re-checked at runtime).
 
         Returns immediately -- this call is synchronous but the actual
         write to a durable store (Milestone O3) is not this method's
@@ -185,9 +196,7 @@ class NodeContext(Generic[MemoryType, OutputType]):
                 "is only available on a NodeContext built by a real Node "
                 "firing (Run._build_call_kwargs -> NodeRuntime.build_context)."
             )
-        return self._recorder(
-            instrument_or_name, value, unit=unit, attributes=attributes
-        )
+        return self._recorder(instrument, value, attributes=attributes)
 
     @property
     def identity(self) -> NodeExecutionIdentity | None:

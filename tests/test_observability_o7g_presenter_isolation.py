@@ -58,9 +58,14 @@ def test_presenter_hook_failure_does_not_break_recording():
             raise RuntimeError("boom: presenter is broken on recording")
 
     from reed import Flow, NodeContext
+    from reed.observability.instrument import Instrument, InstrumentKind
+
+    class ValueInstrument(Instrument[int]):
+        kind = InstrumentKind.GAUGE
+        unit = "1"
 
     def produce(ctx: NodeContext[None, Estimate], measurement: Measurement) -> Estimate:
-        ctx.record("value", measurement.value)
+        ctx.record(ValueInstrument, measurement.value)
         return Estimate(measurement.value)
 
     flow = Flow()

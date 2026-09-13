@@ -14,13 +14,9 @@ meaningful progress.
 
 ## Current slice
 
-**O7g — NOT STARTED.**
-
-O7a-O7f and O7h are done. Next: O7g, the final invariant-by-invariant audit (all 27
-invariants in `observability_invariants.md`, particular attention to #7, #8, #9, #13, #17,
-#20, #22, #23, #25, #26, #27) plus a final full regression pass, followed by an expanded
-acceptance example demonstrating all six `observability=` presets and the final 16-item
-report. See `docs/observability_harness.md`'s Milestone O7 table for the full slice list.
+**All authorized O7 slices complete (O1a-O7i).** 228 tests passing, Ruff clean. See
+`docs/observability_harness.md`'s Milestone O7 table for the full slice list and design
+record §§28-34 for every slice's rationale.
 
 ## Baseline verification
 
@@ -597,6 +593,82 @@ assertion against `LAZY_CAPABLE_LABEL`. Full suite: 233 passed (229 + 4 new, net
 O6b test updated in place); Ruff clean (`src tests examples`).
 
 Full rationale, alternatives, evidence: design record Round 20 (Section 32).
+
+### O7g — Final invariant audit; Presenter isolation gap found and fixed (2026-09-13)
+
+**Decision:** re-audited all 27 invariants in `observability_invariants.md` against every
+O7 change. 26 were clean. One genuine gap: `Run.publish`/`Run._fire` and
+`NodeRuntime.accept_recording` called the O7d/O7e `Presenter` hooks directly, with no
+isolation -- violating invariant #25 ("Observability failures must never change application
+semantics") for the new Presenter surface specifically (Recording/Provenance store failures
+were already isolated; Presenter hooks, added after that original audit, were not). Fixed
+via `Run._safe_presenter_call`, following the exact isolation precedent already used for
+`on_output` callback failures.
+
+**Files changed:** `src/reed/execution/run.py` (`_safe_presenter_call` helper; every
+Presenter hook call site routed through it), `src/reed/execution/node_runtime.py`
+(`on_recording` call wrapped the same way).
+
+**Tests:** `tests/test_observability_o7g_presenter_isolation.py` (2 tests, confirmed both
+failing against pre-fix code). Full suite: 235 passed; Ruff clean.
+
+Full rationale, alternatives, evidence: design record Round 21 (Section 33).
+
+### O7i — Typed Instrument Definitions, discovered dynamically (user-prompted mid-O7) (2026-09-13)
+
+**Decision:** `Instrument[T]` becomes a `Generic[T]` base class; a concrete Instrument is a
+subclass with `kind`/`unit`/`description` as class attributes, never instantiated
+(`ctx.record(Temperature, value)`, the class itself as the value). `Flow.add(...)` no longer
+accepts `instruments=` at all. Instruments are discovered dynamically -- the first time a
+Node's body calls `ctx.record(SomeInstrument, value)` in a real Run -- never prospectively
+declared. The old declared/lazy-mode API (`Instrument(name=..., kind=..., unit=...)`
+instances, `flow.add(node, instruments=[...])`, plain-string `ctx.record(name, value)`) is
+removed entirely, not kept alongside the new one.
+
+**Why:** the user's own follow-up audit of the O7h fix found a deeper issue than O7h
+addressed: even the self-contained `ctx.record("name", value)` style still required a
+Node's Instrument schema to be declared a *second* time in `flow.add(instruments=[...])`,
+duplicating information the Node's own body already determines -- the same shape of
+redundancy Reed already avoids for Artifacts (a Node's produced/consumed types are read off
+its own signature, with no second `produces=[...]` declaration). Making the Instrument type
+itself the single source of truth removes the redundancy structurally rather than by
+convention/preference (which is as far as O7h's fix could go without changing the
+declaration model itself).
+
+**Alternatives considered:** AST inspection of a Node's body to recover static Instrument
+discovery (explicitly rejected by the user's own instruction, and independently: fragile
+against conditional/indirect `ctx.record(...)` calls, and inconsistent with
+`observability_non_goals.md`'s existing "no reflection-based magic" posture elsewhere);
+keeping the old API alongside the new one during a transition period (rejected per explicit
+instruction -- two competing public APIs for the same concept is worse than one clean
+breaking change at this pre-1.0 stage); re-checking `Instrument[T]`'s `T` against `value` at
+runtime via `__orig_bases__` introspection (rejected -- a static type checker already catches
+the mismatch through `NodeContext.record`'s own generic signature, with no additional
+runtime benefit to justify the complexity).
+
+**Files changed:** `src/reed/observability/instrument.py` (full rewrite),
+`src/reed/composition/node/node_context.py` (`record(...)` signature narrowed),
+`src/reed/execution/node_runtime.py` (`_resolve_instrument` rewritten; instrument-discovery
+bookkeeping added), `src/reed/composition/flow/flow_node.py` /
+`src/reed/composition/flow/flow_composition.py` (`instruments`/`instruments=` removed),
+`src/reed/observability/storage.py` (`write_instruments_manifest_if_absent` replaced by
+`merge_discovered_instruments`), `src/reed/execution/run.py`
+(`record_discovered_instruments` added; manifest write moved from `__init__` to
+`NodeRuntime.flush_recordings`), `src/reed/observability/describe.py` (`describe_flow`
+reports discovery is runtime-only for every Node uniformly), `docs/observability_goals.md`
+Section 2 (rewritten). Every existing test referencing the old API was migrated (O2, O3,
+O5c, O6a, O6b, O6c, O7c, O7d, O7f, O7g's instrument-touching test) or, for O7h specifically,
+replaced with a single test documenting its own supersession. `examples/
+observability_example.py` rewritten end-to-end, now also demonstrating all six
+`observability=` presets over the same Flow with an explicit same-domain-result assertion
+and a silent-terminal-still-persists demonstration.
+
+**Tests:** full suite 228 passed (net effect of consolidating superseded tests during
+migration, not reduced coverage -- see design record §34.6 for the accounting); Ruff clean
+(`src tests examples`); `examples/observability_example.py` run directly end-to-end and its
+output inspected.
+
+Full rationale, alternatives, evidence: design record Round 22 (Section 34).
 
 ## Deviations from the design record
 

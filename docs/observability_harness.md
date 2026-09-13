@@ -161,31 +161,30 @@ as it did to O1-O6).
 | O7d | DONE — `flow.run(observability=...)` presets (`silent`/`errors`/`progress`/`instruments`/`nodes`/`verbose`) compiling to `PresentationPolicy`; `Presenter`/`TerminalPresenter`/`NullPresenter` consume `Run`'s existing identity/trace/recording hooks, no new collection mechanism. Design record §31.1-31.3, §31.5-31.6. |
 | O7e | DONE — indeterminate progress rendering (spinner + completed-node counter, no false N/M fraction); verified no `\d+/\d+` pattern is ever rendered. Design record §31.4. |
 | O7f | DONE — Replay rows now carry an explicit `node_execution_id` column; rows sharing one `execution_seq` are tie-broken by a fixed, documented-as-non-causal `_EVENT_TYPE_DISPLAY_PRIORITY`. `describe_flow`/`describe_instruments_manifest` render `LAZY_CAPABLE_LABEL` instead of a blank cell for Nodes with no declared Instruments. Design record §32. |
-| O7g | Final invariant-by-invariant audit and full regression pass. |
+| O7g | DONE — final invariant audit found and fixed one genuine gap: `Presenter` hook failures were unisolated (invariant #25). `Run._safe_presenter_call` isolates every hook call site. Design record §33. |
+| O7i | DONE — user-prompted mid-O7 API redesign: Instruments are now typed `Instrument[T]` subclasses (never instantiated), discovered dynamically the first time a Node calls `ctx.record(SomeInstrument, value)`. `Flow.add(...)` no longer accepts `instruments=` at all; the old declared/lazy-mode API is removed, not kept alongside the new one. Design record §34. |
 
 ## Current slice
 
-**O1a through O7f complete.** 233 tests passing, Ruff clean (`src tests examples`).
-Milestones O1-O6 (Identity, Instrument/Recording, Local Recording Store, Provenance,
-Execution Trace, Tooling/Exporters) remain as originally delivered and audited. Milestone O7
-(Post-Implementation Audit and Terminal Presentation Control) has completed slices O7a, O7b
+**O1a through O7i complete.** 228 tests passing, Ruff clean (`src tests examples`).
+Milestones O1-O6 remain as originally delivered and audited. Milestone O7
+(Post-Implementation Audit and Terminal Presentation Control) has completed O7a, O7b
 (Artifact version identity fix), O7c (Recording durability/hot-path fix), O7h (Instrument API
-self-containment audit), O7d/O7e (terminal presentation policy, API, and progress semantics),
-and O7f (replay ordering + lazy-mode describe corrections) -- see the Milestone O7 slice
-table above and design record §§28-32.
+self-containment audit, superseded by O7i), O7d/O7e (terminal presentation policy/API,
+progress semantics), O7f (replay ordering + lazy-mode describe corrections), O7g (final
+invariant audit; found and fixed a Presenter isolation gap), and O7i (user-prompted mid-O7
+redesign: typed `Instrument[T]` Definitions, discovered dynamically, replacing
+`flow.add(instruments=[...])` and the old declared/lazy-mode `ctx.record(...)` API entirely)
+-- see the Milestone O7 slice table above and design record §§28-34.
 
-**Next slice: O7g** -- final invariant-by-invariant audit (re-verify all 27 invariants in
-`observability_invariants.md` against the O7 changes, with particular attention to #7, #8,
-#9, #13, #17, #20, #22, #23, #25, #26, #27) and a final full regression pass
-(`uv run pytest -q -o addopts=''`, `uv run ruff check src tests examples`), followed by an
-expanded acceptance example demonstrating all six `observability=` presets over the same
-Flow and the final 16-item report the task requires.
-
-Any further observability work beyond O7g (a real `reed` CLI console-script entry point, a
-non-terminal `Presenter` such as `JSONLPresenter`, live-streaming trace rendering under real
-parallel Node execution, a Parquet storage backend, Mermaid/HTML provenance rendering, etc.)
-is future work outside this authorized sequence and would need its own slice(s) defined
-before an agent should proceed autonomously again.
+**All authorized O7 slices are complete.** The example (`examples/
+observability_example.py`) demonstrates the full O1-O7i stack including all six
+`observability=` presets over the same Flow. Any further observability work (a real `reed`
+CLI console-script entry point, a non-terminal `Presenter` such as `JSONLPresenter`,
+live-streaming trace rendering under real parallel Node execution, a Parquet storage
+backend, Mermaid/HTML provenance rendering, static Instrument-usage linting, etc.) is future
+work outside this authorized sequence and would need its own slice(s) defined before an
+agent should proceed autonomously again.
 
 ## Open questions requiring decision (tracked, not yet resolved)
 

@@ -36,6 +36,19 @@ class Estimate:
         self.value = value
 
 
+from reed.observability.instrument import Instrument, InstrumentKind
+
+
+class Speed(Instrument[int]):
+    kind = InstrumentKind.GAUGE
+    unit = "m/s"
+
+
+class Hits(Instrument[int]):
+    kind = InstrumentKind.COUNTER
+    unit = "1"
+
+
 def _make_tracer():
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
@@ -100,16 +113,12 @@ def test_export_trace_to_spans_skips_incomplete_pairs():
 
 def test_export_recording_to_metric_gauge():
     from reed import Flow, NodeContext
-    from reed.observability.instrument import Instrument
-
-    speed = Instrument(name="speed", kind="gauge", unit="m/s")
-
     def track(ctx: NodeContext[None, Estimate], measurement: Measurement) -> Estimate:
-        ctx.record(speed, measurement.value)
+        ctx.record(Speed, measurement.value)
         return Estimate(measurement.value)
 
     flow = Flow()
-    flow.add(track, instruments=[speed])
+    flow.add(track)
     run = flow.run()
     run.publish(Measurement(7))
 
@@ -124,24 +133,34 @@ def test_export_recording_to_metric_gauge():
 
     data = reader.get_metrics_data()
     metric = data.resource_metrics[0].scope_metrics[0].metrics[0]
-    assert metric.name == "speed"
+    assert metric.name == Speed.instrument_name().lower()  # OTel lowercases metric names
     assert metric.data.data_points[0].value == 7
 
 
-def test_export_recording_to_metric_skips_lazy_mode_kind_none():
-    from reed import Flow, NodeContext
+def test_export_recording_to_metric_skips_kind_none():
+    """
+    O7i removed the old lazy-mode plain-string ctx.record(...) path that
+    used to produce Recording.kind=None -- every Instrument now has a
+    concrete kind. `export_recording_to_metric` must still skip a
+    kind=None Recording if one exists (e.g. constructed directly, or by
+    a future non-Instrument-backed observation path) -- this is a
+    contract test against `Recording` itself, not against any live
+    ctx.record(...) call.
+    """
+    from reed.observability.recording import Recording
 
-    def track(ctx: NodeContext[None, Estimate], measurement: Measurement) -> Estimate:
-        ctx.record("reason", "no prior signal")
-        return Estimate(measurement.value)
-
-    flow = Flow()
-    flow.add(track)
-    run = flow.run()
-    run.publish(Measurement(1))
-
-    recording = run.node_runtime(track).recordings[0]
-    assert recording.kind is None
+    recording = Recording(
+        instrument_id="flow.node.reason",
+        name="reason",
+        value="no prior signal",
+        kind=None,
+        unit=None,
+        execution_id="exec",
+        flow_id="flow",
+        node_id="node",
+        node_execution_id="ne-1",
+        execution_seq=1,
+    )
 
     meter, reader = _make_meter()
 
@@ -156,16 +175,12 @@ def test_export_recording_to_metric_skips_lazy_mode_kind_none():
 
 def test_export_recording_to_metric_counter():
     from reed import Flow, NodeContext
-    from reed.observability.instrument import Instrument
-
-    hits = Instrument(name="hits", kind="counter", unit="1")
-
     def track(ctx: NodeContext[None, Estimate], measurement: Measurement) -> Estimate:
-        ctx.record(hits, 1)
+        ctx.record(Hits, 1)
         return Estimate(measurement.value)
 
     flow = Flow()
-    flow.add(track, instruments=[hits])
+    flow.add(track)
     run = flow.run()
     run.publish(Measurement(1))
 
@@ -178,4 +193,4 @@ def test_export_recording_to_metric_counter():
 
     data = reader.get_metrics_data()
     metric = data.resource_metrics[0].scope_metrics[0].metrics[0]
-    assert metric.name == "hits"
+    assert metric.name == Hits.instrument_name().lower()  # OTel lowercases metric names

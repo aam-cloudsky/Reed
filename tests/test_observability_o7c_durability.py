@@ -34,24 +34,37 @@ class Estimate:
         self.value = value
 
 
+from reed.observability.instrument import Instrument, InstrumentKind
+
+
+class InstrumentA(Instrument[int]):
+    kind = InstrumentKind.GAUGE
+    unit = "1"
+
+
+class InstrumentB(Instrument[int]):
+    kind = InstrumentKind.GAUGE
+    unit = "1"
+
+
+class InstrumentC(Instrument[int]):
+    kind = InstrumentKind.GAUGE
+    unit = "1"
+
+
 def _make_flow_with_multi_record_node():
     from reed import Flow, NodeContext
-    from reed.observability.instrument import Instrument
-
-    a = Instrument(name="a", kind="gauge", unit="1")
-    b = Instrument(name="b", kind="gauge", unit="1")
-    c = Instrument(name="c", kind="gauge", unit="1")
 
     def produce(
         ctx: NodeContext[None, Estimate], measurement: Measurement
     ) -> Estimate:
-        ctx.record(a, 1)
-        ctx.record(b, 2)
-        ctx.record(c, 3)
+        ctx.record(InstrumentA, 1)
+        ctx.record(InstrumentB, 2)
+        ctx.record(InstrumentC, 3)
         return Estimate(measurement.value)
 
     flow = Flow()
-    flow.add(produce, instruments=[a, b, c])
+    flow.add(produce)
     return flow, produce
 
 
@@ -85,7 +98,11 @@ def test_multiple_recordings_in_one_firing_fsync_once(tmp_path, monkeypatch):
     run_dir = root / "runs" / run.execution_id
     rows = load_recordings(run_dir)
     assert len(rows) == 3
-    assert {row["name"] for row in rows} == {"a", "b", "c"}
+    assert {row["name"] for row in rows} == {
+        InstrumentA.instrument_name(),
+        InstrumentB.instrument_name(),
+        InstrumentC.instrument_name(),
+    }
 
 
 def test_recordings_are_durable_after_a_successful_firing(tmp_path):
@@ -110,17 +127,19 @@ def test_recordings_flush_even_when_the_node_raises(tmp_path):
     be flushed to disk.
     """
     from reed import Flow, NodeContext
-    from reed.observability.instrument import Instrument
+    from reed.observability.instrument import Instrument, InstrumentKind
     from reed.observability.replay import load_recordings
 
-    flag = Instrument(name="flag", kind="gauge", unit="1")
+    class Flag(Instrument[int]):
+        kind = InstrumentKind.GAUGE
+        unit = "1"
 
     def failing_node(ctx: NodeContext[None, Estimate], measurement: Measurement) -> Estimate:
-        ctx.record(flag, 1)
+        ctx.record(Flag, 1)
         raise RuntimeError("boom")
 
     flow = Flow()
-    flow.add(failing_node, instruments=[flag])
+    flow.add(failing_node)
     root = tmp_path / ".reed"
     run = flow.run(storage_root=str(root))
 
@@ -132,7 +151,7 @@ def test_recordings_flush_even_when_the_node_raises(tmp_path):
     run_dir = root / "runs" / run.execution_id
     rows = load_recordings(run_dir)
     assert len(rows) == 1
-    assert rows[0]["name"] == "flag"
+    assert rows[0]["name"] == Flag.instrument_name()
 
 
 def test_no_fsync_when_no_recordings_are_made_in_a_firing(tmp_path, monkeypatch):

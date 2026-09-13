@@ -17,18 +17,23 @@ class Estimate:
         self.value = value
 
 
+from reed.observability.instrument import Instrument, InstrumentKind
+
+
+class Speed(Instrument[int]):
+    kind = InstrumentKind.GAUGE
+    unit = "m/s"
+
+
 def _make_flow():
     from reed import Flow, NodeContext
-    from reed.observability.instrument import Instrument
-
-    speed = Instrument(name="speed", kind="gauge", unit="m/s")
 
     def produce(ctx: NodeContext[None, Estimate], measurement: Measurement) -> Estimate:
-        ctx.record(speed, measurement.value)
+        ctx.record(Speed, measurement.value)
         return Estimate(measurement.value)
 
     flow = Flow()
-    flow.add(produce, instruments=[speed])
+    flow.add(produce)
     return flow
 
 
@@ -56,19 +61,16 @@ def test_query_recordings_aggregates_across_separate_executions(tmp_path):
 
 def test_query_recordings_filters_by_flow_id():
     from reed import Flow, NodeContext
-    from reed.observability.instrument import Instrument
     from reed.observability.query import query_recordings
 
-    speed = Instrument(name="speed", kind="gauge", unit="m/s")
-
     def produce(ctx: NodeContext[None, Estimate], measurement: Measurement) -> Estimate:
-        ctx.record(speed, measurement.value)
+        ctx.record(Speed, measurement.value)
         return Estimate(measurement.value)
 
     def other_produce(
         ctx: NodeContext[None, Estimate], measurement: Measurement
     ) -> Estimate:
-        ctx.record(speed, measurement.value)
+        ctx.record(Speed, measurement.value)
         return Estimate(measurement.value)
 
     import tempfile
@@ -79,12 +81,12 @@ def test_query_recordings_filters_by_flow_id():
         root = Path(tmp) / ".reed"
 
         flow_a = Flow()
-        flow_a.add(produce, instruments=[speed])
+        flow_a.add(produce)
         run_a = flow_a.run(storage_root=str(root))
         run_a.publish(Measurement(1))
 
         flow_b = Flow()
-        flow_b.add(other_produce, instruments=[speed])
+        flow_b.add(other_produce)
         run_b = flow_b.run(storage_root=str(root))
         run_b.publish(Measurement(2))
 

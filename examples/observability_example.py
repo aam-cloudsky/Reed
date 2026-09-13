@@ -1,11 +1,12 @@
 """
 Reed Observability example (Issue #7).
 
-Demonstrates the full observability stack implemented across Milestones O1-O6:
+Demonstrates the full observability stack implemented across Milestones O1-O7:
 
     - Identity: stable flow_id/node_id, one execution_id per Run (Milestone O1).
-    - Instrument + Recording: declared-mode and lazy-mode ctx.record(...)
-      (Milestone O2).
+    - Instrument + Recording: typed Instrument Definitions, discovered
+      dynamically at execution time -- ctx.record(SomeInstrument, value)
+      (Milestone O2; redesigned at Milestone O7, Slice O7i).
     - Local durable storage: opt-in via Flow.run(storage_root=...) -- writes
       recordings.csv / provenance.csv / manifest.json / instruments.json
       (Milestone O3).
@@ -16,6 +17,11 @@ Demonstrates the full observability stack implemented across Milestones O1-O6:
     - Tooling: Instrument introspection (describe), cross-Execution
       aggregation (query), and a provenance-graph renderer (graph)
       (Milestone O6).
+    - Terminal presentation control: flow.run(observability=<preset>) --
+      silent, errors, progress, instruments, nodes, verbose (Milestone O7,
+      Slices O7d/O7e). Presentation is purely a terminal *view* over
+      Reed's observability model -- it never changes what gets collected
+      or persisted (see main()'s final section).
 
 Run it directly:
 
@@ -36,7 +42,7 @@ from rich.console import Console
 from reed import Flow, NodeContext
 from reed.observability.describe import describe_flow
 from reed.observability.graph import render_provenance_dot, render_provenance_tree
-from reed.observability.instrument import Instrument
+from reed.observability.instrument import Instrument, InstrumentKind
 from reed.observability.query import query_recordings
 from reed.observability.replay import print_replay
 from reed.observability.terminal import print_trace
@@ -72,22 +78,24 @@ class LoggedAnomaly:
 
 
 # ============================================================================
-# Instruments -- declared once, per Node (Milestone O2, Slice O2a/O2b)
+# Instruments -- typed Instrument Definitions (Milestone O7, Slice O7i).
+#
+# There is no separate declaration step: an Instrument is discovered the
+# first time a Node calls ctx.record(SomeInstrument, value) during a real
+# Run. The class itself -- never an instance -- is passed to ctx.record(...).
 # ============================================================================
 
-temperature = Instrument(
-    name="temperature",
-    kind="gauge",
-    unit="celsius",
-    description="Latest sensor reading observed by track_temperature.",
-)
 
-anomaly_count = Instrument(
-    name="anomaly_count",
-    kind="counter",
-    unit="1",
-    description="Number of readings that crossed the anomaly threshold.",
-)
+class Temperature(Instrument[float]):
+    kind = InstrumentKind.GAUGE
+    unit = "celsius"
+    description = "Latest sensor reading observed by track_temperature."
+
+
+class AnomalyCount(Instrument[int]):
+    kind = InstrumentKind.COUNTER
+    unit = "1"
+    description = "Number of readings that crossed the anomaly threshold."
 
 
 # ============================================================================
@@ -100,14 +108,11 @@ def track_temperature(
     reading: SensorReading,
 ) -> TrackedReading:
     """
-    Declared-mode recording, by name (Milestone O7's preferred style): the
-    `temperature` Instrument is declared once via
-    `flow.add(track_temperature, instruments=[temperature])`, and this Node
-    body references only the plain string "temperature" -- no import of,
-    or reference to, the `temperature` object itself. The Node stays
-    self-contained: nothing here couples it to a specific global object.
+    ctx.record(Temperature, ...) references the Instrument Definition
+    directly and exclusively -- no separate flow.add(instruments=[...])
+    declaration exists to duplicate or drift out of sync with this.
     """
-    ctx.record("temperature", reading.celsius)
+    ctx.record(Temperature, reading.celsius)
     return TrackedReading(celsius=reading.celsius)
 
 
@@ -115,52 +120,41 @@ def detect_anomaly(
     ctx: NodeContext[None, Anomaly],
     reading: TrackedReading,
 ) -> Anomaly:
-    """
-    Declared-mode recording only: once a Node opts into an explicit
-    `instruments=[...]` list, every `ctx.record(...)` call must reference
-    a declared name (docs/observability_goals.md Section 2.3) -- lazy-mode
-    recording is demonstrated separately, in `log_note`, a Node declared
-    with no `instruments=[...]` at all.
-    """
     threshold = 80.0
     is_anomaly = reading.celsius > threshold
 
     if is_anomaly:
-        ctx.record("anomaly_count", 1)
+        ctx.record(AnomalyCount, 1)
 
     return Anomaly(celsius=reading.celsius, threshold=threshold, is_anomaly=is_anomaly)
 
 
-def log_note(ctx: NodeContext[None, LoggedAnomaly], anomaly: Anomaly) -> LoggedAnomaly:
-    """
-    Lazy-mode recording (Milestone O2, Slice O2e): `"note"` was never
-    declared via `instruments=[...]` -- `flow.add(log_note)` below passes
-    no `instruments=` at all, so this is a non-metric fact, a `Recording`
-    with `kind=None`, not backed by any `Instrument`.
-    """
-    if anomaly.is_anomaly:
-        ctx.record("note", f"exceeded threshold of {anomaly.threshold}")
-    else:
-        ctx.record("note", "within normal range")
+def log_anomaly(
+    ctx: NodeContext[None, LoggedAnomaly],
+    anomaly: Anomaly,
+) -> LoggedAnomaly:
     return LoggedAnomaly(
-        celsius=anomaly.celsius,
-        threshold=anomaly.threshold,
-        is_anomaly=anomaly.is_anomaly,
+        celsius=anomaly.celsius, threshold=anomaly.threshold, is_anomaly=anomaly.is_anomaly
     )
 
 
 def main() -> None:
     flow = Flow()
-    flow.add(track_temperature, instruments=[temperature])
-    flow.add(detect_anomaly, instruments=[anomaly_count])
-    flow.add(log_note)
+    flow.add(track_temperature)
+    flow.add(detect_anomaly)
+    flow.add(log_anomaly)
+
+    console = Console()
 
     # ------------------------------------------------------------------
-    # Milestone O6, Slice O6b: introspect declared Instruments with no
-    # execution required at all.
+    # Milestone O6, Slice O6b (redesigned at Milestone O7, Slice O7i):
+    # describe_flow(...) needs no execution, but since Instruments are now
+    # discovered dynamically rather than prospectively declared, it can
+    # only report which Nodes exist -- not which Instruments (if any)
+    # they will record. describe_instruments_manifest(...) below is what
+    # actually shows discovered Instrument bindings, once a Run exists.
     # ------------------------------------------------------------------
-    console = Console()
-    print("=== reed describe (no execution required) ===")
+    print("=== reed describe (no execution required -- Nodes only, O7i) ===")
     console.print(describe_flow(flow))
 
     # ------------------------------------------------------------------
@@ -179,6 +173,17 @@ def main() -> None:
 
         print(f"\nexecution_id = {run.execution_id}")
         print(f"flow_id      = {flow.flow_id}")
+
+        # ------------------------------------------------------------------
+        # Milestone O6, Slice O6b: now that this Run has discovered and
+        # persisted real Instrument bindings, describe_instruments_manifest
+        # can report them -- name/kind/unit, per Node.
+        # ------------------------------------------------------------------
+        from reed.observability.describe import describe_instruments_manifest
+
+        manifest_path = storage_root / "flows" / flow.flow_id / "instruments.json"
+        print("\n=== reed describe --manifest (Instruments actually discovered) ===")
+        console.print(describe_instruments_manifest(manifest_path))
 
         # ------------------------------------------------------------------
         # Milestone O5, Slice O5b: render the Level 1 Execution Trace --
@@ -219,6 +224,67 @@ def main() -> None:
             f"\n=== reed query (cross-Execution) ===\n"
             f"{len(rows)} recordings across "
             f"{len({row['execution_id'] for row in rows})} Executions of flow_id={flow.flow_id}"
+        )
+
+    # ------------------------------------------------------------------
+    # Milestone O7, Slices O7d/O7e: terminal presentation control.
+    #
+    # The SAME Flow is run six times below, once per preset, over the
+    # SAME published values. Only what is *shown in the terminal*
+    # changes -- the computed domain results are identical every time
+    # (verified by the assertion at the end of this section), and a
+    # silent terminal does not stop Reed from persisting Recordings and
+    # Provenance to storage_root, demonstrated in the final block.
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 78)
+    print("Milestone O7: terminal presentation presets over the same Flow")
+    print("=" * 78)
+
+    presets = ("silent", "errors", "progress", "instruments", "nodes", "verbose")
+    domain_results: dict[str, float] = {}
+
+    for preset in presets:
+        print(f"\n--- observability={preset!r} " + "-" * (48 - len(preset)))
+        preset_flow = Flow()
+        preset_flow.add(track_temperature)
+        preset_flow.add(detect_anomaly)
+        preset_flow.add(log_anomaly)
+
+        preset_run = preset_flow.run(observability=preset)
+        result = preset_run.publish(SensorReading(celsius=91.3))
+        domain_results[preset] = result.celsius
+
+    assert len(set(domain_results.values())) == 1, (
+        "presentation choice must never change the computed domain result"
+    )
+    print(
+        f"\nAll six presets computed the identical domain result "
+        f"(celsius={next(iter(domain_results.values()))}) -- presentation "
+        "configuration changed only what was shown in the terminal, never "
+        "the Flow's computational semantics."
+    )
+
+    # ------------------------------------------------------------------
+    # Collection vs. presentation are fully independent (Milestone O7,
+    # Slice O7d): observability="silent" here still persists byte-for-byte
+    # the same Recordings/Provenance a "verbose" Run would.
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmp:
+        silent_root = Path(tmp) / ".reed"
+        silent_flow = Flow()
+        silent_flow.add(track_temperature)
+        silent_run = silent_flow.run(storage_root=str(silent_root), observability="silent")
+        silent_run.publish(SensorReading(celsius=50.0))
+
+        from reed.observability.replay import load_recordings
+
+        run_dir = silent_root / "runs" / silent_run.execution_id
+        recordings = load_recordings(run_dir)
+        print(
+            f"\nobservability='silent' + storage_root=... -- terminal was "
+            f"silent, but {len(recordings)} Recording(s) were still durably "
+            "persisted (silence is a terminal presentation choice, never a "
+            "collection choice)."
         )
 
 
