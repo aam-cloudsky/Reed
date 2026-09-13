@@ -49,8 +49,15 @@ def test_describe_flow_lists_nodes_with_no_declared_instruments():
 
     table = describe_flow(flow)
 
+    # O7f: a blank cell here would be indistinguishable from "this Node
+    # truly has no Instrument activity" -- but a Node with no *declared*
+    # Instruments may still record lazy-mode Recordings at runtime, which
+    # static describe() cannot know in advance. LAZY_CAPABLE_LABEL makes
+    # that distinction explicit instead of rendering an empty string.
+    from reed.observability.describe import LAZY_CAPABLE_LABEL
+
     assert table.row_count == 1
-    assert table.columns[1]._cells[0] == ""
+    assert table.columns[1]._cells[0] == LAZY_CAPABLE_LABEL
 
 
 def test_describe_instruments_manifest_reads_past_run_manifest(tmp_path):

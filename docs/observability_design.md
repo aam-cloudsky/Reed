@@ -2048,3 +2048,83 @@ make it possible to replace the renderer later without changing Flow/Run semanti
 ### 31.7 Status
 
 Slices O7d/O7e complete. No new open design questions surfaced.
+
+## Round 20 (Milestone O7, Slice O7f): replay ordering and lazy-mode describe corrected
+
+### 32.1 The two defects (both presentation/introspection, per the audit's own classification)
+
+The Post-Implementation Audit flagged two independent gaps, both already anticipated as
+presentation-only by `observability_invariants.md` #7/#8/#9:
+
+1. **Replay grouping.** `render_replay_table(run_dir)` interleaved `recordings.csv` and
+   `provenance.csv` rows purely by `execution_seq`, with no `node_execution_id` visible in
+   the rendered table at all and no defined order for rows that legitimately share one
+   `execution_seq` (a `"used"` event, a `ctx.record(...)` recording, and a `"generated"`
+   event can all be stamped with the same `execution_seq` for a single firing). Without a
+   visible `node_execution_id` column and a stable secondary order, the table could visually
+   suggest an ordering relationship the data does not actually claim.
+2. **Lazy-mode describe.** `describe_flow`/`describe_instruments_manifest` rendered an empty
+   string for a Node with no declared Instruments -- indistinguishable from "this Node's
+   Instrument column is empty because it truly never records anything," which is not
+   something static `describe()` can know (a lazy-mode `ctx.record("name", value)` call is
+   only visible at runtime).
+
+### 32.2 Fixes
+
+- `replay.py` gained a `_EVENT_TYPE_DISPLAY_PRIORITY = {"used": 0, "recording": 1,
+  "generated": 2}` module constant, documented explicitly as a **fixed, presentation-only
+  tie-break** for rows sharing one `execution_seq` -- never a causality claim. Causality
+  continues to come exclusively from provenance's `generated`/`used` producer/dependency
+  relationships (invariant #9), never from `execution_seq` (invariants #7/#8) and never from
+  this tie-break. `render_replay_table` now extracts `node_execution_id` from every row
+  (recordings and provenance alike) and sorts by `(execution_seq, tie_break_priority)`. The
+  rendered table gained an explicit `node_execution_id` column (truncated to 8 chars for
+  readability) so a reader can see which rows belong to the same firing without relying on
+  visual proximity alone.
+- `describe.py` gained `LAZY_CAPABLE_LABEL = "<lazy -- may record, unknown before
+  execution>"`, used in place of the previous empty string in both `describe_flow` and
+  `describe_instruments_manifest`'s "no declared Instruments" branch. This makes "no
+  Instruments declared, but lazy-mode recording is still possible at runtime" visually
+  distinct from a genuinely empty/inapplicable cell, without asserting anything Reed cannot
+  know statically (it does not claim the Node *will* record -- only that it *may*).
+
+### 32.3 Alternatives considered (replay ordering)
+
+- **New finer-grained sequence number.** Rejected: the audit explicitly asked to prefer
+  presentation fixes over inventing new domain identity; a second sequence counter risks
+  being read as a stronger ordering claim than intended, the same failure mode being fixed.
+- **Group visually by `node_execution_id` (nested/indented output) instead of a flat sorted
+  table.** Deferred, not rejected outright -- a flat table with an explict id column and a
+  documented, non-causal tie-break satisfies the audit's requirement (distinguish rows that
+  share a firing; do not imply false causality) with a strictly smaller change to
+  `replay.py`'s existing Rich `Table` structure. Nested grouping remains a reasonable future
+  presentation enhancement and does not require any change to `execution_seq` or provenance.
+
+### 32.4 Alternatives considered (lazy describe)
+
+- **Omit lazy-capable Nodes from the Instrument table entirely, footnote them elsewhere** (an
+  option the audit itself raised). Rejected for this slice: `describe_flow` is also how a
+  reader enumerates a Flow's full Node set, and dropping rows would make row_count depend on
+  Instrument declarations, breaking the existing `describe_flow` row-per-Node contract
+  exercised by O6b's tests. Keeping one row per Node with an explicit, honest label was the
+  smaller and more consistent change.
+- **A boolean "lazy: true/false" column.** Rejected as strictly less informative than a
+  labeled cell in the same column position -- would require widening the table and does not
+  read as clearly in a terminal-width-constrained Rich table.
+
+### 32.5 Regression: an existing O6b test encoded the old (defective) behavior
+
+`tests/test_observability_o6b_describe.py::test_describe_flow_lists_nodes_with_no_declared_instruments`
+asserted the empty-string cell directly -- i.e. it encoded the exact ambiguity this slice
+fixes. Per the audit's own regression-test instruction ("unless an existing test itself
+encodes behavior proven to contradict the authoritative architecture, in which case the
+exact reason must be explained"): this test's assertion is retracted and replaced with an
+assertion against `LAZY_CAPABLE_LABEL`, because the audit's own investigation (Section 8 of
+the task) determined the blank cell was itself the defect, not a property worth preserving.
+No other existing test asserted on the old blank-cell or the old 4-column (no
+`node_execution_id`) replay table shape.
+
+### 32.6 Status
+
+Slice O7f complete. Full suite: 233 passed (232 O1-O7e/h + this slice's 4 new tests, net of
+1 existing O6b test updated in place rather than counted as new). Ruff: all checks passed.

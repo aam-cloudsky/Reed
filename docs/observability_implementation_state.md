@@ -14,11 +14,13 @@ meaningful progress.
 
 ## Current slice
 
-**O7f — NOT STARTED.**
+**O7g — NOT STARTED.**
 
-O7a-O7e and O7h are done. Next: O7f, replay/describe presentation corrections
-(same-execution_seq disambiguation; lazy-mode describe_flow distinction). See
-`docs/observability_harness.md`'s Milestone O7 table for the full slice list.
+O7a-O7f and O7h are done. Next: O7g, the final invariant-by-invariant audit (all 27
+invariants in `observability_invariants.md`, particular attention to #7, #8, #9, #13, #17,
+#20, #22, #23, #25, #26, #27) plus a final full regression pass, followed by an expanded
+acceptance example demonstrating all six `observability=` presets and the final 16-item
+report. See `docs/observability_harness.md`'s Milestone O7 table for the full slice list.
 
 ## Baseline verification
 
@@ -547,6 +549,54 @@ not disable Recording/Provenance persistence; the zero-argument default is not s
 suite: 229 passed (218 + 11 new); Ruff clean.
 
 Full rationale, alternatives, evidence: design record Round 19 (Section 31).
+
+### O7f — Replay ordering and lazy-mode describe corrections (2026-09-13)
+
+**Decision:** `render_replay_table(run_dir)` now extracts and displays an explicit
+`node_execution_id` column, and rows sharing one `execution_seq` are tie-broken by a fixed,
+documented-as-non-causal `_EVENT_TYPE_DISPLAY_PRIORITY = {"used": 0, "recording": 1,
+"generated": 2}` -- `execution_seq` itself is untouched (still deterministic observation
+order only, per invariants #7/#8; causality still comes exclusively from provenance's
+producer/dependency relationships, per invariant #9). `describe_flow`/
+`describe_instruments_manifest` render a new `LAZY_CAPABLE_LABEL = "<lazy -- may record,
+unknown before execution>"` constant instead of an empty string for a Node with no declared
+Instruments, distinguishing "no Instruments declared, but lazy `ctx.record(...)` is still
+possible at runtime" from a genuinely empty/inapplicable cell.
+
+**Why:** the audit flagged that (1) a reader could visually mistake same-`execution_seq`
+row ordering for a causality claim the data does not make, and (2) an empty Instrument-column
+cell is ambiguous between "this Node never records" and "this Node's Recordings are
+lazy-mode and unknown until runtime." Both are presentation/introspection defects, not
+provenance or Instrument-model defects — no change to `execution_seq`, provenance events, or
+the Instrument declaration model was needed or made.
+
+**Alternatives considered:** a new finer-grained sequence number for replay ordering
+(rejected — the audit explicitly asked to prefer presentation fixes over new domain
+identity, and a second counter risks being read as a stronger ordering claim, the same
+failure mode being fixed); nested/indented grouping by `node_execution_id` instead of a flat
+tie-broken table (deferred as a future presentation enhancement, not required to satisfy the
+audit); omitting lazy-capable Nodes from the describe table entirely with a separate footnote
+(rejected — breaks `describe_flow`'s existing one-row-per-Node contract exercised by O6b's
+tests); a boolean lazy column (rejected as less informative in the same space than a labeled
+cell).
+
+**Files changed:** `src/reed/observability/replay.py` (`_EVENT_TYPE_DISPLAY_PRIORITY`
+constant; `render_replay_table` extracts `node_execution_id`, sorts by
+`(execution_seq, priority)`, adds the `node_execution_id` column),
+`src/reed/observability/describe.py` (`LAZY_CAPABLE_LABEL` constant used in both
+`describe_flow` and `describe_instruments_manifest`'s no-declared-Instruments branch).
+
+**Tests:** `tests/test_observability_o7f_replay_describe.py` (4 tests, confirmed 3 failing
+against pre-fix code first: lazy-capable describe label on `describe_flow` and
+`describe_instruments_manifest`; replay groups rows by `node_execution_id` rather than bare
+`execution_seq`; a declared-Instrument Node is unaffected). One pre-existing O6b test,
+`test_describe_flow_lists_nodes_with_no_declared_instruments`, asserted the old blank-cell
+behavior directly; per the audit's own regression-test instruction, this assertion is
+retracted (the blank cell was itself the ambiguity this slice fixes) and replaced with an
+assertion against `LAZY_CAPABLE_LABEL`. Full suite: 233 passed (229 + 4 new, net of the one
+O6b test updated in place); Ruff clean (`src tests examples`).
+
+Full rationale, alternatives, evidence: design record Round 20 (Section 32).
 
 ## Deviations from the design record
 

@@ -26,16 +26,31 @@ if TYPE_CHECKING:
     from reed.composition.flow.flow_composition import Flow
 
 
+# Milestone O7, Slice O7f: a blank instrument cell for a Node with no
+# `instruments=[...]` declared reads as "declared nothing, no signal at
+# all" -- but that Node is exactly the one still eligible for lazy-mode
+# `ctx.record(name, value)` calls (declared mode requires a non-empty
+# `instruments=[...]`; an empty one is what makes lazy mode active at all,
+# docs/observability_goals.md Section 2.3). Reed cannot know statically
+# whether such a Node actually calls `ctx.record(...)` at runtime -- that
+# is exactly the distinction to preserve: "may emit lazy Recordings,
+# unknown before execution" is not the same claim as "this Node has no
+# Instruments," and describe_flow must not conflate the two.
+LAZY_CAPABLE_LABEL = "<lazy -- may record, unknown before execution>"
+
+
 def describe_flow(flow: "Flow") -> Table:
     """
     Build a Rich `Table` of every `FlowNode` in `flow` and its declared
     Instruments (name/kind/unit/description), read directly off `Flow.
     flow_nodes`/`FlowNode.instruments` -- no `Run`, no execution.
 
-    A Node declared with no `instruments=[...]` (lazy-mode-only, or a Node
-    that never calls `ctx.record(...)` at all) appears with a single row
-    showing no instrument columns filled in, so `describe` still reports
-    every Node in the Flow, not only ones that declared Instruments.
+    A Node declared with no `instruments=[...]` appears with
+    `LAZY_CAPABLE_LABEL` in its instrument column (Slice O7f) rather than
+    a blank cell -- it is statically eligible for lazy-mode
+    `ctx.record(...)` calls, which is different information from "this
+    Node has no Instruments at all," even though describe_flow cannot
+    know whether it actually will record anything until it runs.
     """
     table = Table(title=f"Reed Flow -- {flow.flow_id}")
     table.add_column("node_id")
@@ -45,7 +60,7 @@ def describe_flow(flow: "Flow") -> Table:
 
     for flow_node in flow.flow_nodes:
         if not flow_node.instruments:
-            table.add_row(flow_node.node_id, "", "", "")
+            table.add_row(flow_node.node_id, LAZY_CAPABLE_LABEL, "", "")
             continue
         for instrument in flow_node.instruments:
             table.add_row(
@@ -72,7 +87,7 @@ def describe_instruments_manifest(path: Path) -> Table:
     for node_id, node_data in content["nodes"].items():
         instruments = node_data["instruments"]
         if not instruments:
-            table.add_row(node_id, "", "", "")
+            table.add_row(node_id, LAZY_CAPABLE_LABEL, "", "")
             continue
         for instrument in instruments:
             table.add_row(node_id, instrument["name"], instrument["kind"], instrument["unit"])

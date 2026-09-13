@@ -160,25 +160,32 @@ as it did to O1-O6).
 | O7h | DONE — Instrument API self-containment audit: name-based declared-mode resolution documented as preferred; `Instrument`-object resolution now validated against the FlowNode's declared schema instead of trusted directly. Design record §30. |
 | O7d | DONE — `flow.run(observability=...)` presets (`silent`/`errors`/`progress`/`instruments`/`nodes`/`verbose`) compiling to `PresentationPolicy`; `Presenter`/`TerminalPresenter`/`NullPresenter` consume `Run`'s existing identity/trace/recording hooks, no new collection mechanism. Design record §31.1-31.3, §31.5-31.6. |
 | O7e | DONE — indeterminate progress rendering (spinner + completed-node counter, no false N/M fraction); verified no `\d+/\d+` pattern is ever rendered. Design record §31.4. |
-| O7f | Replay/describe presentation corrections: disambiguate same-`execution_seq` replay rows without redefining `execution_seq`; distinguish "no Instruments" from "lazy-mode capable" in `describe_flow`. |
+| O7f | DONE — Replay rows now carry an explicit `node_execution_id` column; rows sharing one `execution_seq` are tie-broken by a fixed, documented-as-non-causal `_EVENT_TYPE_DISPLAY_PRIORITY`. `describe_flow`/`describe_instruments_manifest` render `LAZY_CAPABLE_LABEL` instead of a blank cell for Nodes with no declared Instruments. Design record §32. |
 | O7g | Final invariant-by-invariant audit and full regression pass. |
 
 ## Current slice
 
-**ALL AUTHORIZED SLICES COMPLETE (O1a through O6d).** 206 tests passing, Ruff clean.
-Milestones O1 (Identity), O2 (Instrument/Recording), O3 (Local Recording Store), O4
-(Provenance), O5 (Execution Trace: ring buffer, terminal renderer, post-hoc replay), and O6
-(Tooling/Exporters: OTel adapter, `describe`, `query`, `graph`) are all done.
+**O1a through O7f complete.** 233 tests passing, Ruff clean (`src tests examples`).
+Milestones O1-O6 (Identity, Instrument/Recording, Local Recording Store, Provenance,
+Execution Trace, Tooling/Exporters) remain as originally delivered and audited. Milestone O7
+(Post-Implementation Audit and Terminal Presentation Control) has completed slices O7a, O7b
+(Artifact version identity fix), O7c (Recording durability/hot-path fix), O7h (Instrument API
+self-containment audit), O7d/O7e (terminal presentation policy, API, and progress semantics),
+and O7f (replay ordering + lazy-mode describe corrections) -- see the Milestone O7 slice
+table above and design record §§28-32.
 
-Per the 2026-09-13 continuous-execution authorization's stop condition 4 ("all remaining
-slices through O6d are complete"), this is a genuine stopping point, not merely a checkpoint
--- there is no next slice in the authorized sequence to advance to. The only explicitly open
-item across the whole build is the narrowed registration-order-forces-new-`flow_id`
-question (Section 18.4), accepted as a known, non-blocking limitation. Any further
-observability work (a real `reed` CLI console-script entry point wrapping `describe`/
-`query`/`graph`, live-streaming trace rendering, a Parquet storage backend, Mermaid/HTML
-provenance rendering, etc.) is future work outside this authorized sequence and would need
-its own slice(s) defined before an agent should proceed autonomously again.
+**Next slice: O7g** -- final invariant-by-invariant audit (re-verify all 27 invariants in
+`observability_invariants.md` against the O7 changes, with particular attention to #7, #8,
+#9, #13, #17, #20, #22, #23, #25, #26, #27) and a final full regression pass
+(`uv run pytest -q -o addopts=''`, `uv run ruff check src tests examples`), followed by an
+expanded acceptance example demonstrating all six `observability=` presets over the same
+Flow and the final 16-item report the task requires.
+
+Any further observability work beyond O7g (a real `reed` CLI console-script entry point, a
+non-terminal `Presenter` such as `JSONLPresenter`, live-streaming trace rendering under real
+parallel Node execution, a Parquet storage backend, Mermaid/HTML provenance rendering, etc.)
+is future work outside this authorized sequence and would need its own slice(s) defined
+before an agent should proceed autonomously again.
 
 ## Open questions requiring decision (tracked, not yet resolved)
 
