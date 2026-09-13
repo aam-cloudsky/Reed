@@ -1354,3 +1354,70 @@ implementation itself.
 Section 17.2's narrower remaining question (whether registration-order changes alone should
 count as a new Flow) and Section 17.5 (`kind="event"`'s fate) remain open, tracked in
 `docs/observability_implementation_state.md`'s open-questions log, not resolved here.
+
+---
+
+## Round 7 (implementation, Milestone O2, Slice O2e) — resolving `kind="event"` (Section 17.5)
+
+This section resolves Section 17.5/16.2's withdrawn `kind="event"` question, per
+`observability_harness.md`'s Slice O2e definition of done: research the question, resolve
+it, and write the decision back here before continuing to Milestone O3.
+
+### 19.1 The decision: non-metric facts are `Recording`s with `kind=None`, never an
+`Instrument.kind` value
+
+`Instrument.kind` remains restricted to `"gauge"`/`"counter"`/`"updown_counter"` (Section
+16.2 stands unchanged — no `"event"` is added to that set). Separately, `Recording.kind` is
+typed `str | None`: a `Recording` produced from a declared `Instrument` always carries that
+Instrument's concrete `kind`; a `Recording` produced in **lazy mode** — `ctx.record(name,
+value)` with no `Instrument` object and no prior `instruments=[...]` declaration for that
+Node — always carries `kind=None`. `kind=None` is the answer to "what happens to a
+non-metric, non-Instrument fact": it is simply a `Recording` with no `Instrument` behind it,
+not a special `Instrument.kind` value and not a separate `Fact` type.
+
+This was implemented, ahead of this section being written, as the natural consequence of
+Slice O2d's lazy-mode design (`docs/observability_implementation_state.md`'s O1d/O2c/O2d
+entries; `NodeRuntime._resolve_instrument`, `reed/observability/recording.py`) — this
+section formalizes that as the deliberate answer to Section 17.5, not an accident to
+retroactively bless. `ctx.record(name="reason", value="conflict avoidance")` (Section 11-13's
+running example) already works exactly this way: a plain string name, no `Instrument`,
+`Recording.kind` is `None`, `Recording.value` is the scalar string.
+
+### 19.2 Why not a separate `Fact` type
+
+Section 17.5 posed two options: "either a separate `Fact` concept parallel to `Instrument`,
+or a decision that such recordings still go through `Instrument` with `kind` left
+optional/`None`." A separate `Fact` type was rejected: it would duplicate `Recording`'s
+entire shape (`name`, `value`, identity columns, `attributes`) for no behavioral difference —
+a `Fact` and a metric `Recording` are stored identically, queried identically (both are rows
+in `recordings.csv`, Milestone O3), and differ only in whether an `Instrument` with a
+concrete `kind` stands behind them. Encoding that one difference as `kind: str | None` on the
+single existing `Recording` type is simpler, avoids a second parallel API surface on `ctx`
+(`docs/observability_non_goals.md` Section 2: no new `ctx.*` vocabulary), and costs nothing a
+`Fact` type would have bought.
+
+### 19.3 Why not `Instrument.kind` left optional
+
+The alternative — making `Instrument.kind` itself `str | None` and letting a `None`-kind
+`Instrument` represent a fact — was also rejected: `Instrument` is specifically the
+declaration of *how to interpret a metric for projection into OTel* (`kind` gates the OTel
+Metric mapping, `docs/observability_goals.md` Section 8). A fact is not an
+OTel-projectable metric at all; it should never need to go through `Instrument`'s
+declaration path (`instruments=[...]`) to be recorded, and lazy mode already gives it a path
+that requires no declaration whatsoever. Making `Instrument.kind` optional would blur
+`Instrument`'s one concrete responsibility for a case that already has a simpler answer.
+
+### 19.4 Consequence for declared mode
+
+A Node that declares `instruments=[...]` and calls `ctx.record(...)` with a name in that list
+always gets a concrete `kind` (Section 19.1) — declared mode is exclusively for metrics.
+Declaring an `Instrument` is not, and does not become, the mechanism for recording a
+non-metric fact; lazy mode is that mechanism, unconditionally available on every Node
+regardless of whether it also declares `instruments=[...]` for its metrics.
+
+### 19.5 Status
+
+Section 17.5 is resolved. `docs/observability_goals.md` and `docs/observability_non_goals.md`
+are updated to match (see their own edit history). No production code changed as a direct
+result of this section — Slice O2d's implementation already matched this decision; this
+section is the formal record that it was a deliberate choice, not an oversight.

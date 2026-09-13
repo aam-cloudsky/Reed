@@ -229,11 +229,12 @@ shared, contended file or a database of its own.
   from the durability guarantee.
 
 ## 10. Open items this document does not resolve (tracked in `observability_design.md`
-Section 17/18, not repeated here in full)
+Section 17/18/19, not repeated here in full)
 
 - `flow_id`/`node_id` cross-run stability is now resolved (Milestone O1, Slice O1a;
   Section 18) — no longer an open item.
-- What happens to a non-metric, non-Instrument fact now that `kind="event"` has been
-  withdrawn pending research (Section 17.5) — still open, blocks Milestone O2's Slice O2e.
+- Non-metric, non-Instrument facts are now resolved (Milestone O2, Slice O2e; Section 19):
+  a `Recording` produced in lazy mode (no `Instrument`) always has `kind=None` — no longer
+  an open item.
 - Whether registration-order changes alone should count as a new `flow_id` (Section 18.4's
   narrowed remainder of Section 17.2) — still open, non-blocking.

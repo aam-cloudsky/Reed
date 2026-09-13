@@ -14,13 +14,12 @@ meaningful progress.
 
 ## Current slice
 
-**O2a — NOT STARTED.**
+**O3a — NOT STARTED.**
 
-Milestone O1 (Identity Foundations, slices O1a-O1f) is complete. Next: the `Instrument`
-dataclass (`name`, `kind`, `unit`, `description`; `kind` restricted to
-`gauge`/`counter`/`updown_counter`). See `docs/observability_harness.md` for the full
-milestone/slice table and `docs/observability_implementation_plan.md` for how this slice
-should be executed.
+Milestones O1 and O2 are complete (continuous execution authorized -- see decision log
+below). Next: `RecordingStore`/`ProvenanceStore` logical interfaces and a `CSVStore` V1
+implementation. See `docs/observability_harness.md` for the full milestone/slice table and
+`docs/observability_implementation_plan.md` for how this slice should be executed.
 
 ## Baseline verification
 
@@ -143,11 +142,46 @@ round/section, and only then is it marked resolved here.
 
 1. **`flow_id`/`node_id` cross-run stability** (`observability_design.md` §17.1) — status:
    **RESOLVED** (2026-09-13, Slice O1a; see Section 18). No longer open.
-2. **`kind="event"` fate** (`observability_design.md` §16.2/§17.5) — status: **open**, blocks
-   O2e/non-metric recording work. Target slice: O2e.
+2. **`kind="event"` fate** (`observability_design.md` §16.2/§17.5) — status:
+   **RESOLVED** (2026-09-13, Slice O2e; see Section 19: non-metric facts are lazy-mode
+   Recordings with `kind=None`). No longer open.
 3. **Whether registration-order changes alone should force a new `flow_id`**
    (`observability_design.md` §18.4, narrowing the original §17.2 question) — status:
    **open**, non-blocking for O1-O5; affects O6c's documentation only.
+
+### O2a-O2d — Instrument declaration, ctx.record() (declared + lazy mode) (2026-09-13)
+- observability_design.md section(s) implemented: Sections 16.2, 16.3 (goals §2.1-2.3).
+- Files changed: `src/reed/observability/instrument.py` (new), `src/reed/observability/recording.py`
+  (new), `src/reed/composition/flow/flow_node.py` (`instruments` field),
+  `src/reed/composition/flow/flow_composition.py` (`Flow.add(..., instruments=...)`),
+  `src/reed/composition/node/node_context.py` (`NodeContext.record`, `_recorder` slot),
+  `src/reed/execution/node_runtime.py` (`accept_recording`, `_resolve_instrument`,
+  `.recordings`, `build_context(identity, recorder)`), `src/reed/execution/run.py`
+  (`_build_call_kwargs` builds a bound recorder via `functools.partial`).
+- Tests: `tests/test_observability_o2_instrument_recording.py` (9 tests); full suite 165
+  passed at this point; ruff clean.
+- Deviations from the slice plan (if any): `tests/test_slice_1c_flow_node.py::test_flow_node_has_no_dedicated_identity_field`
+  asserted `FlowNode`'s exact field set; updated to include `instruments`, since that
+  assertion's actual invariant (no user-supplied *identity* field) is unaffected by adding an
+  observability declaration field. Recordings are in-memory only (`NodeRuntime.recordings`)
+  -- no durable store yet (Milestone O3).
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none.
+
+### O2e — Resolve `kind="event"` (2026-09-13)
+- observability_design.md section(s) implemented: written back as new Section 19 (Round 7).
+- Files changed: `docs/observability_design.md` (+Section 19), `docs/observability_goals.md`
+  (§10), `docs/observability_non_goals.md` (§10), plus two confirming tests appended to
+  `tests/test_observability_o2_instrument_recording.py`.
+- Tests: `test_lazy_mode_recording_kind_is_always_none_slice_o2e`,
+  `test_declared_mode_recording_kind_is_never_none_slice_o2e`; full suite 167 passed; ruff
+  clean.
+- Deviations from the slice plan (if any): no production code changed as a *result* of this
+  slice -- O2d's lazy-mode implementation already matched the resolved decision before this
+  slice formalized it in the design record. This is noted explicitly in Section 19.5, not
+  silently passed over.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none.
 
 ## Deviations from the design record
 

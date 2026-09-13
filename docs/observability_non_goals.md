@@ -127,11 +127,13 @@ These may become separate future issues; they are not part of this design.
 
 ## 10. Explicitly unresolved — do not silently freeze a default
 
-- `kind="event"` for non-metric Instruments/recordings was proposed and then withdrawn
-  pending research (`observability_design.md` Section 16.2/17.5). Do not ship an
-  implementation that quietly reintroduces `"event"` as a `kind` value, or that quietly
-  drops support for non-metric facts, without first resolving this explicitly. Both are
-  live possibilities and neither has been decided.
+- `kind="event"` for non-metric Instruments/recordings is now resolved (Milestone O2,
+  Slice O2e; `observability_design.md` Section 19): `Instrument.kind` stays restricted to
+  `gauge`/`counter`/`updown_counter` (no `"event"` was added), and a non-metric fact is
+  simply a `Recording` produced in lazy mode, carrying `kind=None` -- never a separate
+  `Fact` type, never an `Instrument` with an optional `kind`. Do not reintroduce `"event"`
+  as an `Instrument.kind` value, and do not add a parallel `Fact` concept -- both
+  alternatives were considered and rejected (Section 19.2/19.3).
 - `flow_id`/`node_id` stability across separate process runs of the same Flow is now
   resolved (Milestone O1, Slice O1a; `observability_design.md` Section 18: both are
   deterministically derived from source-level identity — module/qualname for `node_id`,

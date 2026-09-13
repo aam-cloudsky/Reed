@@ -89,10 +89,10 @@ that resolution should be its own slice, not folded silently into another one.
 | Slice | Delivers |
 |---|---|
 | O2a | `Instrument` dataclass (`name`, `kind`, `unit`, `description`); `kind` restricted to `"gauge"`/`"counter"`/`"updown_counter"` for now (no `Histogram`). |
-| O2b | `flow.add(node, instruments=[...])` — the primary, recommended declaration path. |
-| O2c | `ctx.record(instrument, value)` for declared Instruments; enforce "undeclared name is an error at first call" when a Node has an explicit `instruments=` list. |
-| O2d | Lazy-mode `ctx.record(name=..., value=..., unit=...)` for Nodes without a declared list; enforce "first observed kind/unit is authoritative, later mismatch raises." |
-| O2e | Resolve `kind="event"`'s fate (design record §16.2/§17.5): either a separate `Fact` concept parallel to `Instrument`, or an optional/`None` `kind` on `Instrument` for non-metric recordings. Written back into `observability_design.md` once decided, same as O1a. |
+| O2b | **DONE.** `Flow.add(..., instruments=[...])`; `FlowNode.instruments: tuple[Instrument, ...]`. |
+| O2c | **DONE.** `NodeContext.record(...)` -> a bound `NodeRuntime.accept_recording` recorder; declared mode validated in `NodeRuntime._resolve_instrument`. |
+| O2d | **DONE.** Lazy mode in `NodeRuntime._resolve_instrument`/`._lazy_units`; first-observed unit authoritative, later mismatch raises `ValueError`. |
+| O2e | **DONE.** Resolved as design record §19: no `Fact` type, no optional `Instrument.kind` -- a non-metric fact is a lazy-mode `Recording` with `kind=None`. |
 
 ### Milestone O3 — Local Recording Store ("how is a Recording made durable?")
 
