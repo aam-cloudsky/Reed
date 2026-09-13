@@ -14,10 +14,10 @@ meaningful progress.
 
 ## Current slice
 
-**O6c — NOT STARTED.**
+**O6d — NOT STARTED (final slice of the authorized sequence).**
 
-Milestones O1-O5 and Slices O6a-O6b are complete (continuous execution authorized). Next:
-O6c, `reed query <flow_id>`. See `docs/observability_harness.md` for the full
+Milestones O1-O5 and Slices O6a-O6c are complete (continuous execution authorized). Next:
+O6d, `reed graph <execution_id>`. See `docs/observability_harness.md` for the full
 milestone/slice table.
 
 ## Baseline verification
@@ -37,6 +37,7 @@ Re-run after O5c (2026-09-13): 190 passed (186 + 4 new O5c tests); ruff clean.
 Re-run after O6a (2026-09-13): 195 passed (190 + 5 new O6a tests); ruff clean
 (opentelemetry-api/-sdk installed via new `otel` optional-dependency extra).
 Re-run after O6b (2026-09-13): 198 passed (195 + 3 new O6b tests); ruff clean.
+Re-run after O6c (2026-09-13): 202 passed (198 + 4 new O6c tests); ruff clean.
 
 ## Completed slices
 
@@ -326,6 +327,22 @@ round/section, and only then is it marked resolved here.
 - Follow-up filed as future work (if any): an actual `argv`/console-script `reed` CLI
   wrapping `describe`/`query`/`graph`, if the project wants a real command-line tool rather
   than importable Python functions.
+
+### O6c — `reed query` (2026-09-13)
+- observability_design.md section(s) implemented: Section 16.4/17.2, written back as new
+  Section 27 (Round 15) documenting the canonical DuckDB/Polars glob query and providing a
+  pure-Python reference implementation.
+- Files changed: `src/reed/observability/query.py` (new: `recordings_glob_pattern(root)`,
+  `query_recordings(root, flow_id)`).
+- Tests: `tests/test_observability_o6c_query.py` (4 tests: aggregates rows across separate
+  Executions of the same Flow, filters out rows from a different Flow's Executions, glob
+  pattern matches the documented shape, unknown flow_id returns empty). Full suite: 202
+  passed; Ruff clean.
+- Deviations from the slice plan (if any): none -- implemented exactly as the harness row's
+  "documented... not solve it" instruction specifies: Section 17.2's Flow-shape-drift caveat
+  is restated in the module docstring, not detected or warned about in code.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none.
 
 ## Deviations from the design record
 

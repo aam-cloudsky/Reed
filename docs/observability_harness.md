@@ -140,15 +140,15 @@ scope).
 |---|---|
 | O6a | DONE — `export_trace_to_spans`/`export_recording_to_metric` (`src/reed/observability/otel_export.py`); `opentelemetry-api`/`-sdk` added as an optional `otel` extra, never core. Design record §25. |
 | O6b | DONE — `describe_flow`/`describe_instruments_manifest` (`src/reed/observability/describe.py`); Python-level introspection only, no argv CLI wiring (no `reed` console-script entry point exists in this repo). Design record §26. |
-| O6c | `reed query <flow_id>` — a documented DuckDB/Polars glob pattern over `.reed/runs/*/recordings.csv` (design record §16.4/§17.2's Flow-shape-drift caveat applies: document it as a user judgment call, not solve it). |
+| O6c | DONE — `query_recordings`/`recordings_glob_pattern` (`src/reed/observability/query.py`); DuckDB/Polars query strings documented in the module docstring, pure-Python reference implementation provided. Design record §27. |
 | O6d | `reed graph <execution_id>` — a provenance-graph renderer (terminal tree, Mermaid/DOT, or standalone HTML) consuming `provenance.csv` (design record §8, round 4). |
 
 ## Current slice
 
-**O6c — NOT STARTED.** Milestones O1-O5 and Slices O6a-O6b are complete -- 198 tests
-passing, Ruff clean. The next slice is O6c: `reed query <flow_id>` — a documented
-DuckDB/Polars glob pattern over `.reed/runs/*/recordings.csv` (design record §16.4/§17.2's
-Flow-shape-drift caveat applies: document it as a user judgment call, not solve it).
+**O6d — NOT STARTED.** Milestones O1-O5 and Slices O6a-O6c are complete -- 202 tests
+passing, Ruff clean. The next slice is O6d, the final slice of the authorized sequence:
+`reed graph <execution_id>` — a provenance-graph renderer (terminal tree, Mermaid/DOT, or
+standalone HTML) consuming `provenance.csv` (design record §8, round 4).
 
 ## Open questions requiring decision (tracked, not yet resolved)
 

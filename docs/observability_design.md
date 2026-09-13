@@ -1704,3 +1704,29 @@ Python-level introspection functions the harness row names; no `argv`-parsing `r
 executable/console-script entry point was added in this slice (out of scope for O6b as
 written -- the harness row describes the `reed describe <flow>` capability, not a specific
 CLI-wiring requirement, and no existing CLI entry point exists in this repository to extend).
+
+## Round 15 (Milestone O6, Slice O6c): `reed query` implemented
+
+### 27.1 `query_recordings`/`recordings_glob_pattern` (`src/reed/observability/query.py`)
+
+Implements and documents the canonical cross-Execution aggregation pattern Section 16.4/17.1
+named: a glob over `<storage_root>/runs/*/recordings.csv`, filtered by the `flow_id` column
+(recordings.csv is partitioned by `execution_id`, never by `flow_id`, so filtering by
+`flow_id` is always a column filter across many files). The module docstring gives the
+canonical DuckDB and Polars query strings verbatim, and `query_recordings(...)` is a pure-
+Python reference implementation of the same pattern with no DuckDB/Polars dependency --
+suitable for small local exploration and this repository's own tests, not a replacement for
+either tool at real Run volume.
+
+### 27.2 Flow-shape drift (Section 17.2) is documented, not solved
+
+Per the harness row's own instruction ("document it as a user judgment call, not solve it"),
+`query.py`'s module docstring restates Section 17.2's caveat verbatim in context:
+aggregating many Executions under one `flow_id` assumes those Executions ran a structurally
+comparable Flow, which is not automatically guaranteed by `flow_id` stability alone (Section
+18.4's known accepted limitations). `query_recordings(...)` performs no detection or
+warning for this -- it is out of scope by design, not an oversight.
+
+### 27.3 Status
+
+Slice O6c complete. No new open design questions surfaced.
