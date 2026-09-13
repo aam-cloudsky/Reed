@@ -176,6 +176,7 @@ import asyncio
 import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
+import functools
 import uuid
 
 from reed.composition.flow.trigger_policy import TriggerPolicy
@@ -443,8 +444,9 @@ class Run:
         if flow_node.context is not None:
             node_runtime = self.node_runtime(flow_node.definition.function)
             identity = self._begin_node_execution(flow_node)
+            recorder = functools.partial(node_runtime.accept_recording, identity)
             call_kwargs[flow_node.context.parameter_name] = (
-                node_runtime.build_context(identity)
+                node_runtime.build_context(identity, recorder)
             )
 
         return call_kwargs

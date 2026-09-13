@@ -145,6 +145,8 @@ from typing import TYPE_CHECKING
 from reed.composition.node.node_context import NodeContext
 from reed.execution.artifact_record import ArtifactRecord
 from reed.observability.identity import NodeExecutionIdentity
+from reed.observability.instrument import Instrument
+from reed.observability.recording import Recording, ScalarValue
 
 if TYPE_CHECKING:
     from reed.composition.flow.flow_node import FlowNode
@@ -176,6 +178,17 @@ class NodeRuntime:
         self._memory: object | None = None
         self._last_output: object | None = None
         self._firing_lock: threading.Lock | None = None
+        # Milestone O2, Slice O2c/O2d: in-memory Recording buffer (Level 2
+        # precursor -- Milestone O3 gives it a durable store) plus the
+        # lazy-mode registry that makes "first observed kind/unit wins"
+        # enforceable (docs/observability_goals.md Section 2.3).
+        self._recordings: list[Recording] = []
+        # name -> authoritative unit for a lazily-declared (undeclared
+        # Instrument) name -- Slice O2d's "first observed unit wins" rule.
+        self._lazy_units: dict[str, str | None] = {}
+        self._declared_instruments: dict[str, Instrument] = {
+            instrument.name: instrument for instrument in flow_node.instruments
+        }
 
     @property
     def run(self) -> Run:
@@ -327,7 +340,123 @@ class NodeRuntime:
         """
         return NodeContext(memory=self.memory, last_output=self.last_output)
 
-    def build_context(self, identity: NodeExecutionIdentity) -> NodeContext:
+    @property
+    def recordings(self) -> tuple[Recording, ...]:
+        """
+        Every `Recording` accepted on this `NodeRuntime` so far (Milestone
+        O2, Slice O2c/O2d), in acceptance order. In-memory only -- see
+        Milestone O3 for durable persistence.
+        """
+        return tuple(self._recordings)
+
+    def accept_recording(
+        self,
+        identity: NodeExecutionIdentity,
+        instrument_or_name: "Instrument | str",
+        value: ScalarValue,
+        *,
+        unit: str | None = None,
+        attributes: dict[str, ScalarValue] | None = None,
+    ) -> Recording:
+        """
+        Validate and accept one `ctx.record(...)` call (Milestone O2,
+        Slice O2c/O2d), bound (via `functools.partial`) into the
+        `NodeContext.record`-facing recorder built by
+        `Run._build_call_kwargs` for one firing's `identity`.
+
+        Two modes (docs/observability_goals.md Section 2.3):
+
+        - Declared mode (`self._flow_node.instruments` non-empty): an
+          `Instrument` instance, or a plain string matching a declared
+          Instrument's `name`, resolves to that Instrument. A name not
+          among the declared Instruments is an error at first call -- no
+          silent ad hoc registration once a Node has opted into explicit
+          declarations.
+        - Lazy mode (`self._flow_node.instruments` empty): a plain string
+          `name` is accepted with no prior declaration. The first
+          observed `unit` for a given `name` is authoritative; a later
+          call for the same `name` with a different `unit` raises
+          `ValueError`. `kind` is `None` in lazy mode (there was never an
+          `Instrument` to declare one).
+
+        `value` must be scalar (`str | int | float | bool`) --
+        docs/observability_non_goals.md Section 3.
+        """
+        if not isinstance(value, (str, int, float, bool)):
+            raise TypeError(
+                f"Recording value must be scalar (str | int | float | bool), "
+                f"got {type(value).__name__!r} (docs/observability_non_goals.md "
+                "Section 3 -- no mappings, dataclasses, lists, or nested "
+                "structures; flatten a compound fact into multiple explicit "
+                "ctx.record(...) calls with dot-segmented names instead)."
+            )
+
+        name, kind, resolved_unit = self._resolve_instrument(
+            instrument_or_name, unit=unit
+        )
+
+        recording = Recording(
+            instrument_id=f"{identity.flow_id}.{identity.node_id}.{name}",
+            name=name,
+            value=value,
+            kind=kind,
+            unit=resolved_unit,
+            execution_id=identity.execution_id,
+            flow_id=identity.flow_id,
+            node_id=identity.node_id,
+            node_execution_id=identity.node_execution_id,
+            execution_seq=identity.execution_seq,
+            attributes=dict(attributes) if attributes else {},
+        )
+        self._recordings.append(recording)
+        return recording
+
+    def _resolve_instrument(
+        self, instrument_or_name: "Instrument | str", *, unit: str | None
+    ) -> tuple[str, str | None, str | None]:
+        """Returns `(name, kind, unit)` -- `kind` is `None` in lazy mode."""
+        if isinstance(instrument_or_name, Instrument):
+            instrument = instrument_or_name
+            return instrument.name, instrument.kind, instrument.unit
+
+        name = instrument_or_name
+
+        if self._declared_instruments:
+            if name not in self._declared_instruments:
+                raise ValueError(
+                    f"{name!r} is not among this Node's declared instruments "
+                    f"({sorted(self._declared_instruments)!r}) -- calling "
+                    "ctx.record(...) with an undeclared name is an error once "
+                    "a Node has opted into explicit instruments=[...] "
+                    "(docs/observability_goals.md Section 2.3)."
+                )
+            declared = self._declared_instruments[name]
+            return declared.name, declared.kind, declared.unit
+
+        # Lazy mode: first observed unit for `name` is authoritative
+        # (docs/observability_goals.md Section 2.3); `kind` is always
+        # `None` here -- there was never an Instrument declared to carry
+        # one.
+        if name in self._lazy_units:
+            existing_unit = self._lazy_units[name]
+            if unit is not None and existing_unit != unit:
+                raise ValueError(
+                    f"ctx.record({name!r}, ...) was first observed with "
+                    f"unit={existing_unit!r}; a later call supplied a "
+                    f"different unit={unit!r}. The first observed unit for a "
+                    "lazily-declared name is authoritative "
+                    "(docs/observability_goals.md Section 2.3)."
+                )
+            return name, None, existing_unit
+
+        self._lazy_units[name] = unit
+        return name, None, unit
+
+    def build_context(
+        self,
+        identity: NodeExecutionIdentity,
+        recorder: "object | None" = None,
+    ) -> NodeContext:
         """
         A fresh `NodeContext` snapshot carrying an observability identity
         bundle (Milestone O1, Slice O1f).
@@ -347,5 +476,8 @@ class NodeRuntime:
         same as `.context`.
         """
         return NodeContext(
-            memory=self.memory, last_output=self.last_output, identity=identity
+            memory=self.memory,
+            last_output=self.last_output,
+            identity=identity,
+            recorder=recorder,
         )

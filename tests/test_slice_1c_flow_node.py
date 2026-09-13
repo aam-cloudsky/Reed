@@ -138,5 +138,17 @@ def test_flow_node_has_no_dedicated_identity_field():
 
     flow_node = FlowNode(definition=define(estimate))
 
+    # Milestone O2, Slice O2b added `instruments` (a tuple of declared
+    # Instrument observability definitions) -- this is not the
+    # flow-local "identity" field this test guards against (a distinct
+    # id/handle a user would supply, e.g. `name=`); `FlowNode.node_id`
+    # (Milestone O1, Slice O1c) remains a computed @property, not a
+    # stored field, for the same reason. This assertion's actual
+    # invariant -- no user-supplied identity field -- is unchanged.
     field_names = {field for field in FlowNode.__dataclass_fields__}
-    assert field_names == {"definition", "trigger_policy", "on_output"}
+    assert field_names == {
+        "definition",
+        "trigger_policy",
+        "on_output",
+        "instruments",
+    }

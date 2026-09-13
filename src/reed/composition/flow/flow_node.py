@@ -66,6 +66,7 @@ from reed.composition.node.domain_node_description import (
     NodeContextDescriptor,
 )
 from reed.composition.flow.trigger_policy import TriggerPolicy
+from reed.observability.instrument import Instrument
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,12 @@ class FlowNode:
     definition: DomainNodeDefinition
     trigger_policy: TriggerPolicy = TriggerPolicy.ALL_INPUTS_CHANGED
     on_output: Callable[[Any], object] | None = None
+    # This Node's declared Instruments (Milestone O2, Slice O2b;
+    # docs/observability_goals.md Section 2.2) -- the primary, recommended
+    # observability declaration path: `flow.add(node, instruments=[...])`.
+    # Empty by default, meaning "lazy mode": `ctx.record(name=..., value=...)`
+    # with a plain string name and no prior declaration (Slice O2d).
+    instruments: tuple[Instrument, ...] = ()
 
     @property
     def consumed_artifacts(self) -> tuple[ArtifactDescriptor, ...]:

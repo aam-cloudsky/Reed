@@ -77,7 +77,11 @@ from __future__ import annotations
 
 from typing import Generic, TypeVar
 
+from typing import Callable
+
 from reed.observability.identity import NodeExecutionIdentity
+from reed.observability.instrument import Instrument
+from reed.observability.recording import Recording, ScalarValue
 
 MemoryType = TypeVar("MemoryType")
 OutputType = TypeVar("OutputType")
@@ -94,7 +98,7 @@ class NodeContext(Generic[MemoryType, OutputType]):
     anything else internal to Reed's execution infrastructure.
     """
 
-    __slots__ = ("_memory", "_last_output", "_identity")
+    __slots__ = ("_memory", "_last_output", "_identity", "_recorder")
 
     def __init__(
         self,
@@ -102,6 +106,7 @@ class NodeContext(Generic[MemoryType, OutputType]):
         memory: MemoryType,
         last_output: OutputType | None,
         identity: NodeExecutionIdentity | None = None,
+        recorder: "Callable[..., Recording] | None" = None,
     ) -> None:
         self._memory = memory
         self._last_output = last_output
@@ -114,6 +119,12 @@ class NodeContext(Generic[MemoryType, OutputType]):
         # working unchanged; only the real firing path
         # (`Run._build_call_kwargs`) supplies one.
         self._identity = identity
+        # Milestone O2, Slice O2c/O2d: a single, narrow, bound callable
+        # (never a reference to NodeRuntime/Run/Flow themselves) that
+        # `.record(...)` forwards to. Optional, same reasoning as
+        # `identity` above -- every existing NodeContext construction is
+        # unaffected; only the real firing path supplies one.
+        self._recorder = recorder
 
     @property
     def memory(self) -> MemoryType:
@@ -142,6 +153,41 @@ class NodeContext(Generic[MemoryType, OutputType]):
         private computational memory, not a record of committed output.
         """
         return self._last_output
+
+    def record(
+        self,
+        instrument_or_name: "Instrument | str",
+        value: ScalarValue,
+        *,
+        unit: str | None = None,
+        attributes: dict[str, ScalarValue] | None = None,
+    ) -> Recording:
+        """
+        Record one observation (Milestone O2, Slice O2c/O2d;
+        docs/observability_goals.md Section 2.3).
+
+        `value` is scalar only (docs/observability_non_goals.md Section
+        3). Pass a declared `Instrument` (or its `name` string, if this
+        Node declared an `instruments=` list) for the declared path, or
+        a plain string `name` with no prior declaration for lazy mode.
+
+        Returns immediately -- this call is synchronous but the actual
+        write to a durable store (Milestone O3) is not this method's
+        concern; see docs/observability_goals.md Section 5/9.
+
+        Raises `RuntimeError` if this `NodeContext` was constructed
+        without a recorder (i.e. not built by a real firing --
+        `NodeRuntime.context`/direct construction never attach one).
+        """
+        if self._recorder is None:
+            raise RuntimeError(
+                "This NodeContext has no recorder attached -- ctx.record(...) "
+                "is only available on a NodeContext built by a real Node "
+                "firing (Run._build_call_kwargs -> NodeRuntime.build_context)."
+            )
+        return self._recorder(
+            instrument_or_name, value, unit=unit, attributes=attributes
+        )
 
     @property
     def identity(self) -> NodeExecutionIdentity | None:
