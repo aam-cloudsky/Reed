@@ -14,11 +14,12 @@ meaningful progress.
 
 ## Current slice
 
-**O6d — NOT STARTED (final slice of the authorized sequence).**
+**ALL AUTHORIZED SLICES COMPLETE (O1a through O6d). No slice is currently in progress.**
 
-Milestones O1-O5 and Slices O6a-O6c are complete (continuous execution authorized). Next:
-O6d, `reed graph <execution_id>`. See `docs/observability_harness.md` for the full
-milestone/slice table.
+Milestones O1-O6 are all complete. Per the 2026-09-13 continuous-execution authorization's
+stop condition 4 ("all remaining slices through O6d are complete"), this is a genuine
+stopping point. See `docs/observability_harness.md`'s "Current slice" section for what
+remains as explicitly out-of-scope future work.
 
 ## Baseline verification
 
@@ -38,6 +39,8 @@ Re-run after O6a (2026-09-13): 195 passed (190 + 5 new O6a tests); ruff clean
 (opentelemetry-api/-sdk installed via new `otel` optional-dependency extra).
 Re-run after O6b (2026-09-13): 198 passed (195 + 3 new O6b tests); ruff clean.
 Re-run after O6c (2026-09-13): 202 passed (198 + 4 new O6c tests); ruff clean.
+Re-run after O6d (2026-09-13): 206 passed (202 + 4 new O6d tests); ruff clean. **This
+is the final baseline of the authorized slice sequence (O1a-O6d).**
 
 ## Completed slices
 
@@ -344,6 +347,28 @@ round/section, and only then is it marked resolved here.
 - New open questions discovered (if any): none.
 - Follow-up filed as future work (if any): none.
 
+### O6d — `reed graph` (2026-09-13)
+- observability_design.md section(s) implemented: Section 8's round-4 provenance-graph
+  renderer addition, written back as new Section 28 (Round 16).
+- Files changed: `src/reed/observability/graph.py` (new: `ProvenanceGraphNode`,
+  `build_provenance_graph(run_dir)`, `render_provenance_tree(run_dir)`,
+  `render_provenance_dot(run_dir)`).
+- Tests: `tests/test_observability_o6d_graph.py` (4 tests: graph grouped by artifact
+  version with correct producer, a "used" edge appears once both producer and consumer have
+  fired, rendered Rich tree contains the artifact type and producer node, rendered DOT text
+  is a valid-looking digraph containing the same names). Full suite: 206 passed; Ruff
+  clean.
+- Deviations from the slice plan (if any): none.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): Mermaid/HTML provenance rendering (harness row's
+  other menu options, not implemented -- Rich tree and DOT satisfy the "terminal
+  tree"/"standalone page" options already); a real `argv` `reed` CLI console-script entry
+  point wrapping `describe`/`query`/`graph` (same open item as O6b).
+
+**Milestone O6 complete. The full authorized slice sequence (O2a through O6d, plus
+Milestone O1 completed before the 2026-09-13 continuous-execution authorization) is now
+complete. 206 tests passing, Ruff clean, zero regressions across the entire build.**
+
 ## Deviations from the design record
 
 _(none yet — record here if an implementation slice needs to deviate from
@@ -367,8 +392,15 @@ Authorized sequence as of this entry: O2a through O6d.
 
 - Read `docs/observability_agent_protocol.md` first, then this file's "Current slice"
   section, before touching any production code.
-- Continuous execution is authorized (see decision log above) — do not stop after a slice
-  merely because it completed; immediately continue to the next one in the authorized
-  sequence unless a genuine Stop Condition is met.
+- **As of 2026-09-13, all slices authorized by the continuous-execution instruction (O1a
+  through O6d) are complete.** Stop condition 4 of that authorization ("all remaining slices
+  through O6d are complete") has been reached -- this is a genuine stopping point, not a
+  checkpoint to blow past. Do not invent new slices or extend scope (a real `reed` CLI
+  entry point, Mermaid/HTML provenance rendering, a Parquet storage backend, live-streaming
+  trace rendering, etc. -- all noted as future work above) without new human authorization
+  naming them, the same way O2a-O6d were explicitly named.
+- If a human re-authorizes further work, it should name the next slice(s) explicitly (as
+  O2a-O6d were named) rather than assuming "continuous execution" extends indefinitely to
+  undefined future scope.
 - If this file and `docs/observability_harness.md` disagree on what the current slice is,
   stop and report — do not guess which one is stale.

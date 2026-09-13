@@ -141,14 +141,24 @@ scope).
 | O6a | DONE — `export_trace_to_spans`/`export_recording_to_metric` (`src/reed/observability/otel_export.py`); `opentelemetry-api`/`-sdk` added as an optional `otel` extra, never core. Design record §25. |
 | O6b | DONE — `describe_flow`/`describe_instruments_manifest` (`src/reed/observability/describe.py`); Python-level introspection only, no argv CLI wiring (no `reed` console-script entry point exists in this repo). Design record §26. |
 | O6c | DONE — `query_recordings`/`recordings_glob_pattern` (`src/reed/observability/query.py`); DuckDB/Polars query strings documented in the module docstring, pure-Python reference implementation provided. Design record §27. |
-| O6d | `reed graph <execution_id>` — a provenance-graph renderer (terminal tree, Mermaid/DOT, or standalone HTML) consuming `provenance.csv` (design record §8, round 4). |
+| O6d | DONE — `build_provenance_graph`/`render_provenance_tree`/`render_provenance_dot` (`src/reed/observability/graph.py`). Design record §28. **Milestone O6 and the full authorized slice sequence (O2a-O6d) are now complete.** |
 
 ## Current slice
 
-**O6d — NOT STARTED.** Milestones O1-O5 and Slices O6a-O6c are complete -- 202 tests
-passing, Ruff clean. The next slice is O6d, the final slice of the authorized sequence:
-`reed graph <execution_id>` — a provenance-graph renderer (terminal tree, Mermaid/DOT, or
-standalone HTML) consuming `provenance.csv` (design record §8, round 4).
+**ALL AUTHORIZED SLICES COMPLETE (O1a through O6d).** 206 tests passing, Ruff clean.
+Milestones O1 (Identity), O2 (Instrument/Recording), O3 (Local Recording Store), O4
+(Provenance), O5 (Execution Trace: ring buffer, terminal renderer, post-hoc replay), and O6
+(Tooling/Exporters: OTel adapter, `describe`, `query`, `graph`) are all done.
+
+Per the 2026-09-13 continuous-execution authorization's stop condition 4 ("all remaining
+slices through O6d are complete"), this is a genuine stopping point, not merely a checkpoint
+-- there is no next slice in the authorized sequence to advance to. The only explicitly open
+item across the whole build is the narrowed registration-order-forces-new-`flow_id`
+question (Section 18.4), accepted as a known, non-blocking limitation. Any further
+observability work (a real `reed` CLI console-script entry point wrapping `describe`/
+`query`/`graph`, live-streaming trace rendering, a Parquet storage backend, Mermaid/HTML
+provenance rendering, etc.) is future work outside this authorized sequence and would need
+its own slice(s) defined before an agent should proceed autonomously again.
 
 ## Open questions requiring decision (tracked, not yet resolved)
 

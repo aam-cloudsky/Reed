@@ -1730,3 +1730,39 @@ warning for this -- it is out of scope by design, not an oversight.
 ### 27.3 Status
 
 Slice O6c complete. No new open design questions surfaced.
+
+## Round 16 (Milestone O6, Slice O6d): provenance graph renderer implemented -- Milestone O6 and Issue #7's authorized slice sequence (O1-O6d) complete
+
+### 28.1 `build_provenance_graph`/`render_provenance_tree`/`render_provenance_dot` (`src/reed/observability/graph.py`)
+
+Implements Section 8's round-4 provenance-graph renderer addition exactly as described:
+`build_provenance_graph(run_dir)` groups `provenance.csv` rows by `(artifact_id,
+artifact_version)`, producing one `ProvenanceGraphNode` per artifact version with its
+`"generated"` row's `node_id` as producer and its `"used"` rows' `node_id`s as consumers --
+the `NodeA --generated--> ArtifactX <--used-- {NodeB, NodeC}` shape Section 8 names
+verbatim. Two renderings are provided over that same data structure, matching the harness
+row's own menu ("terminal tree, Mermaid/DOT, or standalone HTML"): `render_provenance_tree`
+(a Rich `Tree`, same rendering family as O5b's terminal renderer) and
+`render_provenance_dot` (a standalone Graphviz DOT string -- openable with any DOT renderer,
+no Reed-specific tooling, no server, satisfying the "small self-contained page" option in
+plain-text form rather than embedded HTML/JS).
+
+Both renderings are deliberately thin, swappable consumers of `build_provenance_graph(...)`'s
+data shape -- per Section 8's own framing, this is "a nice-to-have consumer, not a
+requirement this document commits an implementation date to," and neither rendering choice
+is meant to foreclose adding a Mermaid or HTML rendering later without touching the graph-
+building logic.
+
+### 28.2 Status: Milestone O6 complete; the authorized slice sequence (O2a through O6d) is complete
+
+Slice O6d complete. No new open design questions surfaced. This closes Milestone O6
+(Tooling/Exporters: O6a OTel adapter, O6b `describe`, O6c `query`, O6d `graph`) and, with it,
+the full slice sequence the 2026-09-13 continuous-execution authorization named: O2a → O2b →
+O2c → O2d → O2e → O3a → O3b → O3d → O3c → O3e → O4a → O4b → O4c → O5a → O5b → O5c → O6a →
+O6b → O6c → O6d, together with Milestone O1 (completed before that authorization). 206 tests
+passing, Ruff clean, zero regressions across sixteen Rounds of design-record updates.
+
+The only remaining explicitly open, non-blocking item across the whole build is the
+narrowed registration-order-forces-new-`flow_id` question (Section 18.4/`observability_
+goals.md` Section 10) -- accepted as a known limitation, not resolved, per Slice O1a's own
+scope.
