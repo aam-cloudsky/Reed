@@ -14,12 +14,12 @@ meaningful progress.
 
 ## Current slice
 
-**O3a — NOT STARTED.**
+**O4a — NOT STARTED.**
 
-Milestones O1 and O2 are complete (continuous execution authorized -- see decision log
-below). Next: `RecordingStore`/`ProvenanceStore` logical interfaces and a `CSVStore` V1
-implementation. See `docs/observability_harness.md` for the full milestone/slice table and
-`docs/observability_implementation_plan.md` for how this slice should be executed.
+Milestones O1, O2, and O3 are complete (continuous execution authorized). Next: wire
+`provenance.csv` event emission into the `ArtifactRepository` commit path (O4b) and
+consumption sites (O4c) -- the schema (`ProvenanceEvent`/`CSVProvenanceStore`) already
+exists as of O3a. See `docs/observability_harness.md` for the full milestone/slice table.
 
 ## Baseline verification
 
@@ -28,6 +28,8 @@ Run before Milestone O1 (2026-09-13): `uv run pytest -q -o addopts=''` → 145 p
 `uv sync --extra dev` installed it, `ruff==0.16.7`). Re-run after O1 (2026-09-13):
 `uv run pytest -q -o addopts=''` → 156 passed (145 baseline + 11 new O1 tests);
 `uv run ruff check src tests` → all checks passed.
+Re-run after O2 (2026-09-13): 167 passed (156 + 11 new O2 tests); ruff clean.
+Re-run after O3 (2026-09-13): 172 passed (167 + 5 new O3 tests); ruff clean.
 
 ## Completed slices
 
@@ -182,6 +184,33 @@ round/section, and only then is it marked resolved here.
   silently passed over.
 - New open questions discovered (if any): none.
 - Follow-up filed as future work (if any): none.
+
+### O3a-O3e — RecordingStore/ProvenanceStore, CSVStore, manifest.json, instruments.json (2026-09-13)
+- observability_design.md section(s) implemented: Section 16.4/17.3, written back as new
+  Section 20 (Round 8) covering two implementation decisions: (20.1) durable storage is
+  opt-in via `Flow.run(storage_root=...)`, not a default; (20.2) O3c's durability-boundary
+  flush wiring is satisfied by `CSVRecordingStore`/`CSVProvenanceStore`'s synchronous
+  per-call flush+fsync, with no separate finally-equivalent block needed.
+- Files changed: `src/reed/observability/storage.py` (new: `RecordingStore`/`ProvenanceStore`
+  protocols, `CSVRecordingStore`, `CSVProvenanceStore`, `write_manifest`,
+  `write_instruments_manifest_if_absent`), `src/reed/observability/provenance.py` (new:
+  `ProvenanceEvent`, ahead of its O4 emission wiring), `src/reed/execution/run.py`
+  (`storage_root` param, `.recording_store`/`.provenance_store` properties),
+  `src/reed/composition/flow/flow_composition.py` (`Flow.run(storage_root=...)`),
+  `src/reed/execution/node_runtime.py` (`accept_recording` also appends to
+  `run.recording_store` when configured).
+- Tests: `tests/test_observability_o3_storage.py` (5 tests). Full suite: 172 passed; ruff
+  clean.
+- Deviations from the slice plan (if any): O3c required no NodeRuntime/Run code at all --
+  see design record §20.2 for why the chosen store implementation already satisfies it.
+  Storage is opt-in (§20.1), a deliberate narrowing not explicit in the original harness row
+  wording, made to avoid every existing `flow.run()` call site silently starting to write
+  files to disk.
+- New open questions discovered (if any): whether a process-wide default `storage_root`
+  is ever wanted (§20.1) -- flagged as future work, not blocking.
+- Follow-up filed as future work (if any): batching/deferred-flush as a latency optimization
+  if a high-frequency-recording Node ever needs it (§20.2); a process-wide default
+  `storage_root` (§20.1).
 
 ## Deviations from the design record
 

@@ -1421,3 +1421,62 @@ Section 17.5 is resolved. `docs/observability_goals.md` and `docs/observability_
 are updated to match (see their own edit history). No production code changed as a direct
 result of this section — Slice O2d's implementation already matched this decision; this
 section is the formal record that it was a deliberate choice, not an oversight.
+
+---
+
+## Round 8 (implementation, Milestone O3) — storage implementation notes
+
+Milestone O3 (Local Recording Store, Slices O3a-O3e) is implemented on top of Sections 16.4
+and Section 6 of `observability_goals.md`. Two implementation decisions worth recording here,
+since they narrow prior open-ended language into concrete behavior:
+
+### 20.1 Durable storage is opt-in per `Run` (`storage_root=`), not a default
+
+`Flow.run()`/`Run.__init__` gained an optional `storage_root: str | None` parameter. When
+omitted (the default), Recordings remain in-memory only (`NodeRuntime.recordings`) exactly
+as Milestone O2 left them — no `.reed/` directory is created, no file is written. When
+provided, `.reed`-style storage is created and populated under that root as Section 16.4
+describes.
+
+This was a deliberate, narrower choice than "durability is Reed's default behavior for every
+Run," made for a concrete reason: the existing regression-protected test suite (`Run`,
+`NodeRuntime`, `Flow`) calls `flow.run()` freely, dozens of times, with no expectation that
+doing so writes files to disk. Defaulting durable storage to "on" would have silently turned
+every such test (and every future one, and any script that calls `flow.run()` without
+thinking about observability) into a filesystem side effect — directly in tension with
+architectural_invariants.md #25, "observability failures must never change application
+semantics," read here in its stronger form: observability *presence* should not change
+application behavior either, unless explicitly requested. Opt-in via `storage_root=` keeps
+every existing caller's behavior byte-for-byte unchanged and makes durable persistence a
+conscious choice, matching how `flow.add(instruments=[...])` is also opt-in (Section 16.2)
+rather than mandatory.
+
+This does not contradict the durability boundary contract (Section 13.2/`observability_
+goals.md` Section 5): that contract describes what happens *once storage is configured*, not
+a claim that storage is always configured. Future work: revisit whether a process-wide
+default `storage_root` (e.g. from configuration or an environment variable) is desirable once
+there is a concrete “I want durability but forgot to ask for it” complaint — not designed
+here, since no one has needed it yet.
+
+### 20.2 The durability boundary is satisfied by synchronous per-call flush, not by
+flush-on-exit wiring (Slice O3c)
+
+Section 13.2/`observability_goals.md` Section 5 describe the boundary as "Recordings
+accepted during a NodeExecution are guaranteed to be durably flushed when that NodeExecution
+exits." The V1 CSV stores (`CSVRecordingStore`/`CSVProvenanceStore`,
+`src/reed/observability/storage.py`) flush and `fsync` synchronously on every `append(...)`
+call — meaning a Recording is durable the instant `ctx.record(...)` accepts it, strictly
+before the boundary the contract requires, not merely by the boundary. This satisfies Slice
+O3c's flush-wiring requirement without needing a separate `finally`-equivalent block around
+the Node body: there is no deferred, in-flight batch to flush at exit, because nothing is
+ever buffered past one `ctx.record()` call.
+
+This is an explicit V1 latency/simplicity trade-off, not a batching optimization deferred by
+oversight: `docs/observability_non_goals.md` Section 5's caution against "an `fsync` per
+`ctx.record()` call" was aimed at using that as a patch over an unqualified "never lossy"
+claim, which is not what is happening here — the boundary contract itself is unchanged and
+still explicitly qualified (a crash *before* `ctx.record()` is called loses nothing that was
+never recorded; there is no longer a window between "recorded" and "durable" to worry about
+at all, because that window is now zero). If hot-path latency becomes a real concern for a
+high-frequency-recording Node, buffering with an explicit flush-at-boundary is legitimate
+future work, deferred rather than designed here.

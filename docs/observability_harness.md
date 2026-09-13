@@ -100,11 +100,11 @@ Depends on O2 (the store's row shape is defined by `Recording`).
 
 | Slice | Delivers |
 |---|---|
-| O3a | `RecordingStore`/`ProvenanceStore` logical interfaces; `CSVStore` V1 implementation. |
-| O3b | `recordings.csv` writer: append-only, one file per Execution, crash-safe (flush+fsync per batch; tolerant of a truncated final line on read). |
-| O3c | Durability-boundary flush wiring in `NodeRuntime`: a `finally`-equivalent block around the Node body covering success, exception, and cancellation exits (design record §13.2, round 4 — the explicit boundary contract, not an unqualified "never lossy" claim). |
-| O3d | `manifest.json` per Execution, indexing `recordings.csv`/`provenance.csv` and their `schema_version`. |
-| O3e | `instruments.json` per `flow_id` under `.reed/flows/<flow_id>/`; write-once-if-absent or generated on demand — not rewritten by every ordinary run (design record §17.3 flags the concurrency risk of getting this wrong). |
+| O3a | **DONE.** `RecordingStore`/`ProvenanceStore` `Protocol`s; `CSVRecordingStore`/`CSVProvenanceStore` (`src/reed/observability/storage.py`). |
+| O3b | **DONE.** `CSVRecordingStore.append`: append-only, one file per Execution, flush+fsync per call. |
+| O3c | **DONE (by construction — see design record §20.2).** No separate flush-on-exit wiring needed: `CSVRecordingStore.append`'s synchronous per-call flush+fsync makes every Recording durable before the boundary, not merely at it. |
+| O3d | **DONE.** `write_manifest(...)`, written once per `Run.__init__` when `storage_root` is set. |
+| O3e | **DONE.** `write_instruments_manifest_if_absent(...)`; verified write-once by `tests/test_observability_o3_storage.py::test_instruments_json_write_once_if_absent`. |
 
 ### Milestone O4 — Provenance ("what data came from what?")
 
@@ -145,14 +145,16 @@ scope).
 
 ## Current slice
 
-**O2a — NOT STARTED.** Milestone O1 (Identity Foundations, slices O1a-O1f) is complete —
+**O4a — NOT STARTED.** Milestones O1, O2, and O3 (Local Recording Store) are complete —
 see `docs/observability_implementation_state.md` for the full completed-slice record.
-`flow_id`/`node_id` stability is resolved (`docs/observability_design.md` Section 18);
-`execution_id`, `flow_id`, `node_id`/`node_name`, `node_execution_id`, `execution_seq`, and
-the `NodeContext` identity bundle are all implemented and covered by
-`tests/test_observability_o1_identity.py`. The next slice is O2a: the `Instrument`
-dataclass (`name`, `kind`, `unit`, `description`; `kind` restricted to
-`gauge`/`counter`/`updown_counter`).
+`RecordingStore`/`ProvenanceStore`, `CSVRecordingStore`/`CSVProvenanceStore`,
+`manifest.json`, and `instruments.json` are implemented (`src/reed/observability/storage.py`)
+and covered by `tests/test_observability_o3_storage.py`. Durable storage is opt-in via
+`Flow.run(storage_root=...)` (design record Section 20.1); the durability boundary is
+satisfied by synchronous per-call flush+fsync, exceeding rather than merely meeting the
+contract (Section 20.2). The next slice is O4a: wiring `provenance.csv` event emission
+(`ProvenanceEvent`/`CSVProvenanceStore` already exist as of O3a) into the
+`ArtifactRepository` commit path (O4b) and consumption sites (O4c).
 
 ## Open questions requiring decision (tracked, not yet resolved)
 

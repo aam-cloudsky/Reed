@@ -265,7 +265,7 @@ class Flow:
 
         return flow_node
 
-    def run(self) -> Run:
+    def run(self, *, storage_root: str | None = None) -> Run:
         """
         Create a new `Run` -- one concrete execution instance of this
         `Flow` (Slice 2A; docs/architectural_decision.md, "Run").
@@ -284,4 +284,4 @@ class Flow:
         `reed/execution/node_runtime.py`'s module docstrings for the
         exact scope.
         """
-        return Run(self)
+        return Run(self, storage_root=storage_root)

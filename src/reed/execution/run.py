@@ -178,10 +178,19 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import functools
 import uuid
+from pathlib import Path
 
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.execution.node_runtime import NodeRuntime
 from reed.observability.identity import NodeExecutionIdentity
+from reed.observability.storage import (
+    CSVProvenanceStore,
+    CSVRecordingStore,
+    ProvenanceStore,
+    RecordingStore,
+    write_instruments_manifest_if_absent,
+    write_manifest,
+)
 from reed.synchronization.artifact_repository import ArtifactRepository
 from reed.transportation.bus import Bus
 
@@ -207,7 +216,7 @@ class Run:
     stored on `Flow` or `FlowNode`.
     """
 
-    def __init__(self, flow: Flow) -> None:
+    def __init__(self, flow: Flow, *, storage_root: str | None = None) -> None:
         self._flow = flow
         self._repository = ArtifactRepository(bus=Bus.create())
         self._node_runtimes: dict[FlowNode, NodeRuntime] = {}
@@ -218,6 +227,32 @@ class Run:
         # this one execution_id.
         self._execution_id: str = str(uuid.uuid4())
         self._execution_seq_counter: int = 0
+
+        # Milestone O3: durable storage is opt-in via `storage_root`
+        # (docs/observability_implementation_state.md's O3a-e entry
+        # records this as a deliberate default -- omitting `storage_root`
+        # keeps Recordings in-memory only, exactly as Milestone O2 left
+        # them, so every existing caller of `Flow.run()`/`Run(flow)` is
+        # completely unaffected and no test or script silently starts
+        # writing files to disk).
+        self._recording_store: RecordingStore | None = None
+        self._provenance_store: ProvenanceStore | None = None
+        if storage_root is not None:
+            root = Path(storage_root)
+            write_manifest(
+                root, execution_id=self._execution_id, flow_id=flow.flow_id
+            )
+            write_instruments_manifest_if_absent(
+                root,
+                flow_id=flow.flow_id,
+                nodes=[
+                    (fn.node_id, fn.node_name, fn.instruments)
+                    for fn in flow.flow_nodes
+                ],
+            )
+            run_dir = root / "runs" / self._execution_id
+            self._recording_store = CSVRecordingStore(run_dir / "recordings.csv")
+            self._provenance_store = CSVProvenanceStore(run_dir / "provenance.csv")
         self.callback_failures: list[BaseException] = []
         self._pending_callback_coroutines: list[Any] = []
         # Slice 2I: per-(Run, FlowNode) join-state bookkeeping for the
@@ -249,6 +284,21 @@ class Run:
         execution of it.
         """
         return self._execution_id
+
+    @property
+    def recording_store(self) -> "RecordingStore | None":
+        """
+        This `Run`'s `RecordingStore` (Milestone O3), or `None` if this
+        `Run` was created with no `storage_root` -- Recordings then stay
+        in-memory only (`NodeRuntime.recordings`), exactly as Milestone
+        O2 left them.
+        """
+        return self._recording_store
+
+    @property
+    def provenance_store(self) -> "ProvenanceStore | None":
+        """This `Run`'s `ProvenanceStore` (Milestone O4), or `None` -- see `.recording_store`."""
+        return self._provenance_store
 
     @property
     def flow_id(self) -> str:

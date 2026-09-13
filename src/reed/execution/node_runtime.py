@@ -409,6 +409,12 @@ class NodeRuntime:
             attributes=dict(attributes) if attributes else {},
         )
         self._recordings.append(recording)
+        if self._run.recording_store is not None:
+            # Milestone O3, Slice O3b/O3c: durable persistence, opt-in via
+            # Run(storage_root=...). Synchronous, flush+fsync per call --
+            # see storage.py's module docstring for why this exceeds
+            # rather than merely meets the durability boundary.
+            self._run.recording_store.append(recording)
         return recording
 
     def _resolve_instrument(
