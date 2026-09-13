@@ -748,9 +748,16 @@ class Run:
     def _emit_used_provenance_events(
         self, flow_node: "FlowNode", identity: NodeExecutionIdentity
     ) -> None:
-        if self._provenance_store is None:
-            return
-
+        """
+        Emits a durable `"used"` `ProvenanceEvent` per consumed Artifact type
+        with a prior producer (only when `self._provenance_store` is
+        configured -- Milestone O3/O4's own opt-in), and -- independently,
+        Milestone O8, Slice O8b -- reports the same fact to the terminal
+        `Presenter` via `on_artifact_consumed`, regardless of whether durable
+        storage is configured. Presentation must never depend on the durable
+        storage opt-in (docs/observability_invariants.md #35): a `Run` with no
+        `storage_root` still renders `propagation` terminal output.
+        """
         for descriptor in flow_node.consumed_artifacts:
             existing = self._repository.get_artifact_record(descriptor.domain_type)
             if existing is None:
@@ -758,32 +765,52 @@ class Run:
                 # emit (there is no artifact_version to report).
                 continue
 
+            if self._provenance_store is not None:
+                self._provenance_store.append(
+                    ProvenanceEvent(
+                        event_type="used",
+                        artifact_id=self._artifact_id(descriptor.domain_type),
+                        artifact_version=existing.version.number,
+                        node_execution_id=identity.node_execution_id,
+                        node_id=identity.node_id,
+                        execution_seq=identity.execution_seq,
+                    )
+                )
+
+            self._safe_presenter_call(
+                self._presenter.on_artifact_consumed,
+                identity,
+                artifact_type=descriptor.domain_type.__name__,
+                artifact_version=existing.version.number,
+            )
+
+    def _emit_generated_provenance_event(
+        self, record: "ArtifactRecord", identity: NodeExecutionIdentity
+    ) -> None:
+        """
+        Emits a durable `"generated"` `ProvenanceEvent` (only when
+        `self._provenance_store` is configured), and -- independently,
+        Milestone O8, Slice O8b -- reports the same fact to the terminal
+        `Presenter` via `on_artifact_generated`, regardless of durable
+        storage configuration (see `_emit_used_provenance_events` docstring).
+        """
+        if self._provenance_store is not None:
             self._provenance_store.append(
                 ProvenanceEvent(
-                    event_type="used",
-                    artifact_id=self._artifact_id(descriptor.domain_type),
-                    artifact_version=existing.version.number,
+                    event_type="generated",
+                    artifact_id=self._artifact_id(type(record.value)),
+                    artifact_version=record.version.number,
                     node_execution_id=identity.node_execution_id,
                     node_id=identity.node_id,
                     execution_seq=identity.execution_seq,
                 )
             )
 
-    def _emit_generated_provenance_event(
-        self, record: "ArtifactRecord", identity: NodeExecutionIdentity
-    ) -> None:
-        if self._provenance_store is None:
-            return
-
-        self._provenance_store.append(
-            ProvenanceEvent(
-                event_type="generated",
-                artifact_id=self._artifact_id(type(record.value)),
-                artifact_version=record.version.number,
-                node_execution_id=identity.node_execution_id,
-                node_id=identity.node_id,
-                execution_seq=identity.execution_seq,
-            )
+        self._safe_presenter_call(
+            self._presenter.on_artifact_generated,
+            identity,
+            artifact_type=type(record.value).__name__,
+            artifact_version=record.version.number,
         )
 
     def _safe_presenter_call(self, hook, *args, **kwargs) -> None:

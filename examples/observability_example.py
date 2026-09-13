@@ -288,5 +288,51 @@ def main() -> None:
         )
 
 
+    # ------------------------------------------------------------------
+    # Milestone O8: structured logging + terminal rendering visual grammar.
+    #
+    # `on_artifact_generated`/`on_artifact_consumed` (reed.observability.
+    # presenter) render the same Node -> Artifact -> Repository fact
+    # `_emit_generated_provenance_event`/`_emit_used_provenance_events`
+    # already observe -- "propagation" is the compact normal-mode grammar,
+    # "verbose" adds explicit CONSUME/RECORD/COMMIT operation labels.
+    # `StructuredLogPresenter` (reed.observability.logging) turns the same
+    # hook calls into stable-field `LogEvent` dicts -- never scraped from
+    # terminal strings.
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 78)
+    print("Milestone O8: structured logging and terminal rendering")
+    print("=" * 78)
+
+    from reed.observability.logging import StructuredLogPresenter
+    from reed.observability.presenter import CompositePresenter, TerminalPresenter
+    from reed.observability.presentation import resolve_presentation_policy
+
+    for label, preset in (("normal (propagation)", "propagation"), ("verbose", "verbose")):
+        print(f"\n--- {label} " + "-" * (40 - len(label)))
+        o8_flow = Flow()
+        o8_flow.add(track_temperature)
+        o8_flow.add(detect_anomaly)
+        o8_run = o8_flow.run(observability=preset)
+        o8_run.publish(SensorReading(celsius=91.3))
+
+    print("\n--- structured representation of the same events " + "-" * 10)
+    captured_events: list[dict] = []
+    o8_flow = Flow()
+    o8_flow.add(track_temperature)
+    o8_flow.add(detect_anomaly)
+    o8_run = o8_flow.run(observability="silent")
+    o8_run._presenter = CompositePresenter(
+        [
+            TerminalPresenter(resolve_presentation_policy("silent")),
+            StructuredLogPresenter(sink=captured_events.append),
+        ]
+    )
+    o8_run.publish(SensorReading(celsius=91.3))
+    import json as _json
+
+    for event in captured_events:
+        print(_json.dumps(event))
+
 if __name__ == "__main__":
     main()

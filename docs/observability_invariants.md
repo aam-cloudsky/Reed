@@ -44,3 +44,24 @@
 25. Observability failures must never change application semantics.
 26. Remote exporters are never on the Node hot path.
 27. OpenTelemetry is an optional projection, not Reed's source of truth.
+## Structured logging and terminal rendering (Issue #8)
+
+28. Terminal rendering never defines execution semantics.
+29. Structured log events use stable, named semantic fields, never free-form interpolated strings as the primary representation.
+30. A structured log event is a projection of an existing Execution Trace / Provenance / Recording fact, never a second, independently-collected source of truth.
+31. Presenter-hook failure isolation (invariant #25) applies identically to every concrete Presenter, including structured-log sinks and any composite fan-out.
+32. Machine (structured) representation is independent of human (terminal) rendering -- either can change without the other.
+33. Normal-mode terminal output never prints information already unambiguously encoded by its visual structure (column position, arrow direction, marker).
+34. Presentation detail level (Normal/Verbose/Debug-style dimensions) never alters what is computed, collected, or persisted.
+35. Disabling terminal output ("silent") never disables Execution Trace / Provenance / Recording collection.
+36. Disabling terminal output never necessarily disables structured logging (they are independently configured sinks).
+37. Event meaning must be recoverable without color (structure and text carry meaning; color only reinforces it).
+
+## Non-goals (Issue #8)
+
+- Not redesigning Reed execution, provenance, or instrumentation semantics.
+- Not restoring the legacy Depot/Outpost/Parcel/Bus architecture or its message-traffic vocabulary.
+- Not building a TUI or live dashboard.
+- Not introducing distributed logging infrastructure (log shipping, aggregation services).
+- Not implementing every possible logging sink (only a JSON-lines-shaped default and an extension point).
+- Not solving parallel execution or scheduling (the schema is designed to remain valid under a future concurrent model, but none is implemented here).

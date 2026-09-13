@@ -209,3 +209,23 @@ Not yet run for this workstream — no production code has changed. The prior re
 baseline (`uv run pytest -q -o addopts=''`, `uv run ruff check src tests`) remains the
 starting point; re-verify it before O1a begins, since observability work lands on top of
 whatever state Issue #4's merged PR (#17) left the branch in.
+
+---
+
+## Issue #8 — Structured Logging and Semantic Terminal Rendering: slice plan
+
+(Appended after Issue #7's Milestones O1-O7 landed; this section is Issue #8's own
+slice-by-slice plan, executed and closed out in one pass alongside `docs/logging_design.md`
+and `docs/observability_invariants.md`'s Issue #8 additions.)
+
+| Slice | Objective | Files | Invariant | Tests | Completion |
+|-------|-----------|-------|-----------|-------|------------|
+| O8a | Stable `LogEvent` schema + `StructuredLogPresenter` sink, built as a `Presenter` | `src/reed/observability/logging.py` | #29, #30, #32 | `test_logging_o8_structured_and_rendering.py::test_structured_log_presenter_*` | `LogEvent.to_dict()` produces stable named fields for every hook call; no dependency on terminal strings |
+| O8b | Artifact-publication rendering (`on_artifact_generated`/`on_artifact_consumed`) + compact/verbose visual grammar + `CompositePresenter` | `src/reed/observability/presenter.py`, `presentation.py`, `src/reed/execution/run.py` | #28, #33, #34, #35, #37 | `test_single_publication_renders_compactly_in_normal_mode`, `test_multi_hop_propagation_renders_in_order`, `test_repeated_publication_shows_artifact_versions`, `test_verbose_mode_shows_explicit_operations`, `test_normal_propagation_mode_omits_explicit_operations` | Node -> Artifact -> Repository visible in `propagation`/`verbose` presets; presentation hooks fire independent of `storage_root` |
+| O8c | Failure isolation extended to structured-log sinks and composite fan-out | `src/reed/observability/presenter.py` (`CompositePresenter`) | #31, #36 | `test_broken_composite_sub_presenter_does_not_affect_others_or_computation`, `test_composite_presenter_lets_structured_logging_run_even_when_terminal_is_silent` | A broken sub-presenter never affects computation or sibling presenters |
+| O8d | Example demonstrating normal vs. verbose rendering + structured representation | `examples/observability_example.py` | (demonstrates all of the above) | manual run captured in the Issue #8 final report | `uv run python examples/observability_example.py` prints both terminal renderings and the matching JSON events |
+
+No migration/removal of obsolete behavior was required: Issue #8 is additive on top of
+Issue #7's `Presenter`/`PresentationPolicy` surface (one new `PresentationPolicy` field,
+`verbose_ops`, defaulting `False`; two new `Presenter` hooks, both no-ops on the base
+class, so no existing `Presenter` subclass or preset changes behavior unless it opts in).
