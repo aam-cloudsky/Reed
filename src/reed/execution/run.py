@@ -177,6 +177,7 @@ import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
 import functools
+import time
 import uuid
 from pathlib import Path
 
@@ -184,6 +185,7 @@ from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.execution.node_runtime import NodeRuntime
 from reed.observability.identity import NodeExecutionIdentity
 from reed.observability.provenance import ProvenanceEvent
+from reed.observability.trace import ExecutionTrace, TraceEvent, TraceEventType
 from reed.observability.storage import (
     CSVProvenanceStore,
     CSVRecordingStore,
@@ -272,6 +274,15 @@ class Run:
         self._last_known_values: dict[FlowNode, dict[type, object]] = {}
         self._fresh_since_last_firing: dict[FlowNode, set[type]] = {}
 
+        # Milestone O5, Slice O5a: Level 1 Execution Trace -- an
+        # in-memory ring buffer, not required to be durable (design
+        # record Section 11.1). Always constructed (unlike
+        # recording_store/provenance_store, which are opt-in via
+        # `storage_root`): Level 1 has no durability contract to opt in
+        # to, so there is no existing-caller behavior to protect by
+        # defaulting it off.
+        self._trace = ExecutionTrace()
+
     @property
     def flow(self) -> Flow:
         """The `Flow` that created this `Run` via `Flow.run()`."""
@@ -303,6 +314,17 @@ class Run:
     def provenance_store(self) -> "ProvenanceStore | None":
         """This `Run`'s `ProvenanceStore` (Milestone O4), or `None` -- see `.recording_store`."""
         return self._provenance_store
+
+    @property
+    def trace(self) -> ExecutionTrace:
+        """
+        This `Run`'s Level 1 Execution Trace (Milestone O5, Slice O5a): an
+        in-memory ring buffer of `TraceEvent`s recording which Node fired,
+        in what order, correlated by the same identity Recordings/
+        Provenance use. Not durable -- see `docs/observability_design.md`
+        Section 11.1 and `reed.observability.trace.ExecutionTrace`.
+        """
+        return self._trace
 
     @property
     def flow_id(self) -> str:
@@ -565,10 +587,17 @@ class Run:
         this firing itself commits, after `.commit(...)` succeeds. Both
         are no-ops when this `Run` has no `provenance_store` configured
         (`storage_root` was not passed to `Flow.run(...)`).
+
+        Milestone O5 (Slice O5a): records a `"node_started"` `TraceEvent`
+        into `self.trace` before calling the node function, and a
+        `"node_finished"` `TraceEvent` after it commits -- unconditional,
+        unlike Provenance/Recordings, since Level 1 has no opt-in
+        (design record Section 11.1; `self._trace` is always constructed).
         """
         node_runtime = self.node_runtime(flow_node.definition.function)
 
         self._emit_used_provenance_events(flow_node, identity)
+        self._record_trace_event("node_started", identity)
 
         firing_lock = node_runtime.firing_lock
 
@@ -582,6 +611,8 @@ class Run:
         finally:
             if firing_lock is not None:
                 firing_lock.release()
+
+        self._record_trace_event("node_finished", identity)
 
         self._emit_generated_provenance_event(record, identity)
 
@@ -640,6 +671,27 @@ class Run:
                 node_execution_id=identity.node_execution_id,
                 node_id=identity.node_id,
                 execution_seq=identity.execution_seq,
+            )
+        )
+
+    def _record_trace_event(
+        self, event_type: TraceEventType, identity: NodeExecutionIdentity
+    ) -> None:
+        """
+        Milestone O5, Slice O5a: append one `TraceEvent` to `self.trace`
+        (Level 1 Execution Trace, design record Section 11.1).
+        Unconditional -- unlike Recordings/Provenance (Milestone O2-O4),
+        Level 1 has no `storage_root` opt-in and no store to be `None`.
+        """
+        self._trace.record(
+            TraceEvent(
+                event_type=event_type,
+                execution_id=identity.execution_id,
+                flow_id=identity.flow_id,
+                node_id=identity.node_id,
+                node_execution_id=identity.node_execution_id,
+                execution_seq=identity.execution_seq,
+                timestamp=time.time(),
             )
         )
 

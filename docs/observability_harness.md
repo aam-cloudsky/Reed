@@ -125,7 +125,7 @@ render trace/propagation alone), richer once O3/O4 exist for post-hoc replay.
 
 | Slice | Delivers |
 |---|---|
-| O5a | In-memory ring buffer per `Run` (Level 1, design record §11.1) — not required to be durable. |
+| O5a | DONE — `ExecutionTrace`/`TraceEvent` ring buffer (`src/reed/observability/trace.py`), always constructed per `Run`, exposed as `run.trace`. Design record §22.1. |
 | O5b | Rich-based terminal renderer consuming the live ring buffer, reconstructing the pre-Issue-4 trace-id-correlated experience (design record §1, §8) without reviving any Bus/Depot/Outpost machinery (`observability_non_goals.md` §9). |
 | O5c | Optional: extend the renderer to also read `recordings.csv`/`provenance.csv` for post-hoc replay of a past Execution. |
 
@@ -145,13 +145,12 @@ scope).
 
 ## Current slice
 
-**O5a — NOT STARTED.** Milestones O1 (Identity), O2 (Instrument/Recording), O3 (Local
-Recording Store), and O4 (Provenance) are complete — 177 tests passing, Ruff clean. The
-`generated`/`used` provenance event wiring (O4b/O4c) is in place per design record §21.2, and
-identity is now minted for every Node firing regardless of whether it declares a
-`NodeContext` parameter (design record §21.1). The next slice is O5a: an in-memory ring
-buffer per `Run` for the Level 1 Execution Trace (design record §11.1), not required to be
-durable.
+**O5b — NOT STARTED.** Milestones O1-O4 and Slice O5a (Level 1 Execution Trace ring buffer)
+are complete -- 182 tests passing, Ruff clean. `run.trace` is populated unconditionally for
+every firing (design record §22.1). The next slice is O5b: a Rich-based terminal renderer
+consuming the live ring buffer, reconstructing the pre-Issue-4 trace-id-correlated experience
+(design record §1, §8) without reviving any Bus/Depot/Outpost machinery
+(`observability_non_goals.md` §9).
 
 ## Open questions requiring decision (tracked, not yet resolved)
 

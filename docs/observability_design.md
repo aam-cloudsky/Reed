@@ -1539,3 +1539,44 @@ introduced for artifact types.
 Milestone O4 (Slices O4a-O4c) complete. No new open design questions surfaced. The narrowed
 registration-order-forces-new-`flow_id` question (Section 18.4/`observability_goals.md`
 Section 10) remains the only explicitly open, non-blocking item.
+
+## Round 10 (Milestone O5, Slice O5a): Level 1 Execution Trace implemented
+
+### 22.1 `ExecutionTrace`/`TraceEvent` (`src/reed/observability/trace.py`)
+
+Section 11.1's Level 1 is implemented as `reed.observability.trace.ExecutionTrace`: a
+bounded, in-memory ring buffer (`collections.deque(maxlen=capacity)`, default capacity
+1000) of `TraceEvent`s. `TraceEvent` is deliberately thinner than `Recording`/
+`ProvenanceEvent` -- `event_type` (`"node_started"`/`"node_finished"`), the same identity
+fields every Level 2 record already carries (`execution_id`, `flow_id`, `node_id`,
+`node_execution_id`, `execution_seq`), and `timestamp`. No `value`, no `attributes`, no
+`unit` -- Level 1 answers "what ran, in what order", not "what did it observe."
+
+`Run` always constructs an `ExecutionTrace` (`self._trace`, exposed as `run.trace`),
+unconditionally -- unlike `recording_store`/`provenance_store` (Milestone O3), which are
+opt-in via `storage_root`. This is not an inconsistency: Level 1 has no durability contract
+to opt in to (Section 11.1 says it "may be dropped when the process exits without anyone
+having asked for it to be kept"), so there is no existing-caller behavior to protect by
+defaulting it off the way Milestone O3's `storage_root=None` default protects every
+pre-existing `flow.run()` call site from silently writing files to disk (Section 20.1). A
+ring buffer with a bounded default capacity costs a fixed, small amount of memory per `Run`
+regardless of whether anything ever reads `run.trace`.
+
+`Run._fire(...)` records a `"node_started"` event immediately before calling the node
+function and a `"node_finished"` event after `.commit(...)` succeeds, via a new
+`_record_trace_event(...)` helper -- placed alongside, and after, the O4 `_emit_used_
+provenance_events(...)`/`_emit_generated_provenance_event(...)` calls in the same method,
+since all three now instrument the same two moments in a firing's lifecycle (before the call,
+after the commit).
+
+### 22.2 Deferred to O5b/O5c
+
+The Rich-based terminal renderer that consumes `run.trace` live during a Run (O5b) and the
+optional post-hoc replay reading `recordings.csv`/`provenance.csv` (O5c) are not part of this
+slice. `ExecutionTrace.events` returning an immutable snapshot `tuple` is the only API surface
+O5b needs to poll or subscribe to; no additional design decision is required before O5b can
+be implemented directly against it.
+
+### 22.3 Status
+
+Slice O5a complete. No new open design questions surfaced.

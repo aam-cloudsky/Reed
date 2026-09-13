@@ -14,12 +14,11 @@ meaningful progress.
 
 ## Current slice
 
-**O5a — NOT STARTED.**
+**O5b — NOT STARTED.**
 
-Milestones O1, O2, O3, and O4 (Provenance) are complete (continuous execution authorized).
-Next: O5a, an in-memory ring buffer per `Run` for the Level 1 Execution Trace (design record
-§11.1), not required to be durable. See `docs/observability_harness.md` for the full
-milestone/slice table.
+Milestones O1-O4 and Slice O5a (Level 1 Execution Trace ring buffer) are complete
+(continuous execution authorized). Next: O5b, a Rich-based terminal renderer consuming the
+live ring buffer. See `docs/observability_harness.md` for the full milestone/slice table.
 
 ## Baseline verification
 
@@ -32,6 +31,7 @@ Re-run after O2 (2026-09-13): 167 passed (156 + 11 new O2 tests); ruff clean.
 Re-run after O3 (2026-09-13): 172 passed (167 + 5 new O3 tests); ruff clean.
 Re-run after O4 (2026-09-13): 177 passed (172 + 6 new O4 tests); ruff clean (one
 forward-ref lint error fixed: `ArtifactRecord` type hint needed a `TYPE_CHECKING` import).
+Re-run after O5a (2026-09-13): 182 passed (177 + 5 new O5a tests); ruff clean.
 
 ## Completed slices
 
@@ -237,6 +237,22 @@ round/section, and only then is it marked resolved here.
   context-free Nodes.
 - New open questions discovered (if any): none.
 - Follow-up filed as future work (if any): none.
+
+### O5a — Level 1 Execution Trace ring buffer (2026-09-13)
+- observability_design.md section(s) implemented: Section 11.1, written back as new Section
+  22 (Round 10) covering the `ExecutionTrace`/`TraceEvent` implementation and why it is
+  unconditional (no `storage_root` opt-in, unlike Recordings/Provenance).
+- Files changed: `src/reed/observability/trace.py` (new: `TraceEvent`, `ExecutionTrace`),
+  `src/reed/execution/run.py` (`self._trace` constructed unconditionally in `__init__`,
+  `.trace` property, `_record_trace_event(...)` helper called from `_fire(...)` before the
+  node function runs and after `.commit(...)` succeeds).
+- Tests: `tests/test_observability_o5_trace.py` (5 tests: started/finished pair per firing,
+  identity fields carried, trace populated with no storage_root, ring buffer drops oldest
+  past capacity, non-positive capacity rejected). Full suite: 182 passed; Ruff clean.
+- Deviations from the slice plan (if any): none.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none -- O5b (terminal renderer) and O5c
+  (post-hoc replay) are separate slices, not started.
 
 ## Deviations from the design record
 
