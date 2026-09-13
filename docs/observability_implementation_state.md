@@ -14,11 +14,11 @@ meaningful progress.
 
 ## Current slice
 
-**O6b — NOT STARTED.**
+**O6c — NOT STARTED.**
 
-Milestones O1-O5 and Slice O6a (OTel exporter adapter) are complete (continuous execution
-authorized). Next: O6b, `reed describe <flow>`. See `docs/observability_harness.md` for the
-full milestone/slice table.
+Milestones O1-O5 and Slices O6a-O6b are complete (continuous execution authorized). Next:
+O6c, `reed query <flow_id>`. See `docs/observability_harness.md` for the full
+milestone/slice table.
 
 ## Baseline verification
 
@@ -36,6 +36,7 @@ Re-run after O5b (2026-09-13): 186 passed (182 + 4 new O5b tests); ruff clean.
 Re-run after O5c (2026-09-13): 190 passed (186 + 4 new O5c tests); ruff clean.
 Re-run after O6a (2026-09-13): 195 passed (190 + 5 new O6a tests); ruff clean
 (opentelemetry-api/-sdk installed via new `otel` optional-dependency extra).
+Re-run after O6b (2026-09-13): 198 passed (195 + 3 new O6b tests); ruff clean.
 
 ## Completed slices
 
@@ -305,6 +306,26 @@ round/section, and only then is it marked resolved here.
 - Deviations from the slice plan (if any): none.
 - New open questions discovered (if any): none.
 - Follow-up filed as future work (if any): none.
+
+### O6b — `reed describe` (2026-09-13)
+- observability_design.md section(s) implemented: harness row O6b, written back as new
+  Section 26 (Round 14).
+- Files changed: `src/reed/observability/describe.py` (new: `describe_flow(flow)`,
+  `describe_instruments_manifest(path)`).
+- Tests: `tests/test_observability_o6b_describe.py` (3 tests: declared Instruments listed
+  with no execution, a Node with no declared Instruments still appears as a blank row,
+  manifest-sourced variant reads a past Run's `instruments.json`). Full suite: 198 passed;
+  Ruff clean.
+- Deviations from the slice plan (if any): implemented as Python-level introspection
+  functions only -- no `argv`-parsing `reed` console-script entry point was added, since
+  none exists in this repository to extend and the harness row's own wording describes a
+  capability (`instruments.json` introspection, no execution required), not a specific
+  CLI-wiring requirement. Flagged here explicitly rather than silently narrowed.
+- New open questions discovered (if any): whether a real `reed` CLI executable is wanted as
+  a separate, later piece of work (not blocking; not part of O6b's own scope).
+- Follow-up filed as future work (if any): an actual `argv`/console-script `reed` CLI
+  wrapping `describe`/`query`/`graph`, if the project wants a real command-line tool rather
+  than importable Python functions.
 
 ## Deviations from the design record
 

@@ -1676,3 +1676,31 @@ caller's concern.
 ### 25.3 Status
 
 Slice O6a complete. No new open design questions surfaced.
+
+## Round 14 (Milestone O6, Slice O6b): `reed describe` implemented
+
+### 26.1 `describe_flow`/`describe_instruments_manifest` (`src/reed/observability/describe.py`)
+
+`describe_flow(flow)` builds a Rich table of every `FlowNode` in a `Flow` and its declared
+Instruments, reading `Flow.flow_nodes`/`FlowNode.instruments` directly -- **no execution
+required**, matching the harness row's own framing: a Node's declared Instruments are part
+of its own definition (Milestone O2's `flow.add(node, instruments=[...])`), not something
+that only exists once something has run. A Node declared with no Instruments still appears
+as a row with blank instrument columns, so `describe` always reports every Node in the Flow.
+
+`describe_instruments_manifest(path)` is the same report sourced from a past Run's
+`instruments.json` (Milestone O3, Slice O3e) instead of a live `Flow` object -- for
+introspecting a Flow whose source is not importable right now, only its manifest.
+
+Lazy-mode Recordings (`kind=None`, Section 19) are, by construction, undeclared -- there is
+nothing for `describe` to introspect about them without an actual `recordings.csv` to read.
+That is explicitly `reed query`'s job (Slice O6c), not `describe`'s -- `describe` answers
+"what can this Flow observe", `query` answers "what did a past Run actually observe."
+
+### 26.2 Status
+
+Slice O6b complete. No new open design questions surfaced. This slice implements the
+Python-level introspection functions the harness row names; no `argv`-parsing `reed`
+executable/console-script entry point was added in this slice (out of scope for O6b as
+written -- the harness row describes the `reed describe <flow>` capability, not a specific
+CLI-wiring requirement, and no existing CLI entry point exists in this repository to extend).
