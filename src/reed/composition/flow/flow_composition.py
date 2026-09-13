@@ -92,6 +92,7 @@ from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.composition.node.domain_node_description import DomainNodeDescriptionBuilder
 from reed.execution.run import Run
 from reed.observability.instrument import Instrument
+from reed.observability.presentation import PresentationPolicy
 
 
 OutputT = TypeVar("OutputT")
@@ -265,7 +266,12 @@ class Flow:
 
         return flow_node
 
-    def run(self, *, storage_root: str | None = None) -> Run:
+    def run(
+        self,
+        *,
+        storage_root: str | None = None,
+        observability: "str | PresentationPolicy | None" = None,
+    ) -> Run:
         """
         Create a new `Run` -- one concrete execution instance of this
         `Flow` (Slice 2A; docs/architectural_decision.md, "Run").
@@ -284,4 +290,4 @@ class Flow:
         `reed/execution/node_runtime.py`'s module docstrings for the
         exact scope.
         """
-        return Run(self, storage_root=storage_root)
+        return Run(self, storage_root=storage_root, observability=observability)

@@ -14,10 +14,10 @@ meaningful progress.
 
 ## Current slice
 
-**O7d — IN PROGRESS.**
+**O7f — NOT STARTED.**
 
-O7a-O7c are done (audit baseline, Artifact version identity fix, Recording durability
-hot-path fix). Next: O7d, the terminal presentation policy/API. See
+O7a-O7e and O7h are done. Next: O7f, replay/describe presentation corrections
+(same-execution_seq disambiguation; lazy-mode describe_flow distinction). See
 `docs/observability_harness.md`'s Milestone O7 table for the full slice list.
 
 ## Baseline verification
@@ -506,6 +506,47 @@ style).
 against pre-fix code first). Full suite: 218 passed (214 + 4 new); Ruff clean.
 
 Full rationale, alternatives, and evidence: design record Round 18 (Section 30).
+
+### O7d/O7e — Terminal presentation policy and API (2026-09-13)
+
+**Decision:** `Flow.run(observability=<preset name | PresentationPolicy | None>)`; presets
+(`silent`/`errors`/`progress`/`instruments`/`nodes`/`verbose`) compile to a
+`PresentationPolicy` dataclass of independent boolean dimensions
+(errors/progress/nodes/propagation/instruments/timings). `Run` holds one `Presenter`
+(`NullPresenter` for silent), whose hooks are called from the same `_fire`/`publish`/
+`accept_recording` points that already emit Trace/Provenance/Recording data -- purely
+additive, no new collection mechanism.
+
+**Progress semantics:** indeterminate (spinner + "Processed N nodes" completed-count),
+never a fraction -- a reactive graph's true firing-frontier size is not knowable in
+advance under `TriggerPolicy.MANUAL`/`ALL_INPUTS_CHANGED`, branching/joins, or Node
+failures. This also keeps progress reporting valid unmodified under a future parallel
+execution model (concurrent firings each report their own start/finish independently).
+
+**Collection vs. presentation:** `observability=` and `storage_root=` are fully
+independent `Flow.run(...)` arguments -- `observability="silent"` with `storage_root=...`
+persists byte-identical `recordings.csv`/`provenance.csv` to `observability="verbose"` with
+the same `storage_root`, differing only in terminal output.
+
+**Files changed:** `src/reed/observability/presentation.py` (new: `PresentationPolicy`,
+`PRESETS`, `resolve_presentation_policy(...)`), `src/reed/observability/presenter.py` (new:
+`Presenter`/`NullPresenter`/`TerminalPresenter`, `build_presenter(...)`),
+`src/reed/execution/run.py` (`observability=` param threaded through `__init__`; `.presenter`/
+`.presentation_policy` properties; `publish(...)`'s cascade now carries `(value, depth)`
+pairs, presentation-only bookkeeping; `_fire(...)` calls presenter hooks including timing
+and error reporting), `src/reed/execution/node_runtime.py` (`accept_recording(...)` calls
+`self._run.presenter.on_recording(...)`), `src/reed/composition/flow/flow_composition.py`
+(`Flow.run(..., observability=...)` threads through to `Run(...)`).
+
+**Tests:** `tests/test_observability_o7d_presentation.py` (11 tests): silent produces no
+output; errors-only is silent on success and reports on failure; instruments mode has no
+propagation arrows; nodes/verbose modes show node lifecycle; progress never renders a
+`\d+/\d+` fraction; an invalid preset name raises `ValueError` clearly; presentation choice
+does not change the computed domain result across all six presets; a silent terminal does
+not disable Recording/Provenance persistence; the zero-argument default is not silent. Full
+suite: 229 passed (218 + 11 new); Ruff clean.
+
+Full rationale, alternatives, evidence: design record Round 19 (Section 31).
 
 ## Deviations from the design record
 

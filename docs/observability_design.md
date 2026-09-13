@@ -1921,3 +1921,130 @@ for names, generalized to the object form; `examples/new_api.py`'s own framing o
 ### 30.4 Status
 
 Complete. No new open design questions surfaced.
+
+## Round 19 (Milestone O7, Slices O7d/O7e): terminal presentation policy and API
+
+### 31.1 Architecture: presentation is a pure consumer, never a new observability model
+
+```
+Reed Runtime
+     |
+     +-- Execution Trace / Provenance / Recordings / Framework Errors   (Milestones O1-O6, unchanged)
+                  |
+                  v
+           PresentationPolicy    (reed.observability.presentation)
+                  |
+                  v
+           Presenter             (reed.observability.presenter)
+```
+
+`Run` now holds one `Presenter` (`self._presenter`, always a real object -- `NullPresenter`
+for `"silent"`, never `None`), constructed once in `__init__` from `Flow.run(observability=...)`'s
+argument via `resolve_presentation_policy(...)`. `Presenter` hooks are called from the exact
+points `_fire`/`publish` already touch for Provenance/Trace emission (`on_node_started`/
+`on_node_finished`/`on_node_error` in `_fire`; `on_publish_start`/`on_publish_end` in
+`publish`; `on_recording` in `NodeRuntime.accept_recording`) -- no new collection mechanism,
+no new identity, no change to what gets recorded, persisted, or exported. This is the
+architecture the task that opened Milestone O7 named explicitly (its Section 2): the
+terminal is a consumer of observability information, never the model itself.
+
+### 31.2 Public API: semantic presets, PresentationPolicy escape hatch
+
+```python
+flow.run(observability="progress")                 # common case
+flow.run(observability=PresentationPolicy(nodes=True, timings=True))  # escape hatch
+flow.run()                                          # default: "nodes"
+```
+
+**Decision:** a small closed set of named presets (`"silent"`, `"errors"`, `"progress"`,
+`"instruments"`, `"nodes"`, `"verbose"`) compiling to a `PresentationPolicy` -- an immutable
+dataclass of independent boolean dimensions (`errors`, `progress`, `nodes`, `propagation`,
+`instruments`, `timings`) -- rather than exposing the dimensions directly as `Flow.run(...)`
+keyword arguments, or an unbounded/integer verbosity level.
+
+**Alternatives considered:**
+1. Integer verbosity levels (`observability=2`). Rejected -- not self-documenting, meaning
+   drifts as levels are added, forces memorizing a table (explicitly named as an anti-
+   pattern in the task that opened this milestone, Section 12).
+2. Expose every `PresentationPolicy` dimension as a direct `Flow.run(...)` keyword
+   (`Flow.run(show_nodes=True, show_progress=True, ...)`). Rejected -- no single object a
+   caller can store, pass around, or compare (`==`) for presentation config; couples
+   `Flow.run(...)`'s signature to every future dimension added.
+3. Presets *and* a structured object, the object being what presets compile to, `Flow.run(...)`
+   accepting either. **Chosen** -- small common-case API (a string) for ordinary users, an
+   escape hatch (`PresentationPolicy(...)`) for advanced/custom configuration, matching the
+   task's own preferred shape (Section 4). `resolve_presentation_policy(...)` is the single
+   place a preset name is ever interpreted; `_fire`/`publish`/`NodeRuntime` only ever branch
+   on the compiled `PresentationPolicy`'s dimensions, so adding a new preset (or a wholly
+   different `Presenter` implementation) requires no change to execution code at all.
+
+**Preset semantics** (Section 12 of the task): `silent` = nothing; `errors` = errors only;
+`progress` = errors + progress; `instruments` = errors + instrument observations;
+`nodes` = errors + node lifecycle (this is also `.default()` -- `Flow.run()` with no
+argument); `verbose` = errors + nodes + propagation + instruments + timings. Every preset
+includes `errors=True` except `silent` -- a user who asked for *some* visibility should not
+have Node exceptions silently hidden from the terminal merely because they picked a low-
+verbosity preset; `silent` is the one preset that means "truly nothing," used when Reed is
+embedded inside another application (Section 3's own example).
+
+### 31.3 Collection vs. presentation: `observability="silent"` never disables persistence
+
+Section 5 of the task that opened this milestone is a hard requirement, not a design
+preference: `observability=` and `storage_root=` are independent `Flow.run(...)` keyword
+arguments, read by independent code paths (`resolve_presentation_policy(...)`/`build_
+presenter(...)` vs. the Milestone O3 `storage_root` branch in `Run.__init__`). Recordings/
+Provenance collection (Milestone O2/O4) and Level 1 Execution Trace collection (Milestone
+O5) are completely unconditional on `observability=` -- a `Presenter`'s hooks are called
+*in addition to*, never *instead of*, the existing trace/provenance emission calls already
+in `_fire`. `observability="silent"` with `storage_root=...` durably persists exactly as
+much as `observability="verbose"` with the same `storage_root=...` -- the two configurations
+produce byte-identical `recordings.csv`/`provenance.csv`, differing only in terminal output.
+Verified by `test_silent_terminal_does_not_disable_persistence_or_provenance`.
+
+### 31.4 Progress semantics (Slice O7e): no denominator Reed cannot honestly justify
+
+Section 6's core question -- what does "N/M" actually mean in a reactive graph -- has no
+single honest answer: `TriggerPolicy.MANUAL` Nodes never auto-fire; `ALL_INPUTS_CHANGED`
+Nodes wait for every consumed type to go fresh, which may never happen in one cascade;
+branching/joins mean the discovered firing frontier grows and shrinks *while the cascade
+runs*, never fixed in advance; a Node raising can stop further propagation Reed would
+otherwise have predicted. Any of "Nodes in the Flow," "Nodes eligible for this publication,"
+or "NodeExecutions expected" would be presented as a fraction the user reads as a completion
+percentage, when Reed has no basis for the denominator.
+
+**Decision:** `"progress"` renders an **indeterminate** live indicator -- a spinner plus
+"Processed N nodes," where N only ever counts *completed* firings, asserting nothing about
+how many are still to come. This is honest under any `TriggerPolicy` mix and any branching/
+join shape, and -- Section 14's forward-compatibility requirement -- remains correct under a
+future parallel execution model without redesign: concurrent firings each still report their
+own start/finish independently through the same `on_node_started`/`on_node_finished` hooks,
+and a monotonically-increasing completed count needs no serialized "current position"
+concept that concurrency would break. Verified by
+`test_progress_mode_never_claims_a_false_fraction` (asserts no `\d+/\d+` pattern appears).
+
+### 31.5 Propagation depth is presentation-only bookkeeping, computed without touching execution logic
+
+`Run.publish(...)`'s cascade queue now carries `(value, depth)` pairs instead of bare values
+-- `depth` is the propagation depth from the externally published value (0-based),
+incremented by one for every value a firing produces and enqueues. `depth` is passed into
+`_fire(...)` and from there into `Presenter.on_node_started`/`on_node_finished` purely for
+the `"propagation"` dimension's indentation; it is never read by `_is_fully_covered`,
+`_is_eligible_to_fire`, `_build_call_kwargs`, or any other eligibility/firing decision --
+adding it changes zero execution semantics (verified by
+`test_presentation_choice_does_not_change_execution_semantics`, asserting the exact same
+domain result across all six presets).
+
+### 31.6 Rich is an implementation detail; the public surface is Reed's own vocabulary
+
+`PresentationPolicy`/preset names/`Flow.run(observability=...)` mention no Rich (or tqdm, or
+any other backend) type or concept. `TerminalPresenter` uses `rich.console.Console`/
+`rich.progress.Progress` internally, matching the O5b terminal renderer's own precedent, but
+nothing forces a caller to import or understand Rich to configure presentation -- a
+different renderer could replace `TerminalPresenter` entirely (a `LogPresenter`, a
+`JSONLPresenter` for machine consumption) without changing `Flow`/`Run`'s public surface at
+all, satisfying the task's own constraint (Section 13): "the presentation abstraction should
+make it possible to replace the renderer later without changing Flow/Run semantics."
+
+### 31.7 Status
+
+Slices O7d/O7e complete. No new open design questions surfaced.

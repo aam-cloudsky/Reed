@@ -186,6 +186,11 @@ from reed.execution.node_runtime import NodeRuntime
 from reed.observability.identity import NodeExecutionIdentity
 from reed.observability.provenance import ProvenanceEvent
 from reed.observability.trace import ExecutionTrace, TraceEvent, TraceEventType
+from reed.observability.presentation import (
+    PresentationPolicy,
+    resolve_presentation_policy,
+)
+from reed.observability.presenter import build_presenter
 from reed.observability.storage import (
     CSVProvenanceStore,
     CSVRecordingStore,
@@ -222,7 +227,13 @@ class Run:
     stored on `Flow` or `FlowNode`.
     """
 
-    def __init__(self, flow: Flow, *, storage_root: str | None = None) -> None:
+    def __init__(
+        self,
+        flow: Flow,
+        *,
+        storage_root: str | None = None,
+        observability: "str | PresentationPolicy | None" = None,
+    ) -> None:
         self._flow = flow
         self._repository = ArtifactRepository(bus=Bus.create())
         self._node_runtimes: dict[FlowNode, NodeRuntime] = {}
@@ -283,6 +294,18 @@ class Run:
         # defaulting it off.
         self._trace = ExecutionTrace()
 
+        # Milestone O7, Slice O7d: the terminal presentation layer is a
+        # pure *consumer* of the identity/trace/recording data above --
+        # constructing it here, after `self._trace` exists, changes
+        # nothing about what Reed observes or persists (Recordings/
+        # Provenance/Execution Trace collection above is entirely
+        # unaffected by `observability=`). `resolve_presentation_policy`
+        # compiles a preset name / PresentationPolicy / None into one
+        # `PresentationPolicy`; `build_presenter` turns that into a
+        # renderer (or `NullPresenter`, a total no-op, for `silent`).
+        self._presentation_policy = resolve_presentation_policy(observability)
+        self._presenter = build_presenter(self._presentation_policy)
+
     @property
     def flow(self) -> Flow:
         """The `Flow` that created this `Run` via `Flow.run()`."""
@@ -314,6 +337,19 @@ class Run:
     def provenance_store(self) -> "ProvenanceStore | None":
         """This `Run`'s `ProvenanceStore` (Milestone O4), or `None` -- see `.recording_store`."""
         return self._provenance_store
+
+    @property
+    def presenter(self):
+        """This `Run`'s terminal `Presenter` (Milestone O7, Slice O7d)."""
+        return self._presenter
+
+    @property
+    def presentation_policy(self) -> PresentationPolicy:
+        """
+        This `Run`'s compiled terminal `PresentationPolicy` (Milestone O7,
+        Slice O7d) -- read-only; set once via `Flow.run(observability=...)`.
+        """
+        return self._presentation_policy
 
     @property
     def trace(self) -> ExecutionTrace:
@@ -412,12 +448,22 @@ class Run:
         consumes `type(domain_value)`, returns `domain_value` itself
         (there was no direct firing to report a result for).
         """
-        pending: list[object] = [domain_value]
+        # Milestone O7, Slice O7d: `depth` (propagation depth from the
+        # externally published value, 0-based) travels alongside each
+        # pending value purely for the "propagation" terminal
+        # presentation dimension's indentation -- it is presentation-only
+        # bookkeeping, never used for firing order, eligibility, or any
+        # other execution decision (Milestone O7's own constraint:
+        # presentation must never become the observability/execution
+        # model itself).
+        pending: list[tuple[object, int]] = [(domain_value, 0)]
         direct_result: object = domain_value
         is_first_iteration = True
 
+        self._presenter.on_publish_start(domain_value)
+
         while pending:
-            current_value = pending.pop(0)
+            current_value, depth = pending.pop(0)
             domain_type = type(current_value)
 
             consumers = self._flow.dependency_graph.consumers_of(domain_type)
@@ -441,13 +487,15 @@ class Run:
 
                 identity = self._begin_node_execution(flow_node)
                 call_kwargs = self._build_call_kwargs(flow_node, identity)
-                result = self._fire(flow_node, call_kwargs, identity)
-                pending.append(result)
+                result = self._fire(flow_node, call_kwargs, identity, depth=depth)
+                pending.append((result, depth + 1))
 
                 if is_first_iteration:
                     direct_result = result
 
             is_first_iteration = False
+
+        self._presenter.on_publish_end()
 
         return direct_result
 
@@ -562,6 +610,8 @@ class Run:
         flow_node: "FlowNode",
         call_kwargs: dict[str, object],
         identity: NodeExecutionIdentity,
+        *,
+        depth: int = 0,
     ) -> object:
         """
         Fire one `FlowNode` with `call_kwargs` as its full call
@@ -605,9 +655,11 @@ class Run:
 
         self._emit_used_provenance_events(flow_node, identity)
         self._record_trace_event("node_started", identity)
+        self._presenter.on_node_started(identity, depth=depth)
 
         firing_lock = node_runtime.firing_lock
 
+        start_time = time.monotonic()
         if firing_lock is not None:
             firing_lock.acquire()
         try:
@@ -616,13 +668,28 @@ class Run:
 
                 record = node_runtime.wrap(result)
                 node_runtime.commit(record)
+            except BaseException as exc:
+                # Milestone O7, Slice O7d: report the failure to the
+                # terminal presenter -- a pure observer, never a handler
+                # (the exception always propagates unchanged; invariant
+                # #25, "observability failures must never change
+                # application semantics," read here in its stronger form:
+                # observability *reporting* must not change application
+                # semantics either).
+                self._presenter.on_node_error(
+                    identity, exc, duration=time.monotonic() - start_time
+                )
+                raise
             finally:
                 node_runtime.flush_recordings(identity.node_execution_id)
         finally:
             if firing_lock is not None:
                 firing_lock.release()
 
+        duration = time.monotonic() - start_time
+
         self._record_trace_event("node_finished", identity)
+        self._presenter.on_node_finished(identity, depth=depth, duration=duration)
 
         self._emit_generated_provenance_event(record, identity)
 

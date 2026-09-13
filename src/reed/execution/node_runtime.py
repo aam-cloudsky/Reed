@@ -437,6 +437,7 @@ class NodeRuntime:
             attributes=dict(attributes) if attributes else {},
         )
         self._recordings.append(recording)
+        self._run.presenter.on_recording(recording)
         if self._run.recording_store is not None:
             # Milestone O7, Slice O7c: buffer in memory for this firing;
             # `.flush_recordings(...)` writes the whole batch, with one
