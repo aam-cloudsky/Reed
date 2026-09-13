@@ -1,0 +1,165 @@
+# Reed Observability — Implementation State
+
+Status: live operational checkpoint for the observability build (Issue #7), analogous to
+`refactor_state.md` from Reed's prior architectural refactor. This document starts nearly
+empty on purpose — no implementation slice has begun yet. It exists so the next agent (or
+the next session) reads current, ground-truth state here first, rather than re-deriving it
+from `observability_design.md` or guessing from `git log`.
+
+Update this file at the end of every slice, per `observability_agent_protocol.md`'s
+"Observability-State Update" section: when a slice completes, when a new open question is
+discovered, when one of the two flagged open items is resolved, or when a known
+architectural question is resolved or newly discovered. Do not leave it stale after
+meaningful progress.
+
+## Current slice
+
+**O2a — NOT STARTED.**
+
+Milestone O1 (Identity Foundations, slices O1a-O1f) is complete. Next: the `Instrument`
+dataclass (`name`, `kind`, `unit`, `description`; `kind` restricted to
+`gauge`/`counter`/`updown_counter`). See `docs/observability_harness.md` for the full
+milestone/slice table and `docs/observability_implementation_plan.md` for how this slice
+should be executed.
+
+## Baseline verification
+
+Run before Milestone O1 (2026-09-13): `uv run pytest -q -o addopts=''` → 145 passed;
+`uv run ruff check src tests` → all checks passed (ruff was not installed in the venv;
+`uv sync --extra dev` installed it, `ruff==0.16.7`). Re-run after O1 (2026-09-13):
+`uv run pytest -q -o addopts=''` → 156 passed (145 baseline + 11 new O1 tests);
+`uv run ruff check src tests` → all checks passed.
+
+## Completed slices
+
+### O1a — Resolve `flow_id`/`node_id` cross-run stability (2026-09-13)
+- observability_design.md section(s) implemented: written back as new Section 18 (Round 6).
+- Files changed: `docs/observability_design.md` (+Section 18), `docs/observability_goals.md`
+  (§3, §10), `docs/observability_non_goals.md` (§10).
+- Tests: none (design decision only, no production code in this slice).
+- Deviations from the slice plan (if any): none.
+- New open questions discovered (if any): none — narrowed Section 17.2 to "does
+  registration-order-only change deserve special-casing," recorded in Section 18.4 and in
+  this file's open-questions log below.
+- Follow-up filed as future work (if any): none.
+
+### O1b — `Run.execution_id` / `Run.flow_id` (2026-09-13)
+- observability_design.md section(s) implemented: Section 18 (via `Flow.flow_id`).
+- Files changed: `src/reed/execution/run.py`.
+- Tests: `tests/test_observability_o1_identity.py::test_execution_id_is_distinct_per_run`,
+  `::test_run_flow_id_passes_through_to_flow`; full suite 156 passed; ruff clean.
+- Deviations from the slice plan (if any): none.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none.
+
+### O1c — `FlowNode.node_id` / `FlowNode.node_name` (2026-09-13)
+- observability_design.md section(s) implemented: Section 18, Section 16.5.
+- Files changed: `src/reed/composition/flow/flow_node.py`, and
+  `src/reed/composition/flow/flow_composition.py` (`Flow.flow_id`, which depends on
+  `FlowNode.node_id`; bundled into the same commit as O1b/O1c/O1d/O1e/O1f — see the note
+  below).
+- Tests: `test_node_id_is_deterministic_module_qualname_not_object_identity`,
+  `test_node_name_is_display_only_and_allowed_to_collide`,
+  `test_flow_id_is_deterministic_across_separate_instances`,
+  `test_flow_id_changes_when_composition_changes`, `test_flow_id_is_a_short_hex_string`.
+- Deviations from the slice plan (if any): none.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none.
+
+### O1d — `node_execution_id` minted per firing (2026-09-13)
+- observability_design.md section(s) implemented: Section 18.5.
+- Files changed: `src/reed/execution/run.py` (`Run._begin_node_execution`), new
+  `src/reed/observability/identity.py` (`NodeExecutionIdentity`).
+- Tests: `test_firing_attaches_identity_bundle_observed_from_inside_node` (node_execution_id
+  distinctness).
+- Deviations from the slice plan (if any): no separate `NodeExecution` object exists yet
+  (`Run.publish`/`Run._fire` still call the node function directly) — `node_execution_id` is
+  minted by `Run._begin_node_execution` instead of a `NodeExecution.__init__`, matching how
+  the rest of the execution pipeline is currently structured. Recorded as a deviation, not a
+  silent architecture change: introducing a `NodeExecution` object remains available to a
+  later slice if firing-scoped state grows enough to need one.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): revisit whether a distinct `NodeExecution` object
+  is warranted once Milestone O3/O4 need more firing-scoped state than `NodeExecutionIdentity`
+  alone provides.
+
+### O1e — `execution_seq` (2026-09-13)
+- observability_design.md section(s) implemented: Section 13.1.
+- Files changed: `src/reed/execution/run.py` (`Run._execution_seq_counter`).
+- Tests: `test_firing_attaches_identity_bundle_observed_from_inside_node` (execution_seq
+  increments by exactly 1 per firing, scoped to one Run).
+- Deviations from the slice plan (if any): none.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none.
+
+### O1f — `NodeContext.identity` bundle (2026-09-13)
+- observability_design.md section(s) implemented: Section 5 (identity bundle), Section
+  16.5's back-reference constraint (architectural_invariants.md #26).
+- Files changed: `src/reed/composition/node/node_context.py` (`identity` slot/property,
+  optional, defaults to `None`), `src/reed/execution/node_runtime.py`
+  (`NodeRuntime.build_context`), `src/reed/execution/run.py`
+  (`Run._build_call_kwargs` calls `_begin_node_execution` then `build_context`).
+- Tests: `test_firing_attaches_identity_bundle_to_injected_context`,
+  `test_firing_attaches_identity_bundle_observed_from_inside_node`,
+  `test_node_context_without_identity_defaults_to_none`,
+  `test_identity_bundle_has_no_back_reference_to_execution_infrastructure`.
+- Deviations from the slice plan (if any): `NodeRuntime.context` (the existing, regression-
+  protected property) was deliberately left unchanged rather than given an `identity=`
+  parameter, because it is a property (called without parentheses at every existing call
+  site) and properties cannot take arguments. A new method, `NodeRuntime.build_context(identity)`,
+  was added instead, used only by `Run._build_call_kwargs`'s real firing path. This keeps the
+  existing regression-protected `.context` property's behavior completely unchanged (it
+  still returns a `NodeContext` with `identity=None`).
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none.
+
+**Note on commit granularity:** O1b through O1f were implemented and committed together
+(one commit) rather than as five separate commits. They are five rows in
+`observability_harness.md`'s table and are documented as five separate entries above for
+traceability, but they are small, tightly interdependent changes to the same few files
+(`Run`, `FlowNode`, `Flow`, `NodeContext`, `NodeRuntime`) that were designed, implemented,
+and tested together as one coherent unit of work, with one shared test file
+(`tests/test_observability_o1_identity.py`) exercising all of them. O1a (a documentation-only
+design decision) is its own separate commit, matching the harness's requirement that it land
+in `observability_design.md` before O1b proceeds.
+
+Log format, one entry per completed slice:
+
+```
+### <Slice ID> — <name> (<date>)
+- observability_design.md section(s) implemented:
+- Files changed:
+- Tests: <what ran, what moved from failing to passing>
+- Deviations from the slice plan (if any):
+- New open questions discovered (if any):
+- Follow-up filed as future work (if any):
+```
+
+## Open questions log
+
+Tracks the three items already known plus any discovered during implementation. Do not
+resolve an item here silently — resolution happens in `observability_design.md` as a new
+round/section, and only then is it marked resolved here.
+
+1. **`flow_id`/`node_id` cross-run stability** (`observability_design.md` §17.1) — status:
+   **RESOLVED** (2026-09-13, Slice O1a; see Section 18). No longer open.
+2. **`kind="event"` fate** (`observability_design.md` §16.2/§17.5) — status: **open**, blocks
+   O2e/non-metric recording work. Target slice: O2e.
+3. **Whether registration-order changes alone should force a new `flow_id`**
+   (`observability_design.md` §18.4, narrowing the original §17.2 question) — status:
+   **open**, non-blocking for O1-O5; affects O6c's documentation only.
+
+## Deviations from the design record
+
+_(none yet — record here if an implementation slice needs to deviate from
+`observability_design.md`/`observability_goals.md`, with the reason and where it was
+reconciled.)_
+
+## Notes for the next agent
+
+- Read `docs/observability_agent_protocol.md` first, then this file's "Current slice"
+  section, before touching any production code.
+- Do not start a slice beyond the one recorded as current here without a new explicit
+  instruction (per the agent protocol's "One-Slice Termination Rule").
+- If this file and `docs/observability_harness.md` disagree on what the current slice is,
+  stop and report — do not guess which one is stale.
