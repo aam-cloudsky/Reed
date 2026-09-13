@@ -460,7 +460,7 @@ class Run:
         direct_result: object = domain_value
         is_first_iteration = True
 
-        self._presenter.on_publish_start(domain_value)
+        self._safe_presenter_call(self._presenter.on_publish_start, domain_value)
 
         while pending:
             current_value, depth = pending.pop(0)
@@ -495,7 +495,7 @@ class Run:
 
             is_first_iteration = False
 
-        self._presenter.on_publish_end()
+        self._safe_presenter_call(self._presenter.on_publish_end)
 
         return direct_result
 
@@ -655,7 +655,7 @@ class Run:
 
         self._emit_used_provenance_events(flow_node, identity)
         self._record_trace_event("node_started", identity)
-        self._presenter.on_node_started(identity, depth=depth)
+        self._safe_presenter_call(self._presenter.on_node_started, identity, depth=depth)
 
         firing_lock = node_runtime.firing_lock
 
@@ -676,8 +676,11 @@ class Run:
                 # application semantics," read here in its stronger form:
                 # observability *reporting* must not change application
                 # semantics either).
-                self._presenter.on_node_error(
-                    identity, exc, duration=time.monotonic() - start_time
+                self._safe_presenter_call(
+                    self._presenter.on_node_error,
+                    identity,
+                    exc,
+                    duration=time.monotonic() - start_time,
                 )
                 raise
             finally:
@@ -689,7 +692,7 @@ class Run:
         duration = time.monotonic() - start_time
 
         self._record_trace_event("node_finished", identity)
-        self._presenter.on_node_finished(identity, depth=depth, duration=duration)
+        self._safe_presenter_call(self._presenter.on_node_finished, identity, depth=depth, duration=duration)
 
         self._emit_generated_provenance_event(record, identity)
 
@@ -750,6 +753,30 @@ class Run:
                 execution_seq=identity.execution_seq,
             )
         )
+
+    def _safe_presenter_call(self, hook, *args, **kwargs) -> None:
+        """
+        Milestone O7, Slice O7g (final invariant audit finding): call a
+        `Presenter` hook, isolating any exception it raises so that a
+        rendering failure (a broken terminal, a Rich/Console error, a
+        custom `Presenter` subclass with a bug) can never change
+        application semantics -- architectural invariant #25 ("Observability
+        failures must never change application semantics"), extended here
+        explicitly to the O7d/O7e Presenter hooks. `Presenter` is a pure
+        observer of data Reed has already committed (Trace/Provenance/
+        Recording); nothing a Presenter does can undo or affect that
+        already-committed state, so a Presenter exception is swallowed
+        rather than isolated into a reportable list (unlike
+        `callback_failures`, which reports user-authored `on_output`
+        callback failures because those are part of the Flow's declared
+        behavior) -- there is no equivalent public surface for terminal
+        rendering errors, and inventing one would risk becoming a second,
+        competing observability channel.
+        """
+        try:
+            hook(*args, **kwargs)
+        except BaseException:  # noqa: BLE001 -- isolate any presenter/rendering failure
+            pass
 
     def _record_trace_event(
         self, event_type: TraceEventType, identity: NodeExecutionIdentity

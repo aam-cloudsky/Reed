@@ -2128,3 +2128,39 @@ No other existing test asserted on the old blank-cell or the old 4-column (no
 
 Slice O7f complete. Full suite: 233 passed (232 O1-O7e/h + this slice's 4 new tests, net of
 1 existing O6b test updated in place rather than counted as new). Ruff: all checks passed.
+
+## Round 21 (Milestone O7, Slice O7g): final invariant audit finding -- Presenter isolation
+
+### 33.1 Finding
+
+Re-auditing invariant #25 ("Observability failures must never change application
+semantics") specifically against the O7d/O7e `Presenter` hooks (new code, not covered by
+O1-O6's original isolation audit) found a real gap: `Run.publish`/`Run._fire`/
+`NodeRuntime.accept_recording` called `Presenter` hooks (`on_publish_start`,
+`on_publish_end`, `on_node_started`, `on_node_finished`, `on_node_error`, `on_recording`)
+directly, with no isolation -- an exception raised inside a `Presenter` (a broken terminal,
+a `rich.console.Console` failure, a bug in a custom `Presenter` subclass) would propagate
+out of `publish(...)` and crash the calling application, exactly the failure mode invariant
+#25 forbids. Confirmed via a regression test with a `Presenter` subclass that raises from
+`on_node_started`/`on_recording` before the fix (both failed); passes after.
+
+### 33.2 Fix
+
+Added `Run._safe_presenter_call(hook, *args, **kwargs)`, following the exact isolation
+precedent already established for `on_output` callback failures (`_dispatch_on_output`,
+`except BaseException as exc: self.callback_failures.append(exc)`): every Presenter hook
+call site in `publish`/`_fire` now goes through it, and `NodeRuntime.accept_recording`'s
+`on_recording` call is wrapped the same way inline. Unlike callback failures, a swallowed
+Presenter exception is not appended to any reportable list -- `Presenter` is a pure observer
+of already-committed data (Trace/Provenance/Recording), so there is no equivalent "the
+Flow's declared behavior includes this and failures are part of Reed's public contract"
+argument that applies to user `on_output` callbacks. `on_node_error`'s presenter call is
+wrapped the same way, and critically the original application exception is still re-raised
+unconditionally afterward -- a Presenter failure while reporting an error can never mask or
+replace the real error.
+
+### 33.3 Status
+
+Slice O7g's invariant audit is otherwise clean (see the full invariant-by-invariant audit
+in the final report); this was the one genuine gap found and it is now fixed. 2 new tests
+(`tests/test_observability_o7g_presenter_isolation.py`), full suite 235 passed, Ruff clean.

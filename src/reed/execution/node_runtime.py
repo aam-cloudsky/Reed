@@ -437,7 +437,10 @@ class NodeRuntime:
             attributes=dict(attributes) if attributes else {},
         )
         self._recordings.append(recording)
-        self._run.presenter.on_recording(recording)
+        try:
+            self._run.presenter.on_recording(recording)
+        except BaseException:  # noqa: BLE001 -- O7g: isolate presenter failures (invariant #25)
+            pass
         if self._run.recording_store is not None:
             # Milestone O7, Slice O7c: buffer in memory for this firing;
             # `.flush_recordings(...)` writes the whole batch, with one
