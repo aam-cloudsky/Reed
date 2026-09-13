@@ -14,11 +14,12 @@ meaningful progress.
 
 ## Current slice
 
-**O5b — NOT STARTED.**
+**O5c — NOT STARTED (optional).**
 
-Milestones O1-O4 and Slice O5a (Level 1 Execution Trace ring buffer) are complete
-(continuous execution authorized). Next: O5b, a Rich-based terminal renderer consuming the
-live ring buffer. See `docs/observability_harness.md` for the full milestone/slice table.
+Milestones O1-O4 and Slices O5a-O5b (Level 1 Execution Trace + terminal renderer) are
+complete (continuous execution authorized). Next: O5c, optionally extending the renderer for
+post-hoc replay of `recordings.csv`/`provenance.csv`. See `docs/observability_harness.md`
+for the full milestone/slice table.
 
 ## Baseline verification
 
@@ -32,6 +33,7 @@ Re-run after O3 (2026-09-13): 172 passed (167 + 5 new O3 tests); ruff clean.
 Re-run after O4 (2026-09-13): 177 passed (172 + 6 new O4 tests); ruff clean (one
 forward-ref lint error fixed: `ArtifactRecord` type hint needed a `TYPE_CHECKING` import).
 Re-run after O5a (2026-09-13): 182 passed (177 + 5 new O5a tests); ruff clean.
+Re-run after O5b (2026-09-13): 186 passed (182 + 4 new O5b tests); ruff clean.
 
 ## Completed slices
 
@@ -253,6 +255,23 @@ round/section, and only then is it marked resolved here.
 - New open questions discovered (if any): none.
 - Follow-up filed as future work (if any): none -- O5b (terminal renderer) and O5c
   (post-hoc replay) are separate slices, not started.
+
+### O5b — Terminal renderer over the Level 1 Execution Trace (2026-09-13)
+- observability_design.md section(s) implemented: Section 8/Section 1's terminal-rendering
+  goal, written back as new Section 23 (Round 11) covering the pull-based (not live
+  push/subscribe) rendering decision and the one-row-per-firing shape.
+- Files changed: `src/reed/observability/terminal.py` (new: `render_trace_table(trace)`,
+  `print_trace(trace, console=...)`, `_pair_events(...)` helper).
+- Tests: `tests/test_observability_o5b_terminal.py` (4 tests: one row per firing, node id and
+  "finished" status appear in rendered output, "running" status shown when only
+  node_started has been recorded, empty trace renders zero rows). Full suite: 186 passed;
+  Ruff clean.
+- Deviations from the slice plan (if any): pull-based snapshot rendering rather than a live
+  subscriber, since `ExecutionTrace` has no publish/subscribe mechanism (§23.1) -- an
+  explicit, scoped simplification, not a silent narrowing of the harness row's wording.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): live streaming rendering, if a real need appears
+  (§23.1); O5c (post-hoc replay) remains separate and optional.
 
 ## Deviations from the design record
 

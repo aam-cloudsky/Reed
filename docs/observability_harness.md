@@ -126,7 +126,7 @@ render trace/propagation alone), richer once O3/O4 exist for post-hoc replay.
 | Slice | Delivers |
 |---|---|
 | O5a | DONE — `ExecutionTrace`/`TraceEvent` ring buffer (`src/reed/observability/trace.py`), always constructed per `Run`, exposed as `run.trace`. Design record §22.1. |
-| O5b | Rich-based terminal renderer consuming the live ring buffer, reconstructing the pre-Issue-4 trace-id-correlated experience (design record §1, §8) without reviving any Bus/Depot/Outpost machinery (`observability_non_goals.md` §9). |
+| O5b | DONE — `render_trace_table`/`print_trace` (`src/reed/observability/terminal.py`), a pull-based Rich renderer over `run.trace`. Design record §23. |
 | O5c | Optional: extend the renderer to also read `recordings.csv`/`provenance.csv` for post-hoc replay of a past Execution. |
 
 ### Milestone O6 — Exporters and Tooling (deferred / lower priority)
@@ -145,12 +145,9 @@ scope).
 
 ## Current slice
 
-**O5b — NOT STARTED.** Milestones O1-O4 and Slice O5a (Level 1 Execution Trace ring buffer)
-are complete -- 182 tests passing, Ruff clean. `run.trace` is populated unconditionally for
-every firing (design record §22.1). The next slice is O5b: a Rich-based terminal renderer
-consuming the live ring buffer, reconstructing the pre-Issue-4 trace-id-correlated experience
-(design record §1, §8) without reviving any Bus/Depot/Outpost machinery
-(`observability_non_goals.md` §9).
+**O5c — NOT STARTED.** Milestones O1-O4 and Slices O5a-O5b are complete -- 186 tests
+passing, Ruff clean. The next slice is O5c (optional): extend the renderer to also read
+`recordings.csv`/`provenance.csv` for post-hoc replay of a past Execution.
 
 ## Open questions requiring decision (tracked, not yet resolved)
 

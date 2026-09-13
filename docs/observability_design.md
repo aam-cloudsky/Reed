@@ -1580,3 +1580,36 @@ be implemented directly against it.
 ### 22.3 Status
 
 Slice O5a complete. No new open design questions surfaced.
+
+## Round 11 (Milestone O5, Slice O5b): terminal renderer implemented
+
+### 23.1 Pull-based snapshot renderer, not a live subscriber (`src/reed/observability/terminal.py`)
+
+The legacy `EventRenderer` (Section 1) subscribed live to Bus traffic and printed as
+messages arrived. `ExecutionTrace` (Slice O5a) has no subscription/callback mechanism --
+`.events` is a pull-based, point-in-time snapshot `tuple`. Rather than adding a
+publish/subscribe layer to `ExecutionTrace` for this slice, `render_trace_table(trace)` /
+`print_trace(trace, console=...)` are pull-based: a caller renders whenever it wants a
+picture of the trace so far (after each `run.publish(...)`, at the end of a Run, or on a
+timer), and the render reflects whatever is currently in the ring buffer.
+
+This is an explicit, scoped V1 simplification, not a silent narrowing of Section 8's
+"reconstructs the same kind of trace-id-correlated, Node-named, state-labeled terminal
+output": the output shape is the same (one row per Node firing, node identity, status), only
+the delivery mechanism (pull vs. push) differs. Live streaming remains legitimate future
+work -- it would mean adding a subscriber list to `ExecutionTrace.record(...)`, not changing
+any rendering logic in `terminal.py`.
+
+### 23.2 Row shape: one row per firing, paired by `node_execution_id`
+
+`render_trace_table(...)` groups `TraceEvent`s by `node_execution_id` (Section 13.1's
+per-firing identity) so a `"node_started"`/`"node_finished"` pair renders as one row, not
+two, with columns `seq` (`execution_seq`), `node` (`node_id`), a truncated
+`node_execution_id`, and `status` (`"finished"` once both halves of the pair are present,
+`"running"` if only `"node_started"` has been recorded -- e.g. the renderer was called
+mid-firing, or the ring buffer dropped the `"node_finished"` half past capacity).
+
+### 23.3 Status
+
+Slice O5b complete. No new open design questions surfaced. O5c (optional post-hoc replay
+reading `recordings.csv`/`provenance.csv`) is not started.
