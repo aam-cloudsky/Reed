@@ -1,5 +1,6 @@
 """
-Terminal presenter (Milestone O7, Slice O7d/O7e).
+Terminal presenter (Milestone O7, Slice O7d/O7e; extended Milestone O8, Slice O8b for
+artifact-publication rendering and structured-logging fan-out).
 
 The consumer side of `reed.observability.presentation.PresentationPolicy`: turns a
 compiled policy into a live renderer, invoked by `Run` at the same hook points that
@@ -39,13 +40,24 @@ of the task that opened this milestone) unaffected by a future parallel executio
 concurrent firings still each report their own start/finish independently, and a completed-
 count still only ever increases, never requiring Reed to have predicted how many firings
 there would be.
+
+## Artifact-publication rendering (Milestone O8, Slice O8b)
+
+`on_artifact_generated`/`on_artifact_consumed` are new hooks (docs/logging_design.md
+Section 3): `Run._fire` already knows, at the exact moment it emits a `"generated"`/
+`"used"` `ProvenanceEvent`, everything needed to render "Node X published Artifact@vN to
+the Repository" -- this only exposes that same moment to the `Presenter`, it does not add
+any new observation. Rendered only when `PresentationPolicy.propagation` is set (the
+"show data flow" dimension), using the compact/verbose visual grammar
+`docs/logging_design.md` Section 6 defines; see `_render_artifact_generated` below.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from rich.console import Console
+from rich.text import Text
 
 from reed.observability.presentation import PresentationPolicy
 
@@ -78,8 +90,27 @@ class Presenter:
 
     def on_recording(self, recording: "Recording") -> None: ...
 
+    def on_artifact_generated(
+        self, identity: "NodeExecutionIdentity", *, artifact_type: str, artifact_version: int
+    ) -> None: ...
+
+    def on_artifact_consumed(
+        self, identity: "NodeExecutionIdentity", *, artifact_type: str, artifact_version: int
+    ) -> None: ...
+
 
 NullPresenter = Presenter
+
+
+def _short_id(node_execution_id: str) -> str:
+    """
+    A 6-hex-char rendering of `node_execution_id` -- enough to visually
+    correlate lines from the same firing without the noise of a full UUID
+    (docs/logging_design.md Section 6). Never itself a causality claim
+    (`docs/observability_invariants.md` #9): two lines sharing a short id
+    mean "same firing," nothing about ordering between other lines.
+    """
+    return node_execution_id[:6]
 
 
 class TerminalPresenter(Presenter):
@@ -120,7 +151,7 @@ class TerminalPresenter(Presenter):
             self._progress_task = None
 
     def on_node_started(self, identity: "NodeExecutionIdentity", *, depth: int) -> None:
-        if self._policy.propagation:
+        if self._policy.propagation and self._policy.verbose_ops:
             indent = "    " * depth
             self._console.print(f"{indent}[dim]-> {identity.node_id}[/dim]")
 
@@ -135,7 +166,7 @@ class TerminalPresenter(Presenter):
                 description=f"Processed {self._nodes_processed} nodes",
             )
 
-        if self._policy.nodes or self._policy.propagation:
+        if self._policy.nodes or (self._policy.propagation and self._policy.verbose_ops):
             indent = "    " * depth if self._policy.propagation else ""
             timing = f" [dim]({duration * 1000:.1f}ms)[/dim]" if self._policy.timings else ""
             self._console.print(f"{indent}[green]✓[/green] {identity.node_id}{timing}")
@@ -144,14 +175,130 @@ class TerminalPresenter(Presenter):
         self, identity: "NodeExecutionIdentity", exc: BaseException, *, duration: float
     ) -> None:
         if self._policy.errors:
-            self._console.print(
-                f"[bold red]ERROR[/bold red] {identity.node_id}: {exc}"
-            )
+            marker = Text("● ", style="bold red")
+            marker.append("ERROR", style="bold red")
+            marker.append(f" ({_short_id(identity.node_execution_id)})   ", style="dim")
+            marker.append(identity.node_id, style="yellow")
+            marker.append(f": {exc}")
+            self._console.print(marker)
 
     def on_recording(self, recording: "Recording") -> None:
-        if self._policy.instruments:
-            unit = f" {recording.unit}" if recording.unit else ""
+        if not self._policy.instruments:
+            return
+        unit = f" {recording.unit}" if recording.unit else ""
+        if self._policy.verbose_ops:
+            line = Text("● ", style="cyan")
+            line.append("RECORD".ljust(9), style="cyan")
+            line.append(f"({_short_id(recording.node_execution_id)})   ", style="dim")
+            line.append(recording.node_id.ljust(20), style="yellow")
+            line.append(" → ")
+            line.append(f"{recording.name} {recording.value}{unit}")
+            self._console.print(line)
+        else:
             self._console.print(f"  {recording.name:<20} {recording.value}{unit}")
+
+    def on_artifact_generated(
+        self, identity: "NodeExecutionIdentity", *, artifact_type: str, artifact_version: int
+    ) -> None:
+        if not self._policy.propagation:
+            return
+        short_id = _short_id(identity.node_execution_id)
+        if self._policy.verbose_ops:
+            line = Text("● ", style="green")
+            line.append("COMMIT".ljust(9), style="cyan")
+            line.append(f"({short_id})   ", style="dim")
+            line.append(identity.node_id.ljust(20), style="yellow")
+            line.append(" → ")
+            line.append(f"{artifact_type}@v{artifact_version}", style="bold")
+            self._console.print(line)
+        else:
+            line = Text("● ", style="green")
+            line.append(f"{artifact_type}@v{artifact_version}".ljust(22), style="bold")
+            line.append(f"({short_id})   ", style="dim")
+            line.append(identity.node_id, style="yellow")
+            line.append(" → ")
+            line.append("REPOSITORY", style="magenta")
+            self._console.print(line)
+
+    def on_artifact_consumed(
+        self, identity: "NodeExecutionIdentity", *, artifact_type: str, artifact_version: int
+    ) -> None:
+        if not (self._policy.propagation and self._policy.verbose_ops):
+            # Normal mode shows net publication only (Section 6: consumption
+            # is implied by the next line's producer, never spelled out
+            # twice) -- verbose mode is the only place CONSUME is explicit.
+            return
+        short_id = _short_id(identity.node_execution_id)
+        line = Text("● ", style="green")
+        line.append("CONSUME".ljust(9), style="cyan")
+        line.append(f"({short_id})   ", style="dim")
+        line.append(f"{artifact_type}@v{artifact_version}".ljust(20))
+        line.append(" → ")
+        line.append(identity.node_id, style="yellow")
+        self._console.print(line)
+
+
+class CompositePresenter(Presenter):
+    """
+    Fans one `Run`'s `Presenter` calls out to several concrete `Presenter`s
+    (Milestone O8, Slice O8b) -- e.g. a `TerminalPresenter` for humans and a
+    `StructuredLogPresenter` (`reed.observability.logging`) for a JSON sink,
+    built from the same underlying facts. `Run` still only ever holds and
+    calls one `Presenter`; this class is the only place that knows there is
+    more than one.
+
+    Each sub-presenter's hook call is isolated individually so that one
+    broken sub-presenter cannot prevent another from receiving the same
+    call (docs/observability_invariants.md #31) -- on top of, not instead
+    of, `Run._safe_presenter_call`'s own isolation of the composite call
+    itself.
+    """
+
+    def __init__(self, presenters: "list[Presenter]") -> None:
+        self._presenters = list(presenters)
+
+    def _fan_out(self, method_name: str, *args: object, **kwargs: object) -> None:
+        for presenter in self._presenters:
+            try:
+                getattr(presenter, method_name)(*args, **kwargs)
+            except BaseException:  # noqa: BLE001 -- isolate each sub-presenter independently
+                pass
+
+    def on_publish_start(self, domain_value: object) -> None:
+        self._fan_out("on_publish_start", domain_value)
+
+    def on_publish_end(self) -> None:
+        self._fan_out("on_publish_end")
+
+    def on_node_started(self, identity: "NodeExecutionIdentity", *, depth: int) -> None:
+        self._fan_out("on_node_started", identity, depth=depth)
+
+    def on_node_finished(
+        self, identity: "NodeExecutionIdentity", *, depth: int, duration: float
+    ) -> None:
+        self._fan_out("on_node_finished", identity, depth=depth, duration=duration)
+
+    def on_node_error(
+        self, identity: "NodeExecutionIdentity", exc: BaseException, *, duration: float
+    ) -> None:
+        self._fan_out("on_node_error", identity, exc, duration=duration)
+
+    def on_recording(self, recording: "Recording") -> None:
+        self._fan_out("on_recording", recording)
+
+    def on_artifact_generated(
+        self, identity: "NodeExecutionIdentity", *, artifact_type: str, artifact_version: int
+    ) -> None:
+        self._fan_out(
+            "on_artifact_generated", identity, artifact_type=artifact_type, artifact_version=artifact_version
+        )
+
+    def on_artifact_consumed(
+        self, identity: "NodeExecutionIdentity", *, artifact_type: str, artifact_version: int
+    ) -> None:
+        self._fan_out(
+            "on_artifact_consumed", identity, artifact_type=artifact_type, artifact_version=artifact_version
+        )
 
 
 def build_presenter(

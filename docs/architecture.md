@@ -617,6 +617,8 @@ Each of these boundaries answers a question a reader might otherwise conflate:
 - **Instrument Definition ≠ Instrument Binding ≠ Recording / Observation ≠ Presentation** — a semantic measurement's identity, its association with a specific computational role, and one concrete observation are three distinct identities with three different lifetimes; and what the observation plane produces is never conflated with how, or whether, any of it is shown to a particular consumer.
 - **Logical Observation Unit ≠ Physical Persistence Boundary** — the unit at which observations are semantically meaningful (an instrument) is a different concept from the unit at which they are physically isolated and made durable (an execution instance), and conflating them would entangle a purely semantic distinction with a purely operational one.
 
+(Issue #8) Structured logging and terminal rendering are two consumers of this same observation layer, not a second one: a `LogEvent` (`reed.observability.logging`) is a stable-field projection of an already-observed Execution Trace / Provenance / Recording fact, and the terminal's compact/verbose visual grammar (`reed.observability.presenter`) renders the same facts for a human reader — see `docs/logging_design.md` for the full record.
+
 ---
 
 ## Summary

@@ -1,5 +1,6 @@
 """
-Terminal presentation policy (Milestone O7, Slice O7d).
+Terminal presentation policy (Milestone O7, Slice O7d; extended Milestone O8, Slice
+O8b with `verbose_ops`).
 
 The public API Reed users configure per Execution: **what is shown in the terminal**,
 never **what Reed observes or persists**. This is a strict presentation-layer concern,
@@ -20,7 +21,9 @@ docstring of `reed.observability.presenter` for the consumer side of this split.
 `observability="silent"` means "show nothing in the terminal." It never means "stop
 collecting Recordings/Provenance," and it never disables durable storage or OTel export --
 those are controlled independently via `storage_root=`/an OTel exporter adapter call, which
-keep working unchanged regardless of terminal verbosity.
+keep working unchanged regardless of terminal verbosity. It also never disables structured
+logging (Milestone O8): a `StructuredLogPresenter` is a separate, independently-configured
+sink -- see `reed.observability.logging`.
 
 ## Public API
 
@@ -48,6 +51,16 @@ levels are added later, forcing every user to memorize a table. A semantic prese
 `PresentationPolicy` dimensions it compiles to evolve -- exactly the reasoning
 `observability_goals.md`/`observability_non_goals.md` already apply to `Instrument.kind`
 (a small, named, closed set) rather than an open-ended free-form value.
+
+## Detail level vs. logging severity (Milestone O8)
+
+`verbose_ops` is a *presentation detail level*, not a logging severity (docs/
+logging_design.md Section 7): it controls whether artifact-publication/instrument lines
+render in the compact "what was published" grammar or the explicit "which operation
+(CONSUME/RECORD/COMMIT) happened" grammar (`reed.observability.presenter`). It never
+affects `LogEvent.severity`, which is a property of the underlying fact
+(`node_error` is always `"error"`), nor what Reed computes, collects, or persists
+(docs/observability_invariants.md #34).
 """
 
 from __future__ import annotations
@@ -71,13 +84,19 @@ class PresentationPolicy:
       for what "progress" can honestly mean in a reactive graph -- Section 6
       of the task that opened this milestone).
     - `nodes`: print one line per Node firing (start/finish, success/failure).
-    - `propagation`: print full graph propagation (Artifact generation/
-      consumption, indented by causal depth) -- the closest analogue to the
-      pre-Issue-4 Bus/Depot/Outpost terminal experience, rebuilt on the new
-      Execution Trace/Provenance foundation, never on the old Bus machinery.
+    - `propagation`: print graph propagation -- Artifact generation/
+      consumption between Nodes and the Repository (Milestone O8, Slice
+      O8b) -- the closest analogue to the pre-Issue-4 Bus/Depot/Outpost
+      terminal experience, rebuilt on the Execution Trace/Provenance
+      foundation, never on the old Bus machinery.
     - `instruments`: print `ctx.record(...)` observations as they are accepted.
     - `timings`: include per-Node firing durations wherever `nodes`/
       `propagation` output already shows a line for that firing.
+    - `verbose_ops` (Milestone O8): when `propagation`/`instruments` are also
+      set, render the explicit per-operation grammar (`CONSUME`/`RECORD`/
+      `COMMIT`) instead of the compact "Artifact@vN -> REPOSITORY" grammar.
+      Purely a detail-level choice -- see the module docstring's "Detail
+      level vs. logging severity" section.
     """
 
     errors: bool = False
@@ -86,6 +105,7 @@ class PresentationPolicy:
     propagation: bool = False
     instruments: bool = False
     timings: bool = False
+    verbose_ops: bool = False
 
     @classmethod
     def silent(cls) -> "PresentationPolicy":
@@ -108,12 +128,14 @@ PRESETS: dict[str, PresentationPolicy] = {
     "progress": PresentationPolicy(errors=True, progress=True),
     "instruments": PresentationPolicy(errors=True, instruments=True),
     "nodes": PresentationPolicy(errors=True, nodes=True),
+    "propagation": PresentationPolicy(errors=True, propagation=True),
     "verbose": PresentationPolicy(
         errors=True,
         nodes=True,
         propagation=True,
         instruments=True,
         timings=True,
+        verbose_ops=True,
     ),
 }
 
