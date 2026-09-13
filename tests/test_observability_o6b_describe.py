@@ -16,15 +16,15 @@ class Estimate:
         self.value = value
 
 
-def test_describe_flow_reports_discovery_is_runtime_only():
+def test_describe_flow_reports_nodes_with_no_instrument_column():
     """
-    O7i: prospective Instrument declaration no longer exists -- every
-    Node's Instrument column reads DISCOVERED_AT_RUNTIME_LABEL uniformly,
-    whether or not it will ever call ctx.record(...). describe_flow
-    still enumerates every Node in the Flow with no execution required.
+    O7i: prospective Instrument declaration no longer exists, and
+    describe_flow is a purely structural, composition-plane report --
+    it lists Nodes only, with no Instrument column at all (an Instrument
+    binding does not exist until some real Run discovers it).
     """
     from reed import Flow
-    from reed.observability.describe import DISCOVERED_AT_RUNTIME_LABEL, describe_flow
+    from reed.observability.describe import describe_flow
 
     def produce(measurement: Measurement) -> Estimate:
         return Estimate(measurement.value)
@@ -36,7 +36,8 @@ def test_describe_flow_reports_discovery_is_runtime_only():
     table = describe_flow(flow)
 
     assert table.row_count == 1
-    assert table.columns[1]._cells[0] == DISCOVERED_AT_RUNTIME_LABEL
+    assert len(table.columns) == 1
+    assert table.columns[0]._cells[0] == flow.flow_nodes[0].node_id
 
 
 def test_describe_instruments_manifest_reads_past_run_manifest(tmp_path):

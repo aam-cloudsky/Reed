@@ -1681,12 +1681,12 @@ Slice O6a complete. No new open design questions surfaced.
 
 ### 26.1 `describe_flow`/`describe_instruments_manifest` (`src/reed/observability/describe.py`)
 
-`describe_flow(flow)` builds a Rich table of every `FlowNode` in a `Flow` and its declared
-Instruments, reading `Flow.flow_nodes`/`FlowNode.instruments` directly -- **no execution
-required**, matching the harness row's own framing: a Node's declared Instruments are part
-of its own definition (Milestone O2's `flow.add(node, instruments=[...])`), not something
-that only exists once something has run. A Node declared with no Instruments still appears
-as a row with blank instrument columns, so `describe` always reports every Node in the Flow.
+`describe_flow(flow)` builds a Rich table of every `FlowNode` in a `Flow`, reading
+`Flow.flow_nodes` directly -- **no execution required**. As of Milestone O7, Slice O7i, this
+report is purely structural (Nodes and their relationships): Instrument bindings are
+discovered dynamically at execution time rather than declared as part of composing the Flow,
+so `describe_flow` carries no Instrument column at all -- see `describe_instruments_manifest`
+below for the execution-derived view where real bindings, once discovered, actually live.
 
 `describe_instruments_manifest(path)` is the same report sourced from a past Run's
 `instruments.json` (Milestone O3, Slice O3e) instead of a live `Flow` object -- for
