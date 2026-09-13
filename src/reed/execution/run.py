@@ -176,8 +176,11 @@ import asyncio
 import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
+import uuid
+
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.execution.node_runtime import NodeRuntime
+from reed.observability.identity import NodeExecutionIdentity
 from reed.synchronization.artifact_repository import ArtifactRepository
 from reed.transportation.bus import Bus
 
@@ -207,6 +210,13 @@ class Run:
         self._flow = flow
         self._repository = ArtifactRepository(bus=Bus.create())
         self._node_runtimes: dict[FlowNode, NodeRuntime] = {}
+        # Milestone O1, Slice O1b/O1e: observability identity. `execution_id`
+        # is minted once per Run instance; `_execution_seq_counter` is
+        # incremented once per node_execution_id minted (Section 13.1 --
+        # deterministic observation order, never causality), scoped to
+        # this one execution_id.
+        self._execution_id: str = str(uuid.uuid4())
+        self._execution_seq_counter: int = 0
         self.callback_failures: list[BaseException] = []
         self._pending_callback_coroutines: list[Any] = []
         # Slice 2I: per-(Run, FlowNode) join-state bookkeeping for the
@@ -226,6 +236,28 @@ class Run:
     def flow(self) -> Flow:
         """The `Flow` that created this `Run` via `Flow.run()`."""
         return self._flow
+
+    @property
+    def execution_id(self) -> str:
+        """
+        This `Run`'s observability identity (Milestone O1, Slice O1b;
+        docs/observability_goals.md Section 3): a uuid4 minted once in
+        `__init__`, identifying this one concrete execution instance.
+        Distinct from `flow_id`, which identifies the logical `Flow`
+        definition this `Run` was created from, not this particular
+        execution of it.
+        """
+        return self._execution_id
+
+    @property
+    def flow_id(self) -> str:
+        """
+        The observability identity of the `Flow` that created this `Run`
+        (Milestone O1, Slice O1b) -- a passthrough to `self.flow.flow_id`.
+        See `Flow.flow_id` for the derivation and its stability
+        guarantees.
+        """
+        return self._flow.flow_id
 
     @property
     def repository(self) -> ArtifactRepository:
@@ -410,9 +442,40 @@ class Run:
 
         if flow_node.context is not None:
             node_runtime = self.node_runtime(flow_node.definition.function)
-            call_kwargs[flow_node.context.parameter_name] = node_runtime.context
+            identity = self._begin_node_execution(flow_node)
+            call_kwargs[flow_node.context.parameter_name] = (
+                node_runtime.build_context(identity)
+            )
 
         return call_kwargs
+
+    def _begin_node_execution(self, flow_node: "FlowNode") -> NodeExecutionIdentity:
+        """
+        Mint the observability identity for one Node firing (Milestone
+        O1, Slice O1d/O1e/O1f).
+
+        Called from `._build_call_kwargs(...)`, immediately before the
+        `NodeContext` snapshot that will be injected into this firing is
+        built -- not from `._fire(...)` -- because the context object is
+        already fully constructed by the time `._fire(...)` receives
+        `call_kwargs`; the identity must exist before that point to be
+        attached to it (docs/observability_design.md Section 18).
+
+        `node_execution_id` is a fresh uuid4 per call (one per firing,
+        never reused). `execution_seq` is this `Run`'s own monotonic
+        counter, incremented once per call -- a deterministic
+        observation order scoped to this `execution_id`, never a
+        causality claim (Section 13.1; docs/observability_invariants.md
+        #7-9).
+        """
+        self._execution_seq_counter += 1
+        return NodeExecutionIdentity(
+            execution_id=self._execution_id,
+            flow_id=self.flow_id,
+            node_id=flow_node.node_id,
+            node_execution_id=str(uuid.uuid4()),
+            execution_seq=self._execution_seq_counter,
+        )
 
     def _fire(self, flow_node: "FlowNode", call_kwargs: dict[str, object]) -> object:
         """

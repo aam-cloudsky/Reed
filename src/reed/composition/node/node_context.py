@@ -77,6 +77,8 @@ from __future__ import annotations
 
 from typing import Generic, TypeVar
 
+from reed.observability.identity import NodeExecutionIdentity
+
 MemoryType = TypeVar("MemoryType")
 OutputType = TypeVar("OutputType")
 
@@ -92,13 +94,26 @@ class NodeContext(Generic[MemoryType, OutputType]):
     anything else internal to Reed's execution infrastructure.
     """
 
-    __slots__ = ("_memory", "_last_output")
+    __slots__ = ("_memory", "_last_output", "_identity")
 
     def __init__(
-        self, *, memory: MemoryType, last_output: OutputType | None
+        self,
+        *,
+        memory: MemoryType,
+        last_output: OutputType | None,
+        identity: NodeExecutionIdentity | None = None,
     ) -> None:
         self._memory = memory
         self._last_output = last_output
+        # Milestone O1, Slice O1f: a small, read-only observability
+        # identity bundle -- plain values only (docs/observability/
+        # identity.py), never a back-reference to NodeRuntime, Run, or
+        # Flow (architectural_invariants.md #26). Optional and defaults
+        # to None so every existing construction of a NodeContext
+        # (`NodeRuntime.context`, direct test construction) keeps
+        # working unchanged; only the real firing path
+        # (`Run._build_call_kwargs`) supplies one.
+        self._identity = identity
 
     @property
     def memory(self) -> MemoryType:
@@ -127,3 +142,20 @@ class NodeContext(Generic[MemoryType, OutputType]):
         private computational memory, not a record of committed output.
         """
         return self._last_output
+
+    @property
+    def identity(self) -> NodeExecutionIdentity | None:
+        """
+        This firing's observability identity bundle (Milestone O1, Slice
+        O1f), or `None` if this `NodeContext` was constructed without one
+        (every construction before this slice, and any direct
+        construction that does not pass `identity=`).
+
+        Read-only, plain-value only -- see `NodeExecutionIdentity`'s own
+        docstring. Exposing this is a deliberate, narrow exception to
+        `NodeContext`'s "never a back-reference to execution
+        infrastructure" rule (architectural_invariants.md #26): the
+        bundle carries no reference to `Run`, `Flow`, or `NodeRuntime`
+        themselves, only their observability identifiers.
+        """
+        return self._identity

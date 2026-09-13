@@ -144,6 +144,7 @@ from typing import TYPE_CHECKING
 
 from reed.composition.node.node_context import NodeContext
 from reed.execution.artifact_record import ArtifactRecord
+from reed.observability.identity import NodeExecutionIdentity
 
 if TYPE_CHECKING:
     from reed.composition.flow.flow_node import FlowNode
@@ -325,3 +326,26 @@ class NodeRuntime:
         node function does not declare a `NodeContext` parameter.
         """
         return NodeContext(memory=self.memory, last_output=self.last_output)
+
+    def build_context(self, identity: NodeExecutionIdentity) -> NodeContext:
+        """
+        A fresh `NodeContext` snapshot carrying an observability identity
+        bundle (Milestone O1, Slice O1f).
+
+        Identical to `.context` except for the added `identity=...`
+        argument -- used exclusively by `Run._build_call_kwargs(...)` to
+        build the `NodeContext` that is actually injected into a real
+        firing, once `Run._begin_node_execution(...)` has minted that
+        firing's identity. Kept as a separate method rather than an
+        optional parameter on `.context` because `.context` is a
+        property (called without parentheses throughout the existing,
+        regression-protected call sites) and properties cannot take
+        arguments.
+
+        Raises `AttributeError` (via `.memory`) if this `NodeRuntime`'s
+        node function does not declare a `NodeContext` parameter --
+        same as `.context`.
+        """
+        return NodeContext(
+            memory=self.memory, last_output=self.last_output, identity=identity
+        )

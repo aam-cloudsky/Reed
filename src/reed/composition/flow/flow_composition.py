@@ -82,6 +82,7 @@ exposed as the top-level `reed.Flow`.
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from typing import Callable, TypeVar
 
@@ -126,6 +127,53 @@ class Flow:
         reaching into `Flow`'s private internals.
         """
         return tuple(self._flow_nodes)
+
+    @property
+    def flow_id(self) -> str:
+        """
+        This `Flow`'s stable observability identity (Milestone O1, Slice
+        O1a/O1b; docs/observability_design.md Section 18 -- `flow_id`/
+        `node_id` cross-run stability).
+
+        Deterministically derived from the ordered tuple of this Flow's
+        registered `FlowNode.node_id` values: a SHA-256 digest (first 16
+        hex characters -- short enough to be usable in a path/filename,
+        long enough that accidental collision is not a practical
+        concern) of those ids joined by `"|"`, in registration order.
+
+        This is computed fresh from `self._flow_nodes` on every access,
+        never cached: `flow_id` is a pure function of "which FlowNodes
+        are registered, in what order" at the moment it is read, so a
+        Flow that is still being composed (nodes added after an earlier
+        read) is never stuck with a stale value.
+
+        Two consequences, both intentional (docs/observability_design.md
+        Section 17.1/17.2 and Section 18):
+
+        1. Running the same script twice (the same sequence of
+           `Flow.add(...)` calls) in two separate OS processes produces
+           the same `flow_id` both times -- no user-supplied name or
+           identifier is required (docs/observability_non_goals.md
+           Section 8: no `name=` parameter on `Flow.add(...)`).
+        2. A code change to the Flow's composition (a node added,
+           removed, or reordered) changes `flow_id` automatically, as a
+           direct consequence of this deterministic derivation -- there
+           is no separate "should this force a new flow_id" mechanism
+           to design, because `flow_id` was never an independent,
+           storable value in the first place.
+
+        Known, accepted limitation: two independently authored Flows
+        that happen to register the exact same sequence of node
+        functions (same modules, same qualified names, same order)
+        collide on `flow_id`. This is considered acceptable given how
+        narrow and low-stakes that coincidence is in practice; it is not
+        the "some UUID will do" shortcut `observability_non_goals.md`
+        Section 10 warns against; it is a documented trade-off of a
+        specific, deterministic derivation.
+        """
+        joined = "|".join(flow_node.node_id for flow_node in self._flow_nodes)
+        digest = hashlib.sha256(joined.encode("utf-8")).hexdigest()
+        return digest[:16]
 
     @property
     def dependency_graph(self) -> ArtifactDependencyGraph:
