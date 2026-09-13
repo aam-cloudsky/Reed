@@ -1613,3 +1613,25 @@ mid-firing, or the ring buffer dropped the `"node_finished"` half past capacity)
 
 Slice O5b complete. No new open design questions surfaced. O5c (optional post-hoc replay
 reading `recordings.csv`/`provenance.csv`) is not started.
+
+## Round 12 (Milestone O5, Slice O5c, optional): post-hoc replay implemented
+
+### 24.1 `render_replay_table`/`print_replay` (`src/reed/observability/replay.py`)
+
+Reads a past Execution's `recordings.csv`/`provenance.csv` (Milestone O3) back from disk and
+renders them as one Rich `Table`, interleaved by `execution_seq` -- the same deterministic
+observation order every Level 1/2 record already carries (Section 13.1). This is strictly
+read-only and never touches a live `Run`/`ExecutionTrace`: it is a separate consumer of the
+Level 2 durable stores, not an extension of the O5b live/pull-based renderer's internals
+(which stay in `terminal.py`, over `ExecutionTrace`, unchanged).
+
+Requires `storage_root` to have been configured for the Execution being replayed (Milestone
+O3's opt-in, Section 20.1) -- `load_recordings(...)`/`load_provenance(...)` raise
+`FileNotFoundError` rather than silently returning an empty table when the expected CSV file
+does not exist, so "no storage was configured for this run" is never confused with "this run
+recorded nothing."
+
+### 24.2 Status
+
+Slice O5c (optional) complete. Milestone O5 (Execution Trace: ring buffer, terminal renderer,
+post-hoc replay) is now fully complete. No new open design questions surfaced.

@@ -127,7 +127,7 @@ render trace/propagation alone), richer once O3/O4 exist for post-hoc replay.
 |---|---|
 | O5a | DONE — `ExecutionTrace`/`TraceEvent` ring buffer (`src/reed/observability/trace.py`), always constructed per `Run`, exposed as `run.trace`. Design record §22.1. |
 | O5b | DONE — `render_trace_table`/`print_trace` (`src/reed/observability/terminal.py`), a pull-based Rich renderer over `run.trace`. Design record §23. |
-| O5c | Optional: extend the renderer to also read `recordings.csv`/`provenance.csv` for post-hoc replay of a past Execution. |
+| O5c | DONE (optional) — `render_replay_table`/`print_replay`/`load_recordings`/`load_provenance` (`src/reed/observability/replay.py`). Design record §24. |
 
 ### Milestone O6 — Exporters and Tooling (deferred / lower priority)
 
@@ -145,9 +145,11 @@ scope).
 
 ## Current slice
 
-**O5c — NOT STARTED.** Milestones O1-O4 and Slices O5a-O5b are complete -- 186 tests
-passing, Ruff clean. The next slice is O5c (optional): extend the renderer to also read
-`recordings.csv`/`provenance.csv` for post-hoc replay of a past Execution.
+**O6a — NOT STARTED.** Milestones O1-O5 (Identity, Instrument/Recording, Local Recording
+Store, Provenance, Execution Trace) are all complete -- 190 tests passing, Ruff clean. The
+next slice is O6a: an OTel exporter adapter translating Reed's own Run/NodeExecution/Trigger
+events into OTel spans/links/events, per design record Section 8's "OTel is an optional
+consumer of Level 1 and Level 2 data."
 
 ## Open questions requiring decision (tracked, not yet resolved)
 

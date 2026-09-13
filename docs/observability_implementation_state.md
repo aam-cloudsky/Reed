@@ -14,12 +14,10 @@ meaningful progress.
 
 ## Current slice
 
-**O5c — NOT STARTED (optional).**
+**O6a — NOT STARTED.**
 
-Milestones O1-O4 and Slices O5a-O5b (Level 1 Execution Trace + terminal renderer) are
-complete (continuous execution authorized). Next: O5c, optionally extending the renderer for
-post-hoc replay of `recordings.csv`/`provenance.csv`. See `docs/observability_harness.md`
-for the full milestone/slice table.
+Milestones O1-O5 are all complete (continuous execution authorized). Next: O6a, an OTel
+exporter adapter. See `docs/observability_harness.md` for the full milestone/slice table.
 
 ## Baseline verification
 
@@ -34,6 +32,7 @@ Re-run after O4 (2026-09-13): 177 passed (172 + 6 new O4 tests); ruff clean (one
 forward-ref lint error fixed: `ArtifactRecord` type hint needed a `TYPE_CHECKING` import).
 Re-run after O5a (2026-09-13): 182 passed (177 + 5 new O5a tests); ruff clean.
 Re-run after O5b (2026-09-13): 186 passed (182 + 4 new O5b tests); ruff clean.
+Re-run after O5c (2026-09-13): 190 passed (186 + 4 new O5c tests); ruff clean.
 
 ## Completed slices
 
@@ -272,6 +271,21 @@ round/section, and only then is it marked resolved here.
 - New open questions discovered (if any): none.
 - Follow-up filed as future work (if any): live streaming rendering, if a real need appears
   (§23.1); O5c (post-hoc replay) remains separate and optional.
+
+### O5c — Post-hoc replay of a past Execution (optional) (2026-09-13)
+- observability_design.md section(s) implemented: Section 8's "it can show provenance and
+  recordings, not only Bus request/reply pairs", written back as new Section 24 (Round 12).
+- Files changed: `src/reed/observability/replay.py` (new: `load_recordings(run_dir)`,
+  `load_provenance(run_dir)`, `render_replay_table(run_dir)`, `print_replay(run_dir,
+  console=...)`).
+- Tests: `tests/test_observability_o5c_replay.py` (4 tests: recordings/provenance
+  interleaved by execution_seq, raw row read-back, FileNotFoundError when no storage was
+  configured, rendered text contains recording/provenance detail). Full suite: 190 passed;
+  Ruff clean.
+- Deviations from the slice plan (if any): none.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none. **Milestone O5 (Execution Trace) is now
+  fully complete.**
 
 ## Deviations from the design record
 
