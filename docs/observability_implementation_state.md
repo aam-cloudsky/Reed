@@ -14,12 +14,12 @@ meaningful progress.
 
 ## Current slice
 
-**ALL AUTHORIZED SLICES COMPLETE (O1a through O6d). No slice is currently in progress.**
+**O7c — IN PROGRESS.**
 
-Milestones O1-O6 are all complete. Per the 2026-09-13 continuous-execution authorization's
-stop condition 4 ("all remaining slices through O6d are complete"), this is a genuine
-stopping point. See `docs/observability_harness.md`'s "Current slice" section for what
-remains as explicitly out-of-scope future work.
+Milestone O7 (Post-Implementation Audit and Terminal Presentation Control) opened
+2026-09-13 per explicit human instruction, after O1-O6 were already complete. O7a (audit
+baseline) and O7b (Artifact version identity fix) are done. See
+`docs/observability_harness.md`'s Milestone O7 table for the full slice list.
 
 ## Baseline verification
 
@@ -368,6 +368,55 @@ round/section, and only then is it marked resolved here.
 **Milestone O6 complete. The full authorized slice sequence (O2a through O6d, plus
 Milestone O1 completed before the 2026-09-13 continuous-execution authorization) is now
 complete. 206 tests passing, Ruff clean, zero regressions across the entire build.**
+
+### O7a-O7b — Audit baseline + Artifact version identity fix (2026-09-13)
+
+**Decision:** Fix `NodeRuntime.wrap(...)` so repeated firings of the same Node produce
+monotonically increasing `ArtifactRecord.version` values, instead of every firing reading
+`version.number == 1` forever.
+
+**Why:** Independent audit (human-requested, post-O6) of the acceptance example's
+`reed graph`/`reed replay` output showed every generation of `TrackedReading` labeled "v1"
+across multiple publications. Root-caused to `NodeRuntime.wrap(...)` constructing a *fresh*
+`ArtifactProvenance()` (default `pending()` -> `initial()`) on every call, and
+`ArtifactRepository.set_artifact_record(...)` overwriting its dict entry without reading
+the previous version. No existing regression test asserted "always version 1" as an
+intentional invariant (`tests/test_slice_2e_node_execution.py` only asserts a *single*
+firing reads `initial()`) -- this was an unguarded gap, not a protected behavior.
+
+**Alternatives considered:**
+1. Look up the previous committed record via `self._run.repository.get_artifact_record(domain_type)`
+   and continue its version each `wrap()` call.
+2. Give `NodeRuntime` one running `ArtifactProvenance`, advanced in place per firing,
+   snapshotted (`.copy()`) into each returned `ArtifactRecord`. **Chosen.**
+
+**Advantages of (2) over (1):** No repository read on every firing (keeps `wrap()` a pure,
+cheap operation); correct by construction from invariant #24 ("each Artifact type has
+exactly one producer within a Flow" -- so one producer-scoped counter is definitionally
+the same as one type-scoped counter, without needing to prove it via a repository lookup);
+matches the existing pattern already established for `Recording`/Instrument per-NodeRuntime
+state (`self._recordings`, `self._lazy_units`).
+
+**Disadvantages/risks:** A raw shared reference to the running `ArtifactProvenance` object
+would let a later firing's `.advance()` call mutate an *already-committed* record's version
+out from under it -- mitigated by returning `.copy()` (an independent snapshot) from every
+`wrap()` call, verified by
+`test_earlier_committed_records_keep_their_own_version_after_later_firings`.
+
+**Files changed:** `src/reed/execution/node_runtime.py` (`self._provenance =
+ArtifactProvenance()` in `__init__`; `.wrap(...)` advances it in place and returns a
+`.copy()`-snapshotted `ArtifactRecord`).
+
+**Tests:** `tests/test_observability_o7b_provenance_version.py` (4 tests, written and
+confirmed failing against the pre-fix code first, per protocol: repeated firings increment
+version; earlier records are not mutated by later firings; `provenance.csv`'s "generated"
+events show distinct versions end-to-end; two different Artifact types version
+independently). Full suite: 210 passed (206 + 4 new); Ruff clean.
+
+**Evidence:** `docs/observability_design.md` Section 8 ("causally distinct Artifact
+generations"); `docs/observability_invariants.md` #22 ("generation and usage are distinct
+provenance events") and #24 ("each Artifact type has exactly one producer within a Flow");
+direct reproduction via `examples/observability_example.py`'s own output.
 
 ## Deviations from the design record
 

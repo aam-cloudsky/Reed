@@ -143,7 +143,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from reed.composition.node.node_context import NodeContext
-from reed.execution.artifact_record import ArtifactRecord
+from reed.execution.artifact_record import ArtifactProvenance, ArtifactRecord
 from reed.observability.identity import NodeExecutionIdentity
 from reed.observability.instrument import Instrument
 from reed.observability.recording import Recording, ScalarValue
@@ -190,6 +190,17 @@ class NodeRuntime:
             instrument.name: instrument for instrument in flow_node.instruments
         }
 
+        # Milestone O7, Slice O7b: a running `ArtifactProvenance` owned by
+        # this NodeRuntime, advanced (never replaced) on every `.wrap(...)`
+        # call -- fixes a confirmed defect where each firing constructed a
+        # *fresh* `ArtifactProvenance()`, so every committed `ArtifactRecord`
+        # read `version.number == 1` forever, regardless of how many times
+        # this Node had already fired in this Run. Each Artifact type has
+        # exactly one producer within a Flow (architectural invariant #24),
+        # so one running counter per NodeRuntime is the correct scope: it
+        # need not be keyed by domain type.
+        self._provenance = ArtifactProvenance()
+
     @property
     def run(self) -> Run:
         """The `Run` this `NodeRuntime` was materialized inside."""
@@ -216,19 +227,29 @@ class NodeRuntime:
     def wrap(self, domain_value: object) -> "ArtifactRecord":
         """
         Wrap `domain_value` -- a node function's returned domain value --
-        into a fresh `ArtifactRecord` (Slice 2E).
+        into a fresh `ArtifactRecord` (Slice 2E; version mechanics fixed
+        at Milestone O7, Slice O7b).
 
-        This `NodeRuntime` is recorded as the record's producer and its
-        provenance is advanced once (pending (0) -> initial (1) on first
-        firing, matching `ArtifactProvenance.advance`'s existing,
-        regression-tested version mechanics from Slice 2C). This is the
-        "wrap" half of docs/parcel_boundary_decision.md's boundary
-        diagram (`U -> wrap -> Parcel[U]`, read here as `ArtifactRecord`);
-        it does not commit anything by itself -- see `.commit(...)`.
+        This `NodeRuntime` is recorded as the record's producer.
+        `self._provenance` (one running `ArtifactProvenance` per
+        NodeRuntime, Slice O7b) is advanced in place on every call --
+        pending (0) -> initial (1) on this NodeRuntime's first firing,
+        `.next()` on every firing after that -- so repeated firings of
+        the same Node produce monotonically increasing, causally distinct
+        versions instead of every firing reading "version 1" forever.
+
+        Each returned `ArtifactRecord` gets its own immutable *snapshot*
+        (`.copy()`) of `self._provenance` at the moment of this call, not
+        a shared reference to the running object -- otherwise an already-
+        committed record's `.version` would silently change out from
+        under it the next time this Node fires (`self._provenance` keeps
+        advancing after this call returns). This is the "wrap" half of
+        docs/parcel_boundary_decision.md's boundary diagram (`U -> wrap ->
+        Parcel[U]`, read here as `ArtifactRecord`); it does not commit
+        anything by itself -- see `.commit(...)`.
         """
-        record: ArtifactRecord = ArtifactRecord(value=domain_value)
-        record.provenance.advance(producer=self)
-        return record
+        self._provenance.advance(producer=self)
+        return ArtifactRecord(value=domain_value, provenance=self._provenance.copy())
 
     def commit(self, record: "ArtifactRecord") -> None:
         """

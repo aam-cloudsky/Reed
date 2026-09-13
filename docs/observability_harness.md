@@ -143,6 +143,25 @@ scope).
 | O6c | DONE — `query_recordings`/`recordings_glob_pattern` (`src/reed/observability/query.py`); DuckDB/Polars query strings documented in the module docstring, pure-Python reference implementation provided. Design record §27. |
 | O6d | DONE — `build_provenance_graph`/`render_provenance_tree`/`render_provenance_dot` (`src/reed/observability/graph.py`). Design record §28. **Milestone O6 and the full authorized slice sequence (O2a-O6d) are now complete.** |
 
+### Milestone O7 — Post-Implementation Audit and Terminal Presentation Control
+
+Opened 2026-09-13, after O1-O6 were already recorded complete, per explicit human
+instruction to independently audit the implemented system against its own authoritative
+documents and to design/implement a configurable terminal presentation layer. This is a
+new milestone, not a rewrite of O1-O6's history (`observability_agent_protocol.md`'s
+"read -> inspect -> research -> plan -> implement -> verify -> report" applies here exactly
+as it did to O1-O6).
+
+| Slice | Delivers |
+|---|---|
+| O7a | DONE — audit baseline: reproduced two suspected defects (Artifact version identity; per-call fsync) with failing regression tests before any fix, confirmed against the authoritative docs. |
+| O7b | DONE — fixed Artifact version identity: `NodeRuntime` now owns one running `ArtifactProvenance`, advanced (never replaced) per firing, so repeated firings of the same Node produce monotonically increasing versions instead of always "v1". |
+| O7c | Recording durability/hot-path correction: batch `Recording`s in an in-memory, per-NodeExecution buffer; flush+fsync once at the NodeExecution durability boundary (success/exception/cancellation), not per `ctx.record()` call. |
+| O7d | Terminal presentation policy/API: `flow.run(observability=...)` presets compiling to a structured `PresentationPolicy`, decoupled from what Reed collects/persists. |
+| O7e | Progress semantics and renderer: define what a progress denominator can honestly mean in a reactive graph; implement accordingly (spinner/counter if a true fraction is not knowable). |
+| O7f | Replay/describe presentation corrections: disambiguate same-`execution_seq` replay rows without redefining `execution_seq`; distinguish "no Instruments" from "lazy-mode capable" in `describe_flow`. |
+| O7g | Final invariant-by-invariant audit and full regression pass. |
+
 ## Current slice
 
 **ALL AUTHORIZED SLICES COMPLETE (O1a through O6d).** 206 tests passing, Ruff clean.
