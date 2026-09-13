@@ -97,10 +97,15 @@ against that plan.
 
 ### 2.5 Advance
 
-Per the agent protocol's One-Slice Termination Rule: completing a slice's record step is
-where work stops. Do not begin the next slice's "break down" stage without a new explicit
-instruction. This plan does not override that rule — it exists to make each individual pass
-through the cycle well-formed, not to authorize chaining slices automatically.
+**Continuous execution is authorized (2026-09-13, superseding the former One-Slice
+Termination Rule — see `observability_agent_protocol.md`'s "Continuous Execution
+Policy").** Completing a slice's record step now means immediately beginning the next
+slice's "break down" stage (2.1), not stopping to wait for a new instruction. The five-stage
+cycle itself is unchanged; only what happens after stage 4 changes: chain directly into the
+next slice's stage 1, for every slice in the currently authorized sequence, stopping only
+for the genuine blockers in `observability_agent_protocol.md`'s Stop Conditions (an
+unresolvable architectural contradiction, an unauthorized destructive/irreversible action,
+an unrecoverable repository state, or reaching the end of the authorized sequence).
 
 ## 3. Reporting
 

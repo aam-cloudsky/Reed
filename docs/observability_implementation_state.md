@@ -155,11 +155,25 @@ _(none yet — record here if an implementation slice needs to deviate from
 `observability_design.md`/`observability_goals.md`, with the reason and where it was
 reconciled.)_
 
+## Execution policy decision log
+
+**2026-09-13 — continuous execution authorized.** Human instruction: "The observability
+build is now authorized to run continuously across slices. Completing a slice or milestone
+is a checkpoint, not a termination condition." This supersedes the former One-Slice
+Termination Rule everywhere it was stated (`observability_agent_protocol.md`,
+`observability_implementation_plan.md`). The slice discipline (break down → implement →
+validate → record → advance) is unchanged; "advance" now means immediately beginning the
+next slice rather than stopping. Stop conditions narrowed to: (1) a genuine unresolved
+architectural contradiction: (2) an unauthorized destructive/irreversible action; (3) an
+unrecoverable repository state; (4) reaching the end of the authorized slice sequence.
+Authorized sequence as of this entry: O2a through O6d.
+
 ## Notes for the next agent
 
 - Read `docs/observability_agent_protocol.md` first, then this file's "Current slice"
   section, before touching any production code.
-- Do not start a slice beyond the one recorded as current here without a new explicit
-  instruction (per the agent protocol's "One-Slice Termination Rule").
+- Continuous execution is authorized (see decision log above) — do not stop after a slice
+  merely because it completed; immediately continue to the next one in the authorized
+  sequence unless a genuine Stop Condition is met.
 - If this file and `docs/observability_harness.md` disagree on what the current slice is,
   stop and report — do not guess which one is stale.

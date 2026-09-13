@@ -48,6 +48,15 @@ posture as the prior refactor's initial harness-building session.
 | `observability_goals.md` | Target public API and mechanics — what "done" looks like, distilled for implementers. |
 | `observability_design.md` | The full design record (rounds 1-5) — every decision and correction, with reasoning. Read specific sections, not the whole document, per slice. |
 
+## Execution policy
+
+**Continuous execution is authorized (2026-09-13).** Completing a slice or milestone is a
+checkpoint, not a stopping point -- the harness's role is to say what is done and what is
+next, not to gate progress on a new instruction between slices. See
+`observability_agent_protocol.md`'s "Continuous Execution Policy" section for the exact
+rule and its stop conditions. "Current slice" below is updated after every slice and read
+at the start of the next one; it is a live pointer, not a queue waiting on approval.
+
 ## Milestones and slices
 
 Numbered `O1`-`O6` to avoid colliding with the prior refactor's `1A`-`3B+` numbering, since

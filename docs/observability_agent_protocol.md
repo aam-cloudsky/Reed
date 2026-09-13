@@ -282,7 +282,41 @@ verify completely
 report honestly
 ```
 
-## One-Slice Termination Rule
+## Continuous Execution Policy (supersedes the former One-Slice Termination Rule)
 
-Completing one slice does not authorize starting the next slice. After verification, state
-update, and reporting, stop. The next slice requires a new explicit task or instruction.
+**The observability build is authorized to run continuously across slices. Completing a
+slice or milestone is a checkpoint, not a termination condition.** This reverses the
+former One-Slice Termination Rule, under an explicit human instruction to do so (recorded
+in `observability_implementation_state.md`'s decision log). The slice discipline itself is
+unchanged: `read -> inspect -> research if needed -> plan -> implement -> verify -> record
+-> advance`. Only the meaning of "advance" changes:
+
+```
+advance = immediately begin the next slice's break-down stage
+```
+
+not `advance = stop and wait for a new instruction`, as it read before this policy change.
+After each slice: run its targeted tests; run the cumulative test suite and Ruff; update
+`observability_implementation_state.md` and `observability_harness.md`'s current-slice
+pointer; update `observability_design.md` whenever a dedicated design-resolution slice
+(e.g. O2e) settles an architectural question; make a coherent commit; then continue
+immediately to the next slice without waiting for confirmation.
+
+This policy does not weaken any other discipline in this document: the Slice Plan
+Requirement, Blast-Radius Control, Non-Goals Enforcement, and Test Discipline all still
+apply to every slice, one at a time. Only the pause between slices is removed.
+
+## Stop Conditions Override Continuous Execution
+
+Continuous execution does not override the Stop Conditions below. Stop and report,
+rather than continuing, when:
+
+1. a genuine architectural contradiction cannot be resolved from the authority documents
+   or within its own dedicated design slice;
+2. continuing would require an unauthorized destructive or irreversible action;
+3. the repository reaches a state that cannot be safely recovered;
+4. all slices through the currently authorized end point are complete.
+
+These replace the former "stop after every slice" behavior with narrower, genuine
+blockers -- continuous execution means the absence of a blocker is not, by itself, a
+reason to stop.
