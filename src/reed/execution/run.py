@@ -176,9 +176,33 @@ import asyncio
 import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
+import functools
+import time
+import uuid
+from pathlib import Path
+
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.execution.node_runtime import NodeRuntime
+from reed.observability.identity import NodeExecutionIdentity
+from reed.observability.provenance import ProvenanceEvent
+from reed.observability.trace import ExecutionTrace, TraceEvent, TraceEventType
+from reed.observability.presentation import (
+    PresentationPolicy,
+    resolve_presentation_policy,
+)
+from reed.observability.presenter import build_presenter
+from reed.observability.storage import (
+    CSVProvenanceStore,
+    CSVRecordingStore,
+    ProvenanceStore,
+    RecordingStore,
+    merge_discovered_instruments,
+    write_manifest,
+)
 from reed.synchronization.artifact_repository import ArtifactRepository
+
+if TYPE_CHECKING:
+    from reed.execution.artifact_record import ArtifactRecord
 from reed.transportation.bus import Bus
 
 if TYPE_CHECKING:
@@ -203,10 +227,48 @@ class Run:
     stored on `Flow` or `FlowNode`.
     """
 
-    def __init__(self, flow: Flow) -> None:
+    def __init__(
+        self,
+        flow: Flow,
+        *,
+        storage_root: str | None = None,
+        observability: "str | PresentationPolicy | None" = None,
+    ) -> None:
         self._flow = flow
         self._repository = ArtifactRepository(bus=Bus.create())
         self._node_runtimes: dict[FlowNode, NodeRuntime] = {}
+        # Milestone O1, Slice O1b/O1e: observability identity. `execution_id`
+        # is minted once per Run instance; `_execution_seq_counter` is
+        # incremented once per node_execution_id minted (Section 13.1 --
+        # deterministic observation order, never causality), scoped to
+        # this one execution_id.
+        self._execution_id: str = str(uuid.uuid4())
+        self._execution_seq_counter: int = 0
+
+        # Milestone O3: durable storage is opt-in via `storage_root`
+        # (docs/observability_implementation_state.md's O3a-e entry
+        # records this as a deliberate default -- omitting `storage_root`
+        # keeps Recordings in-memory only, exactly as Milestone O2 left
+        # them, so every existing caller of `Flow.run()`/`Run(flow)` is
+        # completely unaffected and no test or script silently starts
+        # writing files to disk).
+        self._recording_store: RecordingStore | None = None
+        self._provenance_store: ProvenanceStore | None = None
+        self._storage_root: Path | None = None
+        if storage_root is not None:
+            root = Path(storage_root)
+            self._storage_root = root
+            write_manifest(
+                root, execution_id=self._execution_id, flow_id=flow.flow_id
+            )
+            # Milestone O7, Slice O7i: instruments.json is no longer
+            # written up front from prospectively declared Instruments --
+            # there is nothing to write yet at Run-construction time.
+            # `.record_discovered_instruments(...)` merges bindings in as
+            # NodeRuntimes discover them during execution.
+            run_dir = root / "runs" / self._execution_id
+            self._recording_store = CSVRecordingStore(run_dir / "recordings.csv")
+            self._provenance_store = CSVProvenanceStore(run_dir / "provenance.csv")
         self.callback_failures: list[BaseException] = []
         self._pending_callback_coroutines: list[Any] = []
         # Slice 2I: per-(Run, FlowNode) join-state bookkeeping for the
@@ -222,10 +284,125 @@ class Run:
         self._last_known_values: dict[FlowNode, dict[type, object]] = {}
         self._fresh_since_last_firing: dict[FlowNode, set[type]] = {}
 
+        # Milestone O5, Slice O5a: Level 1 Execution Trace -- an
+        # in-memory ring buffer, not required to be durable (design
+        # record Section 11.1). Always constructed (unlike
+        # recording_store/provenance_store, which are opt-in via
+        # `storage_root`): Level 1 has no durability contract to opt in
+        # to, so there is no existing-caller behavior to protect by
+        # defaulting it off.
+        self._trace = ExecutionTrace()
+
+        # Milestone O7, Slice O7d: the terminal presentation layer is a
+        # pure *consumer* of the identity/trace/recording data above --
+        # constructing it here, after `self._trace` exists, changes
+        # nothing about what Reed observes or persists (Recordings/
+        # Provenance/Execution Trace collection above is entirely
+        # unaffected by `observability=`). `resolve_presentation_policy`
+        # compiles a preset name / PresentationPolicy / None into one
+        # `PresentationPolicy`; `build_presenter` turns that into a
+        # renderer (or `NullPresenter`, a total no-op, for `silent`).
+        self._presentation_policy = resolve_presentation_policy(observability)
+        self._presenter = build_presenter(self._presentation_policy)
+
     @property
     def flow(self) -> Flow:
         """The `Flow` that created this `Run` via `Flow.run()`."""
         return self._flow
+
+    @property
+    def execution_id(self) -> str:
+        """
+        This `Run`'s observability identity (Milestone O1, Slice O1b;
+        docs/observability_goals.md Section 3): a uuid4 minted once in
+        `__init__`, identifying this one concrete execution instance.
+        Distinct from `flow_id`, which identifies the logical `Flow`
+        definition this `Run` was created from, not this particular
+        execution of it.
+        """
+        return self._execution_id
+
+    @property
+    def recording_store(self) -> "RecordingStore | None":
+        """
+        This `Run`'s `RecordingStore` (Milestone O3), or `None` if this
+        `Run` was created with no `storage_root` -- Recordings then stay
+        in-memory only (`NodeRuntime.recordings`), exactly as Milestone
+        O2 left them.
+        """
+        return self._recording_store
+
+    @property
+    def provenance_store(self) -> "ProvenanceStore | None":
+        """This `Run`'s `ProvenanceStore` (Milestone O4), or `None` -- see `.recording_store`."""
+        return self._provenance_store
+
+    def record_discovered_instruments(
+        self,
+        *,
+        node_id: str,
+        node_name: str,
+        instruments: "list[type]",
+    ) -> None:
+        """
+        Merge newly-discovered Instrument bindings for `node_id` into
+        this Flow's `instruments.json` manifest (Milestone O7, Slice
+        O7i). Called from `NodeRuntime.flush_recordings(...)` -- see
+        that method's docstring for why this stays proportional to
+        genuinely new bindings, not once per `ctx.record(...)` call.
+        A no-op if this Run has no `storage_root` configured.
+        """
+        if self._storage_root is None:
+            return
+        merge_discovered_instruments(
+            self._storage_root,
+            flow_id=self._flow.flow_id,
+            node_id=node_id,
+            node_name=node_name,
+            instruments=[
+                (
+                    instrument.instrument_name(),
+                    instrument.kind.value,
+                    instrument.unit,
+                    instrument.description,
+                )
+                for instrument in instruments
+            ],
+        )
+
+    @property
+    def presenter(self):
+        """This `Run`'s terminal `Presenter` (Milestone O7, Slice O7d)."""
+        return self._presenter
+
+    @property
+    def presentation_policy(self) -> PresentationPolicy:
+        """
+        This `Run`'s compiled terminal `PresentationPolicy` (Milestone O7,
+        Slice O7d) -- read-only; set once via `Flow.run(observability=...)`.
+        """
+        return self._presentation_policy
+
+    @property
+    def trace(self) -> ExecutionTrace:
+        """
+        This `Run`'s Level 1 Execution Trace (Milestone O5, Slice O5a): an
+        in-memory ring buffer of `TraceEvent`s recording which Node fired,
+        in what order, correlated by the same identity Recordings/
+        Provenance use. Not durable -- see `docs/observability_design.md`
+        Section 11.1 and `reed.observability.trace.ExecutionTrace`.
+        """
+        return self._trace
+
+    @property
+    def flow_id(self) -> str:
+        """
+        The observability identity of the `Flow` that created this `Run`
+        (Milestone O1, Slice O1b) -- a passthrough to `self.flow.flow_id`.
+        See `Flow.flow_id` for the derivation and its stability
+        guarantees.
+        """
+        return self._flow.flow_id
 
     @property
     def repository(self) -> ArtifactRepository:
@@ -303,12 +480,22 @@ class Run:
         consumes `type(domain_value)`, returns `domain_value` itself
         (there was no direct firing to report a result for).
         """
-        pending: list[object] = [domain_value]
+        # Milestone O7, Slice O7d: `depth` (propagation depth from the
+        # externally published value, 0-based) travels alongside each
+        # pending value purely for the "propagation" terminal
+        # presentation dimension's indentation -- it is presentation-only
+        # bookkeeping, never used for firing order, eligibility, or any
+        # other execution decision (Milestone O7's own constraint:
+        # presentation must never become the observability/execution
+        # model itself).
+        pending: list[tuple[object, int]] = [(domain_value, 0)]
         direct_result: object = domain_value
         is_first_iteration = True
 
+        self._safe_presenter_call(self._presenter.on_publish_start, domain_value)
+
         while pending:
-            current_value = pending.pop(0)
+            current_value, depth = pending.pop(0)
             domain_type = type(current_value)
 
             consumers = self._flow.dependency_graph.consumers_of(domain_type)
@@ -330,14 +517,17 @@ class Run:
                     # last firing yet).
                     continue
 
-                call_kwargs = self._build_call_kwargs(flow_node)
-                result = self._fire(flow_node, call_kwargs)
-                pending.append(result)
+                identity = self._begin_node_execution(flow_node)
+                call_kwargs = self._build_call_kwargs(flow_node, identity)
+                result = self._fire(flow_node, call_kwargs, identity, depth=depth)
+                pending.append((result, depth + 1))
 
                 if is_first_iteration:
                     direct_result = result
 
             is_first_iteration = False
+
+        self._safe_presenter_call(self._presenter.on_publish_end)
 
         return direct_result
 
@@ -393,7 +583,9 @@ class Run:
         # TriggerPolicy.ANY_INPUT_CHANGED
         return True
 
-    def _build_call_kwargs(self, flow_node: "FlowNode") -> dict[str, object]:
+    def _build_call_kwargs(
+        self, flow_node: "FlowNode", identity: NodeExecutionIdentity
+    ) -> dict[str, object]:
         """
         Build `flow_node`'s full call-argument set from its last-known
         values (Slice 2I) -- one value per consumed parameter, using
@@ -410,11 +602,49 @@ class Run:
 
         if flow_node.context is not None:
             node_runtime = self.node_runtime(flow_node.definition.function)
-            call_kwargs[flow_node.context.parameter_name] = node_runtime.context
+            recorder = functools.partial(node_runtime.accept_recording, identity)
+            call_kwargs[flow_node.context.parameter_name] = (
+                node_runtime.build_context(identity, recorder)
+            )
 
         return call_kwargs
 
-    def _fire(self, flow_node: "FlowNode", call_kwargs: dict[str, object]) -> object:
+    def _begin_node_execution(self, flow_node: "FlowNode") -> NodeExecutionIdentity:
+        """
+        Mint the observability identity for one Node firing (Milestone
+        O1, Slice O1d/O1e/O1f).
+
+        Called once per firing, from the `publish(...)` cascade loop,
+        before `._build_call_kwargs(...)` -- every firing gets an
+        identity, whether or not its Node declares a `NodeContext`
+        parameter, so Milestone O4's provenance events have a
+        `node_execution_id`/`execution_seq` to attach to regardless
+        (docs/observability_design.md Section 18/21).
+
+        `node_execution_id` is a fresh uuid4 per call (one per firing,
+        never reused). `execution_seq` is this `Run`'s own monotonic
+        counter, incremented once per call -- a deterministic
+        observation order scoped to this `execution_id`, never a
+        causality claim (Section 13.1; docs/observability_invariants.md
+        #7-9).
+        """
+        self._execution_seq_counter += 1
+        return NodeExecutionIdentity(
+            execution_id=self._execution_id,
+            flow_id=self.flow_id,
+            node_id=flow_node.node_id,
+            node_execution_id=str(uuid.uuid4()),
+            execution_seq=self._execution_seq_counter,
+        )
+
+    def _fire(
+        self,
+        flow_node: "FlowNode",
+        call_kwargs: dict[str, object],
+        identity: NodeExecutionIdentity,
+        *,
+        depth: int = 0,
+    ) -> object:
         """
         Fire one `FlowNode` with `call_kwargs` as its full call
         arguments (Slice 2E; generalized to multi-input joins by Slice
@@ -430,21 +660,73 @@ class Run:
         clears `flow_node`'s freshness set so a later partial update
         round does not immediately re-trigger it. Returns the produced
         domain value (`record.value`).
+
+        Milestone O4 (Slices O4b/O4c): emits a `"used"` provenance event
+        for each of `flow_node`'s consumed artifact types that already
+        has a committed `ArtifactRecord` (nothing to report the first
+        time a type is consumed with no prior producer), before calling
+        the node function, and a `"generated"` event for the artifact
+        this firing itself commits, after `.commit(...)` succeeds. Both
+        are no-ops when this `Run` has no `provenance_store` configured
+        (`storage_root` was not passed to `Flow.run(...)`).
+
+        Milestone O5 (Slice O5a): records a `"node_started"` `TraceEvent`
+        into `self.trace` before calling the node function, and a
+        `"node_finished"` `TraceEvent` after it commits -- unconditional,
+        unlike Provenance/Recordings, since Level 1 has no opt-in
+        (design record Section 11.1; `self._trace` is always constructed).
+
+        Milestone O7 (Slice O7c): flushes this firing's buffered
+        `Recording`s (`node_runtime.flush_recordings(...)`) in a `finally`
+        block covering the node function call -- the NodeExecution
+        durability boundary applies whether the firing succeeds or
+        raises (docs/observability_goals.md Section 5), not only on the
+        success path.
         """
         node_runtime = self.node_runtime(flow_node.definition.function)
 
+        self._emit_used_provenance_events(flow_node, identity)
+        self._record_trace_event("node_started", identity)
+        self._safe_presenter_call(self._presenter.on_node_started, identity, depth=depth)
+
         firing_lock = node_runtime.firing_lock
 
+        start_time = time.monotonic()
         if firing_lock is not None:
             firing_lock.acquire()
         try:
-            result = flow_node.definition.function(**call_kwargs)
+            try:
+                result = flow_node.definition.function(**call_kwargs)
 
-            record = node_runtime.wrap(result)
-            node_runtime.commit(record)
+                record = node_runtime.wrap(result)
+                node_runtime.commit(record)
+            except BaseException as exc:
+                # Milestone O7, Slice O7d: report the failure to the
+                # terminal presenter -- a pure observer, never a handler
+                # (the exception always propagates unchanged; invariant
+                # #25, "observability failures must never change
+                # application semantics," read here in its stronger form:
+                # observability *reporting* must not change application
+                # semantics either).
+                self._safe_presenter_call(
+                    self._presenter.on_node_error,
+                    identity,
+                    exc,
+                    duration=time.monotonic() - start_time,
+                )
+                raise
+            finally:
+                node_runtime.flush_recordings(identity.node_execution_id)
         finally:
             if firing_lock is not None:
                 firing_lock.release()
+
+        duration = time.monotonic() - start_time
+
+        self._record_trace_event("node_finished", identity)
+        self._safe_presenter_call(self._presenter.on_node_finished, identity, depth=depth, duration=duration)
+
+        self._emit_generated_provenance_event(record, identity)
 
         if flow_node.trigger_policy is TriggerPolicy.ALL_INPUTS_CHANGED:
             self._fresh_since_last_firing[flow_node] = set()
@@ -452,6 +734,102 @@ class Run:
         self._dispatch_on_output(flow_node, record.value)
 
         return record.value
+
+    @staticmethod
+    def _artifact_id(domain_type: type) -> str:
+        """
+        Milestone O4: an Artifact type's provenance identity --
+        deliberately the same `module.qualname` derivation
+        `FlowNode.node_id` uses (Section 18), for the same reason: stable
+        across process runs, no user-supplied identifier required.
+        """
+        return f"{domain_type.__module__}.{domain_type.__qualname__}"
+
+    def _emit_used_provenance_events(
+        self, flow_node: "FlowNode", identity: NodeExecutionIdentity
+    ) -> None:
+        if self._provenance_store is None:
+            return
+
+        for descriptor in flow_node.consumed_artifacts:
+            existing = self._repository.get_artifact_record(descriptor.domain_type)
+            if existing is None:
+                # Nothing produced this type yet -- no "used" event to
+                # emit (there is no artifact_version to report).
+                continue
+
+            self._provenance_store.append(
+                ProvenanceEvent(
+                    event_type="used",
+                    artifact_id=self._artifact_id(descriptor.domain_type),
+                    artifact_version=existing.version.number,
+                    node_execution_id=identity.node_execution_id,
+                    node_id=identity.node_id,
+                    execution_seq=identity.execution_seq,
+                )
+            )
+
+    def _emit_generated_provenance_event(
+        self, record: "ArtifactRecord", identity: NodeExecutionIdentity
+    ) -> None:
+        if self._provenance_store is None:
+            return
+
+        self._provenance_store.append(
+            ProvenanceEvent(
+                event_type="generated",
+                artifact_id=self._artifact_id(type(record.value)),
+                artifact_version=record.version.number,
+                node_execution_id=identity.node_execution_id,
+                node_id=identity.node_id,
+                execution_seq=identity.execution_seq,
+            )
+        )
+
+    def _safe_presenter_call(self, hook, *args, **kwargs) -> None:
+        """
+        Milestone O7, Slice O7g (final invariant audit finding): call a
+        `Presenter` hook, isolating any exception it raises so that a
+        rendering failure (a broken terminal, a Rich/Console error, a
+        custom `Presenter` subclass with a bug) can never change
+        application semantics -- architectural invariant #25 ("Observability
+        failures must never change application semantics"), extended here
+        explicitly to the O7d/O7e Presenter hooks. `Presenter` is a pure
+        observer of data Reed has already committed (Trace/Provenance/
+        Recording); nothing a Presenter does can undo or affect that
+        already-committed state, so a Presenter exception is swallowed
+        rather than isolated into a reportable list (unlike
+        `callback_failures`, which reports user-authored `on_output`
+        callback failures because those are part of the Flow's declared
+        behavior) -- there is no equivalent public surface for terminal
+        rendering errors, and inventing one would risk becoming a second,
+        competing observability channel.
+        """
+        try:
+            hook(*args, **kwargs)
+        except BaseException:  # noqa: BLE001 -- isolate any presenter/rendering failure
+            pass
+
+    def _record_trace_event(
+        self, event_type: TraceEventType, identity: NodeExecutionIdentity
+    ) -> None:
+        """
+        Milestone O5, Slice O5a: append one `TraceEvent` to `self.trace`
+        (Level 1 Execution Trace, design record Section 11.1).
+        Unconditional -- unlike Recordings/Provenance (Milestone O2-O4),
+        Level 1 has no `storage_root` opt-in and no store to be `None`.
+        """
+        self._trace.record(
+            TraceEvent(
+                event_type=event_type,
+                execution_id=identity.execution_id,
+                flow_id=identity.flow_id,
+                node_id=identity.node_id,
+                node_execution_id=identity.node_execution_id,
+                execution_seq=identity.execution_seq,
+                timestamp=time.time(),
+            )
+        )
 
     def publish_many(self, domain_values: "list[object]") -> None:
         """

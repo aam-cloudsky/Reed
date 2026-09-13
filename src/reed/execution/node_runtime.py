@@ -143,7 +143,10 @@ import threading
 from typing import TYPE_CHECKING
 
 from reed.composition.node.node_context import NodeContext
-from reed.execution.artifact_record import ArtifactRecord
+from reed.execution.artifact_record import ArtifactProvenance, ArtifactRecord
+from reed.observability.identity import NodeExecutionIdentity
+from reed.observability.instrument import Instrument, InstrumentKind
+from reed.observability.recording import Recording, ScalarValue
 
 if TYPE_CHECKING:
     from reed.composition.flow.flow_node import FlowNode
@@ -175,6 +178,39 @@ class NodeRuntime:
         self._memory: object | None = None
         self._last_output: object | None = None
         self._firing_lock: threading.Lock | None = None
+        # Milestone O2, Slice O2c/O2d: in-memory Recording buffer (Level 2
+        # precursor -- Milestone O3 gives it a durable store) plus the
+        # lazy-mode registry that makes "first observed kind/unit wins"
+        # enforceable (docs/observability_goals.md Section 2.3).
+        self._recordings: list[Recording] = []
+        # Milestone O7, Slice O7i: Instruments are discovered dynamically
+        # -- there is nothing to pre-populate here anymore (no more
+        # `flow_node.instruments`). `_observed_instruments` remembers
+        # every distinct Instrument subclass this NodeRuntime has already
+        # seen this Run, keyed by `instrument_name()`, purely so a
+        # second `ctx.record(SomeInstrument, ...)` call for the same
+        # Instrument does not repeat the (cheap, but non-zero) manifest
+        # bookkeeping done on first discovery -- see `.flush_recordings`.
+        self._observed_instruments: dict[str, "type[Instrument]"] = {}
+        self._newly_observed_this_firing: list["type[Instrument]"] = []
+
+        # Milestone O7, Slice O7b: a running `ArtifactProvenance` owned by
+        # this NodeRuntime, advanced (never replaced) on every `.wrap(...)`
+        # call -- fixes a confirmed defect where each firing constructed a
+        # *fresh* `ArtifactProvenance()`, so every committed `ArtifactRecord`
+        # read `version.number == 1` forever, regardless of how many times
+        # this Node had already fired in this Run. Each Artifact type has
+        # exactly one producer within a Flow (architectural invariant #24),
+        # so one running counter per NodeRuntime is the correct scope: it
+        # need not be keyed by domain type.
+        self._provenance = ArtifactProvenance()
+        # Milestone O7, Slice O7c: per-NodeExecution Recording batch,
+        # keyed by node_execution_id -- accumulated in memory during a
+        # firing and flushed as one batch (one fsync) at that firing's
+        # own durability boundary (`.flush_recordings(...)`, called from
+        # `Run._fire`'s `finally` block), not written through to the
+        # store on every individual `ctx.record()` call.
+        self._pending_recordings: dict[str, list[Recording]] = {}
 
     @property
     def run(self) -> Run:
@@ -202,19 +238,29 @@ class NodeRuntime:
     def wrap(self, domain_value: object) -> "ArtifactRecord":
         """
         Wrap `domain_value` -- a node function's returned domain value --
-        into a fresh `ArtifactRecord` (Slice 2E).
+        into a fresh `ArtifactRecord` (Slice 2E; version mechanics fixed
+        at Milestone O7, Slice O7b).
 
-        This `NodeRuntime` is recorded as the record's producer and its
-        provenance is advanced once (pending (0) -> initial (1) on first
-        firing, matching `ArtifactProvenance.advance`'s existing,
-        regression-tested version mechanics from Slice 2C). This is the
-        "wrap" half of docs/parcel_boundary_decision.md's boundary
-        diagram (`U -> wrap -> Parcel[U]`, read here as `ArtifactRecord`);
-        it does not commit anything by itself -- see `.commit(...)`.
+        This `NodeRuntime` is recorded as the record's producer.
+        `self._provenance` (one running `ArtifactProvenance` per
+        NodeRuntime, Slice O7b) is advanced in place on every call --
+        pending (0) -> initial (1) on this NodeRuntime's first firing,
+        `.next()` on every firing after that -- so repeated firings of
+        the same Node produce monotonically increasing, causally distinct
+        versions instead of every firing reading "version 1" forever.
+
+        Each returned `ArtifactRecord` gets its own immutable *snapshot*
+        (`.copy()`) of `self._provenance` at the moment of this call, not
+        a shared reference to the running object -- otherwise an already-
+        committed record's `.version` would silently change out from
+        under it the next time this Node fires (`self._provenance` keeps
+        advancing after this call returns). This is the "wrap" half of
+        docs/parcel_boundary_decision.md's boundary diagram (`U -> wrap ->
+        Parcel[U]`, read here as `ArtifactRecord`); it does not commit
+        anything by itself -- see `.commit(...)`.
         """
-        record: ArtifactRecord = ArtifactRecord(value=domain_value)
-        record.provenance.advance(producer=self)
-        return record
+        self._provenance.advance(producer=self)
+        return ArtifactRecord(value=domain_value, provenance=self._provenance.copy())
 
     def commit(self, record: "ArtifactRecord") -> None:
         """
@@ -325,3 +371,195 @@ class NodeRuntime:
         node function does not declare a `NodeContext` parameter.
         """
         return NodeContext(memory=self.memory, last_output=self.last_output)
+
+    @property
+    def recordings(self) -> tuple[Recording, ...]:
+        """
+        Every `Recording` accepted on this `NodeRuntime` so far (Milestone
+        O2, Slice O2c/O2d), in acceptance order. In-memory only -- see
+        Milestone O3 for durable persistence.
+        """
+        return tuple(self._recordings)
+
+    def accept_recording(
+        self,
+        identity: NodeExecutionIdentity,
+        instrument: "type[Instrument]",
+        value: ScalarValue,
+        *,
+        attributes: dict[str, ScalarValue] | None = None,
+    ) -> Recording:
+        """
+        Validate and accept one `ctx.record(instrument, value)` call
+        (Milestone O2, Slice O2c/O2d; redesigned at Milestone O7, Slice
+        O7i for typed Instrument Definitions), bound (via
+        `functools.partial`) into the `NodeContext.record`-facing
+        recorder built by `Run._build_call_kwargs` for one firing's
+        `identity`.
+
+        `instrument` must be an `Instrument` subclass (never an
+        instance) -- see `reed.observability.instrument`'s module
+        docstring. There is no more declared-vs-lazy distinction: every
+        Instrument is discovered dynamically, the first time a Node
+        actually calls `ctx.record(instrument, value)`, never
+        prospectively declared through `Flow.add(...)` (which no longer
+        accepts an `instruments=` parameter at all).
+
+        `value` must be scalar (`str | int | float | bool`) --
+        docs/observability_non_goals.md Section 3.
+        """
+        if not isinstance(value, (str, int, float, bool)):
+            raise TypeError(
+                f"Recording value must be scalar (str | int | float | bool), "
+                f"got {type(value).__name__!r} (docs/observability_non_goals.md "
+                "Section 3 -- no mappings, dataclasses, lists, or nested "
+                "structures; flatten a compound fact into multiple explicit "
+                "ctx.record(...) calls with dot-segmented names instead)."
+            )
+
+        name, kind, resolved_unit, description = self._resolve_instrument(instrument)
+        self._newly_observed_this_firing_note(instrument, name)
+
+        recording = Recording(
+            instrument_id=f"{identity.flow_id}.{identity.node_id}.{name}",
+            name=name,
+            value=value,
+            kind=kind,
+            unit=resolved_unit,
+            execution_id=identity.execution_id,
+            flow_id=identity.flow_id,
+            node_id=identity.node_id,
+            node_execution_id=identity.node_execution_id,
+            execution_seq=identity.execution_seq,
+            attributes=dict(attributes) if attributes else {},
+        )
+        self._recordings.append(recording)
+        try:
+            self._run.presenter.on_recording(recording)
+        except BaseException:  # noqa: BLE001 -- O7g: isolate presenter failures (invariant #25)
+            pass
+        if self._run.recording_store is not None:
+            # Milestone O7, Slice O7c: buffer in memory for this firing;
+            # `.flush_recordings(...)` writes the whole batch, with one
+            # fsync, at this firing's own NodeExecution durability
+            # boundary -- not on every individual ctx.record() call (see
+            # storage.py's module docstring for the corrected contract).
+            self._pending_recordings.setdefault(
+                identity.node_execution_id, []
+            ).append(recording)
+        return recording
+
+    def flush_recordings(self, node_execution_id: str) -> None:
+        """
+        Flush and durably persist every `Recording` buffered for
+        `node_execution_id` as one batch (Milestone O7, Slice O7c) --
+        the NodeExecution durability boundary (docs/observability_goals.md
+        Section 5; architectural invariants #20/#21). Called from
+        `Run._fire`'s `finally` block, so it runs whether the firing
+        succeeded or raised. A no-op if this firing made no
+        `ctx.record(...)` calls (nothing buffered) or if no
+        `recording_store` is configured (`storage_root` was not passed
+        to `Flow.run(...)`).
+
+        Milestone O7, Slice O7i: also flushes any newly-*discovered*
+        Instrument bindings observed during this firing into the Flow's
+        `instruments.json` manifest (`Run.record_discovered_instruments`),
+        at the same durability boundary -- proportional only to how many
+        genuinely new (node_id, Instrument) bindings this firing
+        introduced (usually zero after the first firing of a given
+        Node/Instrument pair), never once per `ctx.record(...)` call, so
+        this stays off the hot path the same way Recording persistence
+        does (architectural invariant #26).
+        """
+        newly_observed = self._newly_observed_this_firing
+        self._newly_observed_this_firing = []
+        if newly_observed and self._run.recording_store is not None:
+            self._run.record_discovered_instruments(
+                node_id=self._flow_node.node_id,
+                node_name=self._flow_node.node_name,
+                instruments=newly_observed,
+            )
+
+        batch = self._pending_recordings.pop(node_execution_id, None)
+        if not batch or self._run.recording_store is None:
+            return
+        self._run.recording_store.append_batch(batch)
+
+    def _newly_observed_this_firing_note(
+        self, instrument: "type[Instrument]", name: str
+    ) -> None:
+        """Record that `instrument` was newly discovered this Run, if it was."""
+        if name not in self._observed_instruments:
+            self._observed_instruments[name] = instrument
+            self._newly_observed_this_firing.append(instrument)
+
+    def _resolve_instrument(
+        self, instrument: "type[Instrument]"
+    ) -> tuple[str, str, str, str]:
+        """
+        Returns `(name, kind, unit, description)` for `instrument`
+        (Milestone O7, Slice O7i -- typed Instrument Definitions,
+        discovered dynamically; see `reed.observability.instrument`'s
+        module docstring).
+
+        `instrument` must be an `Instrument` **subclass** with `kind`/
+        `unit` class attributes -- both are validated eagerly by
+        `Instrument.__init_subclass__` for the common case (a concrete
+        leaf class with a typo'd or missing attribute), but that check is
+        skipped for an intermediate subclass that itself sets neither;
+        this is the fallback that catches such a class if it is ever
+        actually passed to `ctx.record(...)`.
+        """
+        if not (isinstance(instrument, type) and issubclass(instrument, Instrument)):
+            raise TypeError(
+                "ctx.record(...) expects an Instrument *subclass* (the "
+                "Instrument Definition itself, e.g. ctx.record(Temperature, "
+                "value) -- not an instance, and not a plain string). Got "
+                f"{instrument!r}."
+            )
+        if not hasattr(instrument, "kind") or not isinstance(
+            instrument.kind, InstrumentKind
+        ):
+            raise TypeError(
+                f"{instrument.__name__} must declare kind: InstrumentKind as "
+                "a class attribute (docs/observability_non_goals.md Section "
+                "2 -- no Histogram, no arbitrary kind values)."
+            )
+        if not hasattr(instrument, "unit") or not isinstance(instrument.unit, str):
+            raise TypeError(
+                f"{instrument.__name__} must declare unit: str as a class "
+                "attribute."
+            )
+
+        name = instrument.instrument_name()
+        return name, instrument.kind.value, instrument.unit, instrument.description
+
+    def build_context(
+        self,
+        identity: NodeExecutionIdentity,
+        recorder: "object | None" = None,
+    ) -> NodeContext:
+        """
+        A fresh `NodeContext` snapshot carrying an observability identity
+        bundle (Milestone O1, Slice O1f).
+
+        Identical to `.context` except for the added `identity=...`
+        argument -- used exclusively by `Run._build_call_kwargs(...)` to
+        build the `NodeContext` that is actually injected into a real
+        firing, once `Run._begin_node_execution(...)` has minted that
+        firing's identity. Kept as a separate method rather than an
+        optional parameter on `.context` because `.context` is a
+        property (called without parentheses throughout the existing,
+        regression-protected call sites) and properties cannot take
+        arguments.
+
+        Raises `AttributeError` (via `.memory`) if this `NodeRuntime`'s
+        node function does not declare a `NodeContext` parameter --
+        same as `.context`.
+        """
+        return NodeContext(
+            memory=self.memory,
+            last_output=self.last_output,
+            identity=identity,
+            recorder=recorder,
+        )

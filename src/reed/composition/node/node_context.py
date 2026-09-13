@@ -77,6 +77,15 @@ from __future__ import annotations
 
 from typing import Generic, TypeVar
 
+from typing import Callable
+
+from reed.observability.identity import NodeExecutionIdentity
+from reed.observability.instrument import Instrument
+from typing import TypeVar
+
+InstrumentValueT = TypeVar("InstrumentValueT", bound="str | int | float | bool")
+from reed.observability.recording import Recording, ScalarValue
+
 MemoryType = TypeVar("MemoryType")
 OutputType = TypeVar("OutputType")
 
@@ -92,13 +101,33 @@ class NodeContext(Generic[MemoryType, OutputType]):
     anything else internal to Reed's execution infrastructure.
     """
 
-    __slots__ = ("_memory", "_last_output")
+    __slots__ = ("_memory", "_last_output", "_identity", "_recorder")
 
     def __init__(
-        self, *, memory: MemoryType, last_output: OutputType | None
+        self,
+        *,
+        memory: MemoryType,
+        last_output: OutputType | None,
+        identity: NodeExecutionIdentity | None = None,
+        recorder: "Callable[..., Recording] | None" = None,
     ) -> None:
         self._memory = memory
         self._last_output = last_output
+        # Milestone O1, Slice O1f: a small, read-only observability
+        # identity bundle -- plain values only (docs/observability/
+        # identity.py), never a back-reference to NodeRuntime, Run, or
+        # Flow (architectural_invariants.md #26). Optional and defaults
+        # to None so every existing construction of a NodeContext
+        # (`NodeRuntime.context`, direct test construction) keeps
+        # working unchanged; only the real firing path
+        # (`Run._build_call_kwargs`) supplies one.
+        self._identity = identity
+        # Milestone O2, Slice O2c/O2d: a single, narrow, bound callable
+        # (never a reference to NodeRuntime/Run/Flow themselves) that
+        # `.record(...)` forwards to. Optional, same reasoning as
+        # `identity` above -- every existing NodeContext construction is
+        # unaffected; only the real firing path supplies one.
+        self._recorder = recorder
 
     @property
     def memory(self) -> MemoryType:
@@ -127,3 +156,61 @@ class NodeContext(Generic[MemoryType, OutputType]):
         private computational memory, not a record of committed output.
         """
         return self._last_output
+
+    def record(
+        self,
+        instrument: "type[Instrument[InstrumentValueT]]",
+        value: InstrumentValueT,
+        *,
+        attributes: dict[str, ScalarValue] | None = None,
+    ) -> Recording:
+        """
+        Record one observation of `instrument` (Milestone O2, Slice
+        O2c/O2d; redesigned at Milestone O7, Slice O7i).
+
+        `instrument` is an `Instrument[T]` **subclass** -- the Instrument
+        Definition itself, never instantiated (`ctx.record(Temperature,
+        ...)`, not `ctx.record(Temperature(), ...)`). There is no
+        separate declaration step: passing an `Instrument` subclass here
+        is itself how Reed discovers, at execution time, that this
+        (flow_id, node_id, Instrument) binding exists -- see
+        `reed.observability.instrument`'s module docstring, "Instrument
+        Definition vs. Instrument Binding". `value` is scalar only
+        (docs/observability_non_goals.md Section 3) and should match the
+        Instrument's declared `T` (a static type checker can verify this
+        through this method's own generic signature; see
+        `instrument.py`'s "Typing" section for why this is not also
+        re-checked at runtime).
+
+        Returns immediately -- this call is synchronous but the actual
+        write to a durable store (Milestone O3) is not this method's
+        concern; see docs/observability_goals.md Section 5/9.
+
+        Raises `RuntimeError` if this `NodeContext` was constructed
+        without a recorder (i.e. not built by a real firing --
+        `NodeRuntime.context`/direct construction never attach one).
+        """
+        if self._recorder is None:
+            raise RuntimeError(
+                "This NodeContext has no recorder attached -- ctx.record(...) "
+                "is only available on a NodeContext built by a real Node "
+                "firing (Run._build_call_kwargs -> NodeRuntime.build_context)."
+            )
+        return self._recorder(instrument, value, attributes=attributes)
+
+    @property
+    def identity(self) -> NodeExecutionIdentity | None:
+        """
+        This firing's observability identity bundle (Milestone O1, Slice
+        O1f), or `None` if this `NodeContext` was constructed without one
+        (every construction before this slice, and any direct
+        construction that does not pass `identity=`).
+
+        Read-only, plain-value only -- see `NodeExecutionIdentity`'s own
+        docstring. Exposing this is a deliberate, narrow exception to
+        `NodeContext`'s "never a back-reference to execution
+        infrastructure" rule (architectural_invariants.md #26): the
+        bundle carries no reference to `Run`, `Flow`, or `NodeRuntime`
+        themselves, only their observability identifiers.
+        """
+        return self._identity

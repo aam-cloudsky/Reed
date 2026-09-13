@@ -79,6 +79,15 @@ class FlowNode:
     definition: DomainNodeDefinition
     trigger_policy: TriggerPolicy = TriggerPolicy.ALL_INPUTS_CHANGED
     on_output: Callable[[Any], object] | None = None
+    # Milestone O2 originally added a declared-Instruments field here
+    # (`instruments: tuple[Instrument, ...] = ()`, populated by
+    # `flow.add(node, instruments=[...])`). Milestone O7, Slice O7i
+    # removed it: Instruments are now typed Instrument Definitions
+    # (`reed.observability.instrument.Instrument` subclasses) discovered
+    # dynamically the first time a Node calls `ctx.record(SomeInstrument,
+    # value)`, never prospectively declared by the Flow -- see that
+    # module's docstring. `FlowNode` no longer carries any
+    # Instrument-related field at all.
 
     @property
     def consumed_artifacts(self) -> tuple[ArtifactDescriptor, ...]:
@@ -91,3 +100,42 @@ class FlowNode:
     @property
     def context(self) -> NodeContextDescriptor | None:
         return self.definition.description.context
+
+    @property
+    def node_id(self) -> str:
+        """
+        This `FlowNode`'s stable observability identity (Milestone O1,
+        Slice O1c; docs/observability_design.md Section 18 -- `flow_id`/
+        `node_id` cross-run stability).
+
+        Deterministically derived from the wrapped function's module and
+        qualified name (`f"{function.__module__}.{function.__qualname__}"`),
+        NOT from `id(self)` or any other per-process runtime value -- this
+        is what makes it reproducible across separate process runs of the
+        same source code, with no user-supplied identifier and no `name=`
+        parameter on `Flow.add(...)` (docs/observability_non_goals.md
+        Section 8).
+
+        Explicitly NOT required to be unique, in this Flow or across
+        Flows (docs/observability_design.md Section 16.5, retracting the
+        uniqueness-validation proposal in Section 12.3): identity/
+        correlation always uses `node_id` together with `flow_id`
+        (`instrument_id = (flow_id, node_id, name)`), so a `node_id`
+        collision alone causes no correlation ambiguity. The only
+        invariant that causes composition failure remains the existing
+        one -- within a Flow, each Artifact type has exactly one
+        producer.
+        """
+        function = self.definition.function
+        return f"{function.__module__}.{function.__qualname__}"
+
+    @property
+    def node_name(self) -> str:
+        """
+        This `FlowNode`'s display label (Milestone O1, Slice O1c) --
+        presentation metadata only, never identity
+        (docs/observability_invariants.md #5). Defaults to the wrapped
+        function's `__name__`; not required to be unique. Use `node_id`
+        for correlation, never this.
+        """
+        return self.definition.function.__name__
