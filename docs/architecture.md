@@ -2,7 +2,7 @@
 
 Reed is a computational framework for coordinating interdependent transformations through typed artifacts, explicit dependency structure, and reactive propagation. A user models a domain as a set of typed values and the transformations between them; Reed turns that model into an executable dataflow, decides what must recompute when something changes, and keeps a single authoritative record of every artifact it produces along the way.
 
-This document describes Reed's architecture at the level of concepts and mechanisms that would survive a reimplementation in different classes or data structures. Concrete names appear only for orientation.
+This document describes Reed's architecture at the level of concepts and mechanisms, independent of any particular class or data structure. Concrete names appear only for orientation.
 
 ---
 
@@ -59,13 +59,22 @@ flowchart BT
     D -->|"defines producer/consumer structure"| P
 ```
 
+**Computational Plane**
+
 | Layer | Question it answers |
 |---|---|
 | Bus Coordination | How do components communicate? |
 | Shared-State Synchronization | Where does authoritative truth live, and what is merely local? |
 | Dependency Management | What depends on what? |
 | Reactive Propagation | What must react when something changes, and when? |
-| Execution Observability (Section 5) | What can be reconstructed about a computation after it happened, without changing what it computed? |
+
+**Observation Plane** (orthogonal to the above, not a fifth row appended to it — see Section 5)
+
+| Concern | Question it answers |
+|---|---|
+| Execution Tracing | What happened? |
+| Data Provenance | Why did this value exist? |
+| Instrumentation | What domain-specific property did the application choose to observe? |
 
 ---
 
@@ -147,6 +156,8 @@ Reed does not recompute a whole Flow when one artifact changes. A change propaga
 
 Bus Coordination is the substrate of communication: how requests, responses, and updates move between components without components needing direct references to each other.
 
+A naive alternative — components holding direct references to one another and calling each other synchronously — makes the set of collaborators for any one component implicit in its code rather than visible in its wiring, and lets a reaction to one message recursively trigger another message before the first interaction has finished, so cause and effect become impossible to separate once a handler's own side effects start calling back into the system that invoked it. Routing every interaction through a bus with an explicit, deferred flush phase avoids both problems at once: components are addressable by topic rather than by reference, and no interaction can recursively reenter another before it completes.
+
 ### Core Concepts
 
 | Concept | Meaning |
@@ -205,6 +216,8 @@ This keeps cause and effect distinguishable even when a reaction to one message 
 ### Purpose
 
 This layer establishes where authoritative truth lives, and how a node's private view of the world stays consistent with it.
+
+A naive design would let any node read and write shared values directly, in whatever representation is convenient at the call site. That collapses the domain value a transformation computes into the same thing as its committed, versioned, provenance-carrying record — so two nodes can disagree about which value is current, or overwrite each other's commits, with no way to reconstruct afterward who produced what from which inputs. Reed avoids this by making commitment to authoritative state the only way a value becomes visible to anyone but its producer, and by deriving identity, versioning, and provenance from the artifact model rather than leaving them to be reinvented ad hoc at each call site.
 
 ### The Artifact Model
 
@@ -274,6 +287,8 @@ stateDiagram-v2
 
 Dependency Management answers what depends on what, purely from a Flow's composition — never from a manually declared execution order.
 
+A design that instead asked the user to declare execution order directly would work until the topology changed: every reordering, insertion, or removal of a node would require re-auditing every ordering statement by hand, and an order that quietly fell out of sync with the actual data dependencies would fail silently rather than being rejected. Inferring the graph from producer-consumer relationships instead means an order is never stated as a separate fact that can drift from the dependencies it is supposed to reflect — it is recomputed, correctly, every time the graph itself changes.
+
 ### Producer-Consumer Graph
 
 Nodes are edges between artifact-typed nodes in a graph: each node consumes some artifact types and produces one. The graph may branch (one artifact feeding several independent consumers) and join (one node consuming several artifacts at once):
@@ -317,6 +332,8 @@ A Flow is the composition boundary within which Reed can answer: which artifacts
 ### Purpose
 
 This layer determines what must react when an artifact changes, and governs the mechanism by which a single committed value can cause a cascade of further computation across the whole reachable dependency graph, until nothing more is eligible to run.
+
+A naive reactive design collapses "an input changed" and "this node should now run" into the same event, firing eagerly on every arrival. That either recomputes a multi-input join once per input instead of once per meaningful update — wasting work and, worse, sometimes producing results from a partial, not-yet-complete set of inputs — or, if it waits for every input naively, it can deadlock a node whose inputs never all change together. Separating change detection from a node's own trigger policy avoids both failure modes: a node only fires once its declared inputs are covered, and only when its own policy judges the resulting pattern of changes eligible.
 
 ### Core Concepts
 
@@ -482,7 +499,7 @@ flowchart LR
 
 This three-level structure is what allows the same semantic instrument to be reused across different computational roles without conflating their observational series: a recording's identity is never the bare instrument definition alone, but the binding — instrument definition together with the specific computational role that produced it — exactly mirroring how an artifact's identity is never its bare data type alone, but that type together with the one producer responsible for it within a Flow (Section 3). Reusing an instrument definition across two different participations is therefore unproblematic by construction: each participation establishes its own binding, and each binding accumulates its own, uncontaminated series of recordings.
 
-None of this depends on Python, or on any particular programming language's type system. A definition/binding/recording structure is expressible with a trait and a generic in one language, an interface and a class in another, a struct and a descriptor in a third — the architecture is the three-level identity discipline itself, not any one language's syntax for expressing it. The test that separates an architectural claim from an implementation detail here is simple: if Reed were reimplemented tomorrow in an entirely different language, would this paragraph still describe something true about the new implementation? An instrument definition, a binding, and a recording would still exist, still related the same way, regardless of what syntax expressed them.
+What matters architecturally is the three-level identity discipline itself, not any particular construct used to express it: a definition, a binding, and a recording, each with a distinct lifetime, related the same way regardless of how any given implementation chooses to represent them.
 
 ### Instrumentation Is Discovered, Not Declared
 
@@ -511,7 +528,7 @@ Runtime discovery
 what was actually observed
 ```
 
-Prospective declaration would let an observer inspect a composition and know, before any execution runs, the complete set of quantities it could ever measure — valuable for static documentation and validation, at the cost of a second declaration that must be kept in agreement with what the computational activity's own body actually does, a redundancy this architecture treats as a cost rather than a safety net (an artifact's produced type is never declared a second time separately from the transformation that produces it, and the same discipline now applies to instruments). Runtime discovery instead reports only what a computation has actually been observed to measure, which is always accurate by construction — it can never drift out of agreement with the computation's real behavior, because it is derived from that behavior directly — at the cost of being unable to answer, before any execution has occurred, what a computation *might* measure. Reed chose runtime discovery: recovering a prospective inventory of possible observations through static analysis of a computational activity's own definition (for instance, by inspecting its source) was considered and rejected, both because it is fragile against any indirection between the activity and where the observation is actually emitted, and because it would reintroduce, through a side door, exactly the kind of inference-from-structure that this architecture otherwise reserves only for the dependency graph itself (Section 3) — a decision reproducible in any language, since it depends on nothing but where the responsibility for discovering an observation is placed: at composition time, or at execution time.
+Prospective declaration would let an observer inspect a composition and know, before any execution runs, the complete set of quantities it could ever measure — valuable for static documentation and validation, at the cost of a second declaration that must be kept in agreement with what the computational activity's own body actually does, a redundancy this architecture treats as a cost rather than a safety net (an artifact's produced type is never declared a second time separately from the transformation that produces it, and the same discipline now applies to instruments). Runtime discovery instead reports only what a computation has actually been observed to measure, which is always accurate by construction — it can never drift out of agreement with the computation's real behavior, because it is derived from that behavior directly — at the cost of being unable to answer, before any execution has occurred, what a computation *might* measure. Reed chose runtime discovery: recovering a prospective inventory of possible observations through static analysis of a computational activity's own definition (for instance, by inspecting its source) was considered and rejected, both because it is fragile against any indirection between the activity and where the observation is actually emitted, and because it would reintroduce, through a side door, exactly the kind of inference-from-structure that this architecture otherwise reserves only for the dependency graph itself (Section 3), since the choice depends only on where the responsibility for discovering an observation is placed: at composition time, or at execution time.
 
 ### Observation Granularity: Logical Unit, Physical Boundary
 
@@ -558,7 +575,7 @@ This boundary licenses a guarantee that would otherwise be impossible to state c
 - causality is always represented explicitly, through generation and usage relationships between firings and artifact versions — temporal observation order is never treated as a substitute for it;
 - an instrument's semantic definition, its contextual binding to a computational role, and any one concrete recording are three identities with three different lifetimes, mirroring the same discipline Section 1 already establishes for computational definitions, participations, and firings;
 - the same instrument definition may be reused across different computational roles without conflating their observational series;
-- instrumentation is discovered through actual execution rather than declared prospectively as part of composition, and this decision is reproducible in any implementation language;
+- instrumentation is discovered through actual execution rather than declared prospectively as part of composition;
 - the logical unit of observation (an instrument) is kept distinct from the physical boundary of isolation and persistence (an execution instance), with cross-execution aggregation layered on top rather than replacing it;
 - observation is never conflated with presentation — suppressing what is shown to a human never suppresses tracing, provenance, recording, persistence, or external telemetry, and no presentation failure can ever alter what was computed or what was observed.
 
@@ -604,7 +621,9 @@ Each of these boundaries answers a question a reader might otherwise conflate:
 
 ## Summary
 
-Reed combines five architectural concerns into one coherent model, organized as two planes: a computational plane that decides what is computed and when, and an observation plane, standing beside it rather than after it, that decides what can be reconstructed about that computation without ever changing its outcome.
+Reed rests on two orthogonal planes: a computational plane that decides what is computed and when, and an observation plane, standing beside it rather than after it, that decides what can be reconstructed about that computation without ever changing its outcome.
+
+**Computational Plane**
 
 | Layer | Responsibility |
 |---|---|
@@ -612,6 +631,13 @@ Reed combines five architectural concerns into one coherent model, organized as 
 | Shared-State Synchronization | One authoritative store of versioned, provenance-carrying artifacts, kept distinct from every node's private local state. |
 | Dependency Management | A dependency graph inferred from unambiguous producer-consumer relationships between typed artifacts. |
 | Reactive Propagation | Automatic, selective, multi-hop propagation of change through that graph — with execution eligibility, commitment, and observation kept as three distinct, ordered concerns — running to a well-defined quiescent state. |
-| Execution Observability | Three distinct, causally-grounded observational views of the computational plane's activity — execution tracing, data provenance, and application instrumentation — discovered rather than declared where appropriate, isolated at the execution boundary, and consumed by presentation without ever influencing what was computed. |
+
+**Observation Plane**
+
+| Concern | Responsibility |
+|---|---|
+| Execution Tracing | A chronologically ordered record of computational activity, scoped to one execution instance. |
+| Data Provenance | Explicit generation/usage relationships between firings and artifact versions, standing in for temporal order wherever causality is the real question. |
+| Instrumentation | Domain-specific quantities the application chose to observe, discovered rather than declared, and consumed by presentation without ever influencing what was computed. |
 
 Together, these layers let Reed coordinate interdependent computation the way a reader would want a dataflow system to work: composition stays separate from execution; artifacts carry a clear identity, version, and provenance; state has exactly one authoritative home; a single change can safely and predictably cascade through everything that actually depends on it and nothing else; and everything the computational plane does can be observed, traced, and reconstructed afterward without that observation ever being able to feed back into what was computed.
