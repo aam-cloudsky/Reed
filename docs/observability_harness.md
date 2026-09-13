@@ -138,18 +138,16 @@ scope).
 
 | Slice | Delivers |
 |---|---|
-| O6a | OTel exporter adapter: translates Reed's Run/NodeExecution/Trigger events and `gauge`/`counter`/`updown_counter` Instruments into OTel spans/metrics; `kind`-gated, never inferred from `type(value)` (`observability_non_goals.md` §4). |
+| O6a | DONE — `export_trace_to_spans`/`export_recording_to_metric` (`src/reed/observability/otel_export.py`); `opentelemetry-api`/`-sdk` added as an optional `otel` extra, never core. Design record §25. |
 | O6b | `reed describe <flow>` — introspects `instruments.json`, no execution required. |
 | O6c | `reed query <flow_id>` — a documented DuckDB/Polars glob pattern over `.reed/runs/*/recordings.csv` (design record §16.4/§17.2's Flow-shape-drift caveat applies: document it as a user judgment call, not solve it). |
 | O6d | `reed graph <execution_id>` — a provenance-graph renderer (terminal tree, Mermaid/DOT, or standalone HTML) consuming `provenance.csv` (design record §8, round 4). |
 
 ## Current slice
 
-**O6a — NOT STARTED.** Milestones O1-O5 (Identity, Instrument/Recording, Local Recording
-Store, Provenance, Execution Trace) are all complete -- 190 tests passing, Ruff clean. The
-next slice is O6a: an OTel exporter adapter translating Reed's own Run/NodeExecution/Trigger
-events into OTel spans/links/events, per design record Section 8's "OTel is an optional
-consumer of Level 1 and Level 2 data."
+**O6b — NOT STARTED.** Milestones O1-O5 and Slice O6a (OTel exporter adapter) are complete
+-- 195 tests passing, Ruff clean. The next slice is O6b: `reed describe <flow>`, introspecting
+`instruments.json` with no execution required.
 
 ## Open questions requiring decision (tracked, not yet resolved)
 

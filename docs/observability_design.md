@@ -1635,3 +1635,44 @@ recorded nothing."
 
 Slice O5c (optional) complete. Milestone O5 (Execution Trace: ring buffer, terminal renderer,
 post-hoc replay) is now fully complete. No new open design questions surfaced.
+
+## Round 13 (Milestone O6, Slice O6a): OTel exporter adapter implemented
+
+### 25.1 `opentelemetry-api`/`opentelemetry-sdk` are an optional extra, never core
+
+`pyproject.toml` gained a new `otel` optional-dependency group
+(`opentelemetry-api`/`opentelemetry-sdk`), alongside the existing `dev` group. No core Reed
+module imports `reed.observability.otel_export` -- a caller who wants OTel export imports it
+explicitly, and gets Python's own `ModuleNotFoundError` if the extra was not installed. This
+is a direct, mechanical consequence of Section 8's already-decided principle ("OTel is an
+exporter target, not a foundation Reed's core sits on top of") and Section 2's guiding
+principle, not a new architectural decision -- it did not need a dedicated design slice.
+
+### 25.2 `export_trace_to_spans`/`export_recording_to_metric` (`src/reed/observability/otel_export.py`)
+
+`export_trace_to_spans(trace, *, tracer)` translates complete `"node_started"`/
+`"node_finished"` `TraceEvent` pairs (Slice O5a) into OTel spans, named after `node_id` and
+carrying `execution_id`/`flow_id`/`node_execution_id`/`execution_seq` as span attributes --
+using each event's own recorded `timestamp` for the span's start/end time, not the
+wall-clock time export happens to run at (a replayed/deferred export must not misreport when
+a Node actually ran). An incomplete pair (only `"node_started"` observed -- e.g. the ring
+buffer dropped the other half past capacity) produces no span, mirroring `terminal.py`'s
+"running" status rather than fabricating an end time.
+
+`export_recording_to_metric(recording, *, meter)` is strictly kind-gated per
+`docs/observability_non_goals.md` Section 4 ("do not infer OTel export mappings from Python
+types"): `"gauge"` maps to `meter.create_gauge(...).set(...)`, `"counter"` and
+`"updown_counter"` map to `meter.create_counter(...)`/`meter.create_up_down_counter(...)`
+with `.add(...)`. A lazy-mode `Recording` (`kind=None`, Section 19) is never exported as a
+metric -- there is no `Instrument` behind it to determine which OTel instrument kind it would
+even be, so the function returns `False` and records nothing, rather than guessing from
+`type(recording.value)`.
+
+Both functions take an already-configured `Tracer`/`Meter` as a parameter; this module owns
+no `TracerProvider`/`MeterProvider` construction or global OTel configuration -- provider
+setup and export destination (console, OTLP collector, in-memory for tests, ...) are the
+caller's concern.
+
+### 25.3 Status
+
+Slice O6a complete. No new open design questions surfaced.

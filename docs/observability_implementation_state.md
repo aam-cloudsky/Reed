@@ -14,10 +14,11 @@ meaningful progress.
 
 ## Current slice
 
-**O6a — NOT STARTED.**
+**O6b — NOT STARTED.**
 
-Milestones O1-O5 are all complete (continuous execution authorized). Next: O6a, an OTel
-exporter adapter. See `docs/observability_harness.md` for the full milestone/slice table.
+Milestones O1-O5 and Slice O6a (OTel exporter adapter) are complete (continuous execution
+authorized). Next: O6b, `reed describe <flow>`. See `docs/observability_harness.md` for the
+full milestone/slice table.
 
 ## Baseline verification
 
@@ -33,6 +34,8 @@ forward-ref lint error fixed: `ArtifactRecord` type hint needed a `TYPE_CHECKING
 Re-run after O5a (2026-09-13): 182 passed (177 + 5 new O5a tests); ruff clean.
 Re-run after O5b (2026-09-13): 186 passed (182 + 4 new O5b tests); ruff clean.
 Re-run after O5c (2026-09-13): 190 passed (186 + 4 new O5c tests); ruff clean.
+Re-run after O6a (2026-09-13): 195 passed (190 + 5 new O6a tests); ruff clean
+(opentelemetry-api/-sdk installed via new `otel` optional-dependency extra).
 
 ## Completed slices
 
@@ -286,6 +289,22 @@ round/section, and only then is it marked resolved here.
 - New open questions discovered (if any): none.
 - Follow-up filed as future work (if any): none. **Milestone O5 (Execution Trace) is now
   fully complete.**
+
+### O6a — OTel exporter adapter (2026-09-13)
+- observability_design.md section(s) implemented: Section 8's OTel-as-optional-consumer
+  principle, written back as new Section 25 (Round 13).
+- Files changed: `src/reed/observability/otel_export.py` (new: `export_trace_to_spans(trace,
+  tracer=...)`, `export_recording_to_metric(recording, meter=...)`), `pyproject.toml` (new
+  `otel` optional-dependency extra: `opentelemetry-api`, `opentelemetry-sdk`).
+- Tests: `tests/test_observability_o6a_otel_export.py` (5 tests, `pytest.importorskip`-gated
+  on `opentelemetry.sdk.trace`/`opentelemetry.sdk.metrics`: complete started/finished pairs
+  become spans with the right attributes/timestamps, incomplete pairs are skipped, gauge and
+  counter Recordings become the right OTel metric with the right value, lazy-mode
+  `kind=None` Recordings are skipped rather than guessed). Full suite: 195 passed; Ruff
+  clean.
+- Deviations from the slice plan (if any): none.
+- New open questions discovered (if any): none.
+- Follow-up filed as future work (if any): none.
 
 ## Deviations from the design record
 
