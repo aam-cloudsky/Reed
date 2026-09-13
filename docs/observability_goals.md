@@ -60,11 +60,34 @@ required.
 
 ### 2.3 Recording an observation
 
+**Preferred style (Milestone O7 self-containment audit):** reference a declared Instrument
+by its plain string name, not the `Instrument` object itself:
+
 ```python
 def update_aircraft(ctx, aircraft):
     ...
-    ctx.record(speed, aircraft.speed)
+    ctx.record("speed", aircraft.speed)
 ```
+
+`ctx.record("speed", ...)` resolves purely against `update_aircraft`'s own FlowNode-declared
+schema (`flow.add(update_aircraft, instruments=[speed, altitude])`) -- the Node body needs no
+import of, or reference to, the `speed` object at all. This keeps the Node function
+self-contained: it depends only on a name it and the composition call agree on, the same way
+a logger call depends on a string key, not on a shared global object. It also means the same
+Node function can be composed into a different Flow with a differently-configured Instrument
+for the same name (different `unit`, say) with zero change to the Node body.
+
+Passing the `Instrument` object itself still works, for callers who prefer it (e.g. to reuse
+one Python object as the single source of truth for a name used in several places):
+
+```python
+ctx.record(speed, aircraft.speed)
+```
+
+but it is always validated against the FlowNode's own declared schema, never trusted
+directly -- an `Instrument` object that was never declared via `instruments=[...]`, or whose
+`kind`/`unit` contradicts what was actually declared for that name, raises `ValueError`
+rather than silently overriding the declaration.
 
 or, in lazy mode:
 

@@ -100,11 +100,14 @@ def track_temperature(
     reading: SensorReading,
 ) -> TrackedReading:
     """
-    Declared-mode recording: `temperature` was declared up front via
-    `flow.add(track_temperature, instruments=[temperature])`, so
-    `ctx.record(temperature, ...)` is validated against that declaration.
+    Declared-mode recording, by name (Milestone O7's preferred style): the
+    `temperature` Instrument is declared once via
+    `flow.add(track_temperature, instruments=[temperature])`, and this Node
+    body references only the plain string "temperature" -- no import of,
+    or reference to, the `temperature` object itself. The Node stays
+    self-contained: nothing here couples it to a specific global object.
     """
-    ctx.record(temperature, reading.celsius)
+    ctx.record("temperature", reading.celsius)
     return TrackedReading(celsius=reading.celsius)
 
 
@@ -123,7 +126,7 @@ def detect_anomaly(
     is_anomaly = reading.celsius > threshold
 
     if is_anomaly:
-        ctx.record(anomaly_count, 1)
+        ctx.record("anomaly_count", 1)
 
     return Anomaly(celsius=reading.celsius, threshold=threshold, is_anomaly=is_anomaly)
 

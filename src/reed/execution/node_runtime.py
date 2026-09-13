@@ -468,10 +468,47 @@ class NodeRuntime:
     def _resolve_instrument(
         self, instrument_or_name: "Instrument | str", *, unit: str | None
     ) -> tuple[str, str | None, str | None]:
-        """Returns `(name, kind, unit)` -- `kind` is `None` in lazy mode."""
+        """
+        Returns `(name, kind, unit)` -- `kind` is `None` in lazy mode.
+
+        Milestone O7 (Instrument API self-containment audit): the
+        preferred declared-mode style is a plain string name
+        (`ctx.record("temperature", value)`) -- the schema lives entirely
+        in `flow.add(node, instruments=[...])`, so the Node body needs no
+        reference to any `Instrument` object at all, and the same Node
+        function can be composed into a different Flow with a differently
+        declared schema for the same names. Passing an `Instrument`
+        *object* is still accepted for backward compatibility, but it is
+        always validated against this FlowNode's own declared schema
+        (never trusted directly) -- an Instrument object that was never
+        declared via `instruments=[...]`, or whose `kind`/`unit` contradicts
+        what was actually declared for that name, is rejected. Silently
+        trusting an ad hoc Instrument object would let it bypass the
+        FlowNode's own declared schema entirely, which is exactly the kind
+        of undeclared-name error declared mode already exists to catch.
+        """
         if isinstance(instrument_or_name, Instrument):
             instrument = instrument_or_name
-            return instrument.name, instrument.kind, instrument.unit
+            declared = self._declared_instruments.get(instrument.name)
+            if declared is None:
+                raise ValueError(
+                    f"Instrument {instrument.name!r} passed to ctx.record(...) "
+                    "was not declared via flow.add(node, instruments=[...]) for "
+                    "this Node -- pass the plain name string instead "
+                    f"(ctx.record({instrument.name!r}, ...)) once it is "
+                    "declared, or add it to instruments=[...]."
+                )
+            if declared.kind != instrument.kind or declared.unit != instrument.unit:
+                raise ValueError(
+                    f"Instrument object passed to ctx.record(...) for "
+                    f"{instrument.name!r} (kind={instrument.kind!r}, "
+                    f"unit={instrument.unit!r}) does not match this Node's "
+                    f"declared Instrument (kind={declared.kind!r}, "
+                    f"unit={declared.unit!r}) -- pass the plain name string "
+                    f"instead (ctx.record({instrument.name!r}, ...)) to always "
+                    "resolve against the declared schema."
+                )
+            return declared.name, declared.kind, declared.unit
 
         name = instrument_or_name
 

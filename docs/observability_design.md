@@ -1840,3 +1840,84 @@ work is required here now; this is noted rather than silently left unaddressed.
 ### 29.5 Status
 
 Slice O7c complete. No new open design questions surfaced.
+
+## Round 18 (Milestone O7): Instrument API self-containment audit -- name-based declared-mode resolution preferred, object-mode validated
+
+### 30.1 The problem: a Node body needed a global `Instrument` reference for declared mode
+
+The acceptance example (`examples/observability_example.py`) originally wrote
+`ctx.record(temperature, reading.celsius)` inside a Node body, where `temperature` was a
+module-level `Instrument` object also passed to `flow.add(track_temperature,
+instruments=[temperature])`. This duplicates the same object reference in two places and
+couples the Node function to a specific global -- the Node is no longer self-contained with
+respect to its own instrumentation, unlike the rest of Reed's Node-authoring model (a Node
+is "an ordinary typed Python function," `examples/new_api.py`'s own framing).
+
+### 30.2 The API already supported the better alternative -- but had a validation gap
+
+`NodeRuntime._resolve_instrument(...)` already accepted a plain string name in declared mode
+(`ctx.record("temperature", value)`), resolving purely against the FlowNode's own declared
+schema with zero Instrument-object coupling in the Node body -- this was already the
+stronger, more self-contained model, just not the one the example demonstrated.
+
+Auditing the `Instrument`-*object* branch of `_resolve_instrument(...)` found a real defect:
+it returned `instrument.name, instrument.kind, instrument.unit` directly from whatever object
+was passed, with **no cross-check against `self._declared_instruments` at all**. An ad hoc
+`Instrument("temperature", kind="counter", unit="celsius")` constructed inside a Node body --
+never passed to `flow.add(..., instruments=[...])`, and contradicting the actually-declared
+`kind="gauge"` -- would silently win, completely bypassing the FlowNode's declared schema.
+This is exactly the class of error declared mode exists to catch for a name string
+(`observability_goals.md` Section 2.3: "calling `ctx.record(...)` with a name not in that
+list is an error"), just left open for the object form.
+
+### 30.3 Decision: prefer name-based resolution; validate object-based resolution against the declared schema
+
+**Decision:** `ctx.record("name", value)` is now documented as the preferred declared-mode
+style (`observability_goals.md` Section 2.3, updated). `ctx.record(instrument_object, value)`
+remains supported, but `_resolve_instrument(...)` now looks up `self._declared_instruments`
+by the object's `.name` and raises `ValueError` if no such declaration exists, or if the
+declared Instrument's `kind`/`unit` differ from the passed object's -- the declared schema is
+always the source of truth, never the object handed to `ctx.record(...)`.
+
+**Alternatives considered:**
+1. Remove Instrument-object support from `ctx.record(...)` entirely, name-only. Rejected --
+   unnecessarily breaks a legitimate style (one Python object as the single source of truth
+   for a name reused in several places) and every existing O2 test using the object form,
+   for no additional safety once the object form is validated anyway.
+2. Validate by object identity (`is`) against the exact declared `Instrument` instance.
+   Rejected -- too strict for no benefit: a caller reconstructing an equal
+   `Instrument(name=..., kind=..., unit=...)` value each call (not caching the same object)
+   is not doing anything wrong; what matters is that its `kind`/`unit` agree with the
+   declaration, not object identity.
+3. Validate by (`name`, `kind`, `unit`) equality against the declared entry. **Chosen** --
+   closes the actual gap (a mismatched or undeclared object silently winning) without
+   over-constraining legitimate reuse patterns.
+
+**Advantages:** Closes a real validation bypass; keeps both calling styles working;
+name-based style becomes the documented default, making Nodes reusable across Flows with
+different Instrument configurations for the same names, with zero Node-body changes.
+
+**Disadvantages/risks:** None identified -- this is a strict tightening of an existing gap,
+not a behavior change for any caller who was already declaring instruments correctly and
+passing the same object consistently.
+
+**Files changed:** `src/reed/execution/node_runtime.py` (`_resolve_instrument(...)`'s
+Instrument-object branch now validates against `self._declared_instruments`),
+`docs/observability_goals.md` Section 2.3 (documents the preferred name-based style and the
+object form's validation), `examples/observability_example.py` (Node bodies now use
+`ctx.record("name", value)` exclusively, no `Instrument` object referenced inside any Node
+body).
+
+**Tests:** `tests/test_observability_o7h_instrument_api.py` (4 tests, written and confirmed
+failing against the pre-fix code first: name-based declared mode needs no Instrument object
+in the Node body; a matching Instrument object still works; a kind-mismatched Instrument
+object is rejected; an undeclared Instrument object is rejected even though it is a real,
+validly-constructed `Instrument`). Full suite: 218 passed (214 + 4 new); Ruff clean.
+
+**Evidence:** `docs/observability_goals.md` Section 2.3's existing declared-mode error rule
+for names, generalized to the object form; `examples/new_api.py`'s own framing of Nodes as
+"ordinary typed Python functions" with no Reed-infrastructure coupling.
+
+### 30.4 Status
+
+Complete. No new open design questions surfaced.

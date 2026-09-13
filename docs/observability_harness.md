@@ -157,6 +157,7 @@ as it did to O1-O6).
 | O7a | DONE — audit baseline: reproduced two suspected defects (Artifact version identity; per-call fsync) with failing regression tests before any fix, confirmed against the authoritative docs. |
 | O7b | DONE — fixed Artifact version identity: `NodeRuntime` now owns one running `ArtifactProvenance`, advanced (never replaced) per firing, so repeated firings of the same Node produce monotonically increasing versions instead of always "v1". |
 | O7c | DONE — `NodeRuntime` buffers Recordings per firing (`_pending_recordings`), `CSVRecordingStore.append_batch(...)` flushes+fsyncs once per batch; `Run._fire`'s `finally` flushes on success and exception. Design record §29. |
+| O7h | DONE — Instrument API self-containment audit: name-based declared-mode resolution documented as preferred; `Instrument`-object resolution now validated against the FlowNode's declared schema instead of trusted directly. Design record §30. |
 | O7d | Terminal presentation policy/API: `flow.run(observability=...)` presets compiling to a structured `PresentationPolicy`, decoupled from what Reed collects/persists. |
 | O7e | Progress semantics and renderer: define what a progress denominator can honestly mean in a reactive graph; implement accordingly (spinner/counter if a true fraction is not knowable). |
 | O7f | Replay/describe presentation corrections: disambiguate same-`execution_seq` replay rows without redefining `execution_seq`; distinguish "no Instruments" from "lazy-mode capable" in `describe_flow`. |

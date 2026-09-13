@@ -479,6 +479,34 @@ own fsync remains)). Full suite: 214 passed (210 + 4 new); Ruff clean.
 verbatim); `docs/observability_non_goals.md` Section 5 (explicit prohibition, quoted
 verbatim); architectural invariants #20, #21, #26.
 
+### O7h — Instrument API self-containment audit (user-prompted mid-O7) (2026-09-13)
+
+**Decision:** `ctx.record("name", value)` is the preferred declared-mode style (no
+`Instrument` object needed in the Node body); `ctx.record(instrument_object, value)` remains
+supported but is now validated against the FlowNode's declared schema rather than trusted
+directly.
+
+**Why:** User-raised concern, while O7 was in progress, that the acceptance example
+required `ctx.record(temperature, value)` to reference the same module-level `Instrument`
+object also passed to `flow.add(..., instruments=[temperature])` -- coupling the Node body
+to a global and duplicating the dependency. Auditing `NodeRuntime._resolve_instrument(...)`
+found the string-name path already avoided this coupling, but the Instrument-*object* path
+had a real, separate defect: it trusted the passed object's `kind`/`unit` directly, with no
+cross-check against what was actually declared -- an undeclared or mismatched ad hoc
+Instrument object could silently bypass the FlowNode's declared schema entirely.
+
+**Fix:** validate the object's `.name` against `self._declared_instruments`, and its
+`kind`/`unit` against the declared entry; raise `ValueError` on either mismatch.
+
+**Files changed:** `src/reed/execution/node_runtime.py`, `docs/observability_goals.md`
+Section 2.3, `examples/observability_example.py` (Node bodies switched to the name-based
+style).
+
+**Tests:** `tests/test_observability_o7h_instrument_api.py` (4 tests, confirmed failing
+against pre-fix code first). Full suite: 218 passed (214 + 4 new); Ruff clean.
+
+Full rationale, alternatives, and evidence: design record Round 18 (Section 30).
+
 ## Deviations from the design record
 
 _(none yet — record here if an implementation slice needs to deviate from
