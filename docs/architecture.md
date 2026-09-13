@@ -16,6 +16,37 @@ Reed's design rests on three ideas held apart on purpose:
 
 These three separations recur throughout the architecture and are the basis for the four layers below.
 
+A fourth idea sits alongside the first three, orthogonally rather than sequentially:
+
+4. **Executing a computation is not the same activity as understanding it.** Running a reactive dataflow to completion tells an observer nothing, by itself, about which computational activities actually occurred, which versions of which data participated in them, or which domain-specific quantities were observed along the way. A runtime that only computes has already discarded the information a scientist, an operator, or a future version of the same system would need to reconstruct what happened.
+
+This fourth idea is not a fifth stage a value passes through on its way somewhere. It is a second plane of concern, standing beside the first three rather than after them — a **computational plane**, which decides what is computed and when, and an **observation plane**, which decides what can be reconstructed about that computation after (or during) the fact. Every mechanism in the computational plane can, in principle, run with the observation plane silent; every mechanism in the observation plane exists only to describe activity the computational plane already decided to perform. Neither plane is allowed to alter the other's outcome: an observation is never permitted to change what was computed, and computation is never permitted to depend on whether anything is watching.
+
+```mermaid
+flowchart TB
+    subgraph CP["Computational Plane"]
+        direction TB
+        DM["Dependency Management"]
+        RP["Reactive Propagation"]
+        SS["State Synchronization"]
+        BC["Runtime Coordination"]
+        DM --> RP --> SS --> BC
+    end
+    subgraph OP["Observation Plane"]
+        direction TB
+        ET["Execution Trace"]
+        DP["Data Provenance"]
+        IN["Instrumentation"]
+        PR["Presentation / Export"]
+        ET --> PR
+        DP --> PR
+        IN --> PR
+    end
+    CP -.->|"activity to observe"| OP
+```
+
+The computational plane is described first, in Sections 1 through 4, exactly as it was before this document incorporated the observation plane. The observation plane is described in Section 5. The two-plane framing itself is the more important structural fact: a reader who has understood Sections 1-4 has understood everything necessary for Reed to compute correctly; Section 5 answers a different question, about what can be known of that computation afterward, and depends on Sections 1-4 for its vocabulary (artifacts, versions, firings, commits) without changing any of their guarantees.
+
 ```mermaid
 flowchart BT
     B["1. Bus Coordination"]
@@ -34,6 +65,7 @@ flowchart BT
 | Shared-State Synchronization | Where does authoritative truth live, and what is merely local? |
 | Dependency Management | What depends on what? |
 | Reactive Propagation | What must react when something changes, and when? |
+| Execution Observability (Section 5) | What can be reconstructed about a computation after it happened, without changing what it computed? |
 
 ---
 
@@ -62,6 +94,19 @@ flowchart LR
     E -->|qualifying data arrives| F2[Firing 2]
     E -->|qualifying data arrives| F3[Firing N]
 ```
+
+Two further identities complete the picture, and belong to the artifact side of the same hierarchy rather than the node side: an **artifact identity** is stable for as long as its producer's participation exists, and an **artifact version** is one committed value of that identity, changing every time its producer commits again. Every one of these six scopes has a distinct lifetime, and no scope's identity is ever reused to stand in for another's:
+
+| Identity scope | Stable across | Changes when |
+|---|---|---|
+| Computational definition | every Flow it participates in, every Execution of every such Flow | the definition itself is redefined |
+| Flow participation | every Execution of the same composition | the composition's topology changes |
+| Execution instance | every firing that occurs during one run | a new, independent run begins |
+| Firing | nothing beyond itself — it is the smallest unit | the same participation is asked to compute again |
+| Artifact identity | every version committed during one Execution | the producer's computational role changes |
+| Artifact version | nothing beyond itself — it is one committed value | its producer commits a new value |
+
+This table is what later grounds the observation plane's own vocabulary (Section 5) without needing to introduce anything new: an execution trace is a record of firings against one execution instance; provenance is a record of which artifact versions a firing consumed and which it produced; and an instrument binding, introduced in Section 5, is simply this same identity discipline applied to observation instead of computation. A system that needed distributed identifiers to correlate work across process or machine boundaries would derive them from exactly this hierarchy — an execution instance's identity extended with a firing's identity is already sufficient to correlate any observation with the specific computational activity that produced it, with nothing further to invent.
 
 ### Producer-Consumer Organization
 
@@ -360,9 +405,168 @@ sequenceDiagram
 
 ---
 
+## 5. Execution Observability
+
+### Purpose
+
+Executing a reactive computation is insufficient for understanding it. A runtime must also preserve enough information to reconstruct which computational activities occurred, which data versions participated in them, and which domain-specific quantities were observed during execution. This is a distinct architectural problem from the one Sections 1-4 solve: those sections describe how Reed decides what to compute and when; this section describes what can be known about that computation after (or during) the fact, without ever feeding back into what was computed.
+
+Three different questions arise from this problem, and a design that collapses them loses the ability to answer any of them precisely:
+
+| View | Question it answers |
+|---|---|
+| Execution tracing | What happened? |
+| Data provenance | Why did this value exist? |
+| Instrumentation | What property of the computation did the application observe? |
+
+```mermaid
+flowchart LR
+    E[Execution]
+    E --> X[Computational Activity]
+    E --> P[Artifact Lineage]
+    E --> M[Domain Measurements]
+    X --> T[Execution Trace]
+    P --> V[Provenance]
+    M --> R[Recordings]
+    T --> O[Observation Layer]
+    V --> O
+    R --> O
+```
+
+These three views cannot be collapsed into one another. A firing raising an error is part of execution — it is not an instrument observation. A measured temperature is an observation the application chose to make — it is not provenance. The statement "artifact version B₂ was produced using artifact version A₃" is provenance — it is not simply a claim about temporal order. Each view answers a question the other two structurally cannot.
+
+### Temporal Order Is Not Causality
+
+Temporal order alone is insufficient to reconstruct computational causality. Two activities may occur one after another without either contributing data to the other, while an artifact produced much earlier may remain causally relevant much later — its most recent committed version may still be exactly what a firing much further downstream consumes. Knowing only that "activity 41" preceded "activity 42" preceded "activity 43" establishes nothing about which of them, if any, depended on which.
+
+```mermaid
+flowchart LR
+    A1["Artifact A · version 1"] -->|used by| X1["Firing X1"]
+    X1 -->|generated| B1["Artifact B · version 1"]
+    A2["Artifact A · version 2"] -->|used by| X2["Firing X2"]
+    X2 -->|generated| B2["Artifact B · version 2"]
+```
+
+Reed therefore represents causality explicitly, through generation and usage relationships between firings and versioned artifacts, never through the order in which activities were merely observed to occur. Every firing records which artifact versions it consumed and which artifact version it generated; that relationship — not sequence position — is what a reader traverses to answer "why did this value exist." Sequence position remains useful for reconstructing the order in which activities were observed to happen — a legitimate and separate question — but it is never treated as a substitute for lineage, and a system built on this architecture must resist the temptation to infer causality from convenient temporal proximity.
+
+### Execution Tracing
+
+An execution trace answers "what happened": a chronologically ordered record of computational activities — which participation fired, when it started, when it finished, and whether it succeeded or failed — scoped to one execution instance. Ordering here is deterministic *observation* order: it reconstructs the sequence in which the runtime became aware of each activity's start and completion, which is exactly the information needed to answer questions like "how many firings occurred," "how long did each take," and "in what order did the runtime observe them" — and exactly the information *not* sufficient to answer "did this firing's result depend on that one."
+
+### Data Provenance
+
+Data provenance answers "why did this value exist": for every artifact version a firing generates, which firing generated it, and which versions of which other artifacts that firing consumed to do so. Because each artifact identity has exactly one responsible producer within a Flow (Section 3), and because commitment always advances an artifact's version cleanly (Section 2), a chain of generation and usage relationships can be followed indefinitely — forward from a version to everything it caused, or backward from a version to everything that caused it — independent of when any of those activities happened to occur relative to one another. This is what lets a reader reconstruct the full ancestry of any committed value, a capability temporal ordering alone could never provide.
+
+### Instrumentation as a Semantic Model
+
+Instrumentation answers a third, orthogonal question: what domain-specific property of the computation did the application itself choose to observe? Unlike execution tracing and provenance — both of which the runtime maintains automatically, as an unavoidable consequence of firing and committing — an instrumented observation exists only because application code explicitly decided to record it. A runtime error belongs to execution tracing; a temperature reading belongs to instrumentation; neither is the other.
+
+Reed's instrumentation model distinguishes three concepts, each with a different lifetime and a different scope, mirroring the identity discipline established in Section 1:
+
+An **instrument definition** gives semantic identity to a family of observations: what is being measured, the admissible value domain, its measurement semantics, and, when applicable, its unit. It exists independently of any particular computation — the same instrument definition (a temperature, a count of anomalies, a queue depth) is meaningful wherever that quantity might be measured, in this Flow or any other.
+
+An **instrument binding** associates that semantic definition with a particular computational role in a Flow — a specific participation, in a specific composition. The binding is what gives a series of observations a consistent origin: it is the difference between "temperature, in general" and "the temperature this specific stage of this specific Flow measures."
+
+A **recording** is one concrete observation produced by such a binding during an individual firing — one value, one timestamp, one place in the identity hierarchy it was produced from.
+
+```mermaid
+flowchart LR
+    I[Instrument Definition]
+    N[Computational Role]
+    I --> B[Instrument Binding]
+    N --> B
+    B --> R1[Recording]
+    B --> R2[Recording]
+    B --> RN[Recording N]
+```
+
+This three-level structure is what allows the same semantic instrument to be reused across different computational roles without conflating their observational series: a recording's identity is never the bare instrument definition alone, but the binding — instrument definition together with the specific computational role that produced it — exactly mirroring how an artifact's identity is never its bare data type alone, but that type together with the one producer responsible for it within a Flow (Section 3). Reusing an instrument definition across two different participations is therefore unproblematic by construction: each participation establishes its own binding, and each binding accumulates its own, uncontaminated series of recordings.
+
+None of this depends on Python, or on any particular programming language's type system. A definition/binding/recording structure is expressible with a trait and a generic in one language, an interface and a class in another, a struct and a descriptor in a third — the architecture is the three-level identity discipline itself, not any one language's syntax for expressing it. The test that separates an architectural claim from an implementation detail here is simple: if Reed were reimplemented tomorrow in an entirely different language, would this paragraph still describe something true about the new implementation? An instrument definition, a binding, and a recording would still exist, still related the same way, regardless of what syntax expressed them.
+
+### Instrumentation Is Discovered, Not Declared
+
+A further architectural decision governs how an instrument binding comes to exist: instrumentation is observational rather than compositional. The computational topology does not require prospective knowledge of every quantity that may be observed during execution — a binding is established the first time a computational activity actually emits a typed observation during a real execution, not declared ahead of time as part of composing the Flow.
+
+```mermaid
+sequenceDiagram
+    participant C as Computational Activity
+    participant O as Observation Context
+    participant R as Runtime
+    C->>O: emit typed observation
+    O->>R: associate observation with current activity
+    R->>R: establish or reuse instrument binding
+    R->>R: persist recording
+```
+
+This is a genuine trade-off, not a cost-free simplification, and it is worth stating explicitly what each alternative buys:
+
+```text
+Prospective declaration
+        ↓
+what may be observed
+
+Runtime discovery
+        ↓
+what was actually observed
+```
+
+Prospective declaration would let an observer inspect a composition and know, before any execution runs, the complete set of quantities it could ever measure — valuable for static documentation and validation, at the cost of a second declaration that must be kept in agreement with what the computational activity's own body actually does, a redundancy this architecture treats as a cost rather than a safety net (an artifact's produced type is never declared a second time separately from the transformation that produces it, and the same discipline now applies to instruments). Runtime discovery instead reports only what a computation has actually been observed to measure, which is always accurate by construction — it can never drift out of agreement with the computation's real behavior, because it is derived from that behavior directly — at the cost of being unable to answer, before any execution has occurred, what a computation *might* measure. Reed chose runtime discovery: recovering a prospective inventory of possible observations through static analysis of a computational activity's own definition (for instance, by inspecting its source) was considered and rejected, both because it is fragile against any indirection between the activity and where the observation is actually emitted, and because it would reintroduce, through a side door, exactly the kind of inference-from-structure that this architecture otherwise reserves only for the dependency graph itself (Section 3) — a decision reproducible in any language, since it depends on nothing but where the responsibility for discovering an observation is placed: at composition time, or at execution time.
+
+### Observation Granularity: Logical Unit, Physical Boundary
+
+An instrument is the logical unit of observation — the unit at which recordings are semantically comparable and analytically meaningful. This is deliberately a different concept from the boundary at which observations are physically isolated and made durable. An execution instance is a natural isolation boundary for persistence: everything an execution instance observes is self-contained, attributable to that one run, and safe to persist or discard independently of every other execution instance of the same Flow. Aggregating across many execution instances of the same Flow — to compare how one instrument's values evolved run over run — is a different, later operation, layered on top of per-execution isolation rather than replacing it.
+
+```mermaid
+flowchart TB
+    F[Flow]
+    F --> E1[Execution Instance 1]
+    F --> E2[Execution Instance 2]
+    E1 --> R1[Recordings]
+    E1 --> P1[Provenance]
+    E2 --> R2[Recordings]
+    E2 --> P2[Provenance]
+    R1 --> Q[Cross-Execution Analysis]
+    R2 --> Q
+```
+
+Collapsing these two concepts — treating the instrument itself as the unit of physical isolation, for instance by giving each instrument its own persistent, execution-spanning store — would entangle a purely semantic distinction (what is being measured) with a purely operational one (what is safe to isolate and discard together), and would make it substantially harder to reason about what one execution instance is responsible for. Keeping them separate is what lets a single instrument's observations be persisted, queried, and reasoned about consistently whether they came from one execution or many, without that consistency requiring any single execution instance to know about any other.
+
+### Observation Is Not Presentation
+
+The runtime's responsibility ends at producing an accurate, complete observation layer — an execution trace, a provenance record, a set of recordings. What a human operator sees in a terminal, what a machine consumer receives through an external telemetry protocol, and what an offline analysis tool reads back from storage are all downstream *consumers* of that same observation layer, never additional sources of it.
+
+```mermaid
+flowchart LR
+    R[Runtime]
+    R --> T[Execution Trace]
+    R --> P[Provenance]
+    R --> M[Measurements]
+    T --> V[Presentation]
+    P --> V
+    M --> V
+    V --> H[Human Interface]
+    V --> E[External Telemetry]
+    V --> A[Offline Analysis]
+```
+
+This boundary licenses a guarantee that would otherwise be impossible to state cleanly: suppressing human-facing output does not suppress observation. A caller free to choose how much is shown at a terminal — from nothing at all to a fully detailed rendering of every computational activity, every artifact version, and every recording — is choosing only how the already-complete observation layer is presented, never whether that layer is produced or preserved. Presentation is one consumer among several, standing entirely downstream of an observation layer that is indifferent to whether anything is watching it at all.
+
+### Guarantees
+
+- an execution trace, a provenance record, and a set of instrument recordings remain three structurally distinct views, never collapsible into one another;
+- causality is always represented explicitly, through generation and usage relationships between firings and artifact versions — temporal observation order is never treated as a substitute for it;
+- an instrument's semantic definition, its contextual binding to a computational role, and any one concrete recording are three identities with three different lifetimes, mirroring the same discipline Section 1 already establishes for computational definitions, participations, and firings;
+- the same instrument definition may be reused across different computational roles without conflating their observational series;
+- instrumentation is discovered through actual execution rather than declared prospectively as part of composition, and this decision is reproducible in any implementation language;
+- the logical unit of observation (an instrument) is kept distinct from the physical boundary of isolation and persistence (an execution instance), with cross-execution aggregation layered on top rather than replacing it;
+- observation is never conflated with presentation — suppressing what is shown to a human never suppresses tracing, provenance, recording, persistence, or external telemetry, and no presentation failure can ever alter what was computed or what was observed.
+
+---
+
 ## Architectural Boundaries
 
-The distinctions that hold this design together, stated as boundaries that must never be collapsed:
+The distinctions that hold this design together, stated as boundaries that must never be collapsed. The first group governs the computational plane (Sections 1-4); the second governs the observation plane (Section 5) and its relationship to the first:
 
 ```text
 Definition ≠ Composition ≠ Execution
@@ -376,6 +580,14 @@ Memory ≠ Previous Output
 
 Change Detection ≠ Execution Eligibility
 Trigger Policy ≠ Output Observation
+
+Temporal Order ≠ Causality
+Execution Trace ≠ Provenance ≠ Instrumentation
+
+Instrument Definition ≠ Instrument Binding ≠ Recording
+Observation ≠ Presentation
+
+Logical Observation Unit ≠ Physical Persistence Boundary
 ```
 
 Each of these boundaries answers a question a reader might otherwise conflate:
@@ -384,12 +596,15 @@ Each of these boundaries answers a question a reader might otherwise conflate:
 - **Domain Value ≠ Artifact State / Artifact Identity ≠ Artifact Version** — what a transformation computes is not the same as what Reed commits and tracks about it; an artifact's role in the computation is stable while its value changes version by version.
 - **Shared State ≠ Node-local Memory / Memory ≠ Previous Output** — only one store is authoritative for any artifact; a node's private continuity and its own last committed result are related but distinct, and neither is visible to any other node.
 - **Change Detection ≠ Execution Eligibility / Trigger Policy ≠ Output Observation** — noticing that something changed, deciding whether to act on it, and being notified after acting on it are three separate moments, each with its own rule.
+- **Temporal Order ≠ Causality / Execution Trace ≠ Provenance ≠ Instrumentation** — the order in which the runtime observed activities to occur is never a substitute for the explicit generation/usage relationships that establish why a value exists; and the three observational views this architecture maintains — what happened, why a value exists, and what the application chose to measure — each answer a question the other two structurally cannot.
+- **Instrument Definition ≠ Instrument Binding ≠ Recording / Observation ≠ Presentation** — a semantic measurement's identity, its association with a specific computational role, and one concrete observation are three distinct identities with three different lifetimes; and what the observation plane produces is never conflated with how, or whether, any of it is shown to a particular consumer.
+- **Logical Observation Unit ≠ Physical Persistence Boundary** — the unit at which observations are semantically meaningful (an instrument) is a different concept from the unit at which they are physically isolated and made durable (an execution instance), and conflating them would entangle a purely semantic distinction with a purely operational one.
 
 ---
 
 ## Summary
 
-Reed combines four architectural layers into one coherent model:
+Reed combines five architectural concerns into one coherent model, organized as two planes: a computational plane that decides what is computed and when, and an observation plane, standing beside it rather than after it, that decides what can be reconstructed about that computation without ever changing its outcome.
 
 | Layer | Responsibility |
 |---|---|
@@ -397,5 +612,6 @@ Reed combines four architectural layers into one coherent model:
 | Shared-State Synchronization | One authoritative store of versioned, provenance-carrying artifacts, kept distinct from every node's private local state. |
 | Dependency Management | A dependency graph inferred from unambiguous producer-consumer relationships between typed artifacts. |
 | Reactive Propagation | Automatic, selective, multi-hop propagation of change through that graph — with execution eligibility, commitment, and observation kept as three distinct, ordered concerns — running to a well-defined quiescent state. |
+| Execution Observability | Three distinct, causally-grounded observational views of the computational plane's activity — execution tracing, data provenance, and application instrumentation — discovered rather than declared where appropriate, isolated at the execution boundary, and consumed by presentation without ever influencing what was computed. |
 
-Together, these layers let Reed coordinate interdependent computation the way a reader would want a dataflow system to work: composition stays separate from execution; artifacts carry a clear identity, version, and provenance; state has exactly one authoritative home; and a single change can safely and predictably cascade through everything that actually depends on it — and nothing else.
+Together, these layers let Reed coordinate interdependent computation the way a reader would want a dataflow system to work: composition stays separate from execution; artifacts carry a clear identity, version, and provenance; state has exactly one authoritative home; a single change can safely and predictably cascade through everything that actually depends on it and nothing else; and everything the computational plane does can be observed, traced, and reconstructed afterward without that observation ever being able to feed back into what was computed.
