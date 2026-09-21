@@ -42,6 +42,23 @@ Explicitly out of scope for this slice:
       recommended work item 5 ("move validation earlier into Flow
       composition"). This file's own class is unchanged by that
       wiring; it remains a standalone, directly usable class.
+
+Slice 21D (GitHub issue #21, "Distinguish triggering inputs from
+sampled inputs in node firing rules") adds a third registration-time
+validation alongside self-flow and duplicate-producer rejection:
+`register(...)` now rejects a `FlowNode` that has at least one
+consumed artifact but none with `InputRole.TRIGGERING`
+(`ZeroTriggeringInputsError`), unless its `trigger_policy` is
+`MANUAL`. Such a node could never become eligible to fire through the
+`Run.publish(...)` cascade (Slice 21C: `_is_eligible_to_fire`
+evaluates both TriggerPolicy branches over `flow_node`'s
+TRIGGERING-role consumed types only) -- surfacing this as a
+registration-time error, matching this file's own
+SelfFlowError/DuplicateArtifactProducerError precedent, is preferred
+over letting such a node silently never fire. A node with zero
+consumed artifacts at all (a pure source/producer node) is exempt --
+it was never part of this concern before Sampled existed, and is
+never a `Run.publish(...)` cascade consumer of anything either way.
 """
 
 from __future__ import annotations
@@ -49,6 +66,8 @@ from __future__ import annotations
 from collections import defaultdict
 
 from reed.composition.flow.flow_node import FlowNode
+from reed.composition.flow.trigger_policy import TriggerPolicy
+from reed.composition.node.artifact_descriptor import InputRole
 
 
 class DuplicateArtifactProducerError(RuntimeError):
@@ -92,6 +111,35 @@ class SelfFlowError(RuntimeError):
             f"Artifact type:\n    {domain_type.__name__}\n\n"
             "A Node cannot consume and produce the same domain artifact "
             "type."
+        )
+
+
+class ZeroTriggeringInputsError(RuntimeError):
+    """
+    Raised when a `FlowNode` has at least one consumed artifact but none
+    with `InputRole.TRIGGERING`, under a non-`MANUAL` `TriggerPolicy`
+    (architectural_invariants.md #18-20; Slice 21C, "Run eligibility
+    redefinition"). Such a node could never become eligible to fire
+    through the automatic `Run.publish(...)` cascade -- both
+    `TriggerPolicy.ALL_INPUTS_CHANGED` and `TriggerPolicy.ANY_INPUT_CHANGED`
+    evaluate eligibility over TRIGGERING-role consumed types only -- so a
+    node with none can only ever be fired by a `MANUAL` caller.
+
+    Naming/base-class decision (this slice's SliceContract
+    stop_conditions -- not grounded in any surviving accepted document):
+    subclasses `RuntimeError` directly, matching `SelfFlowError` and
+    `DuplicateArtifactProducerError`'s own precedent in this same file.
+    """
+
+    def __init__(self, *, flow_node: FlowNode) -> None:
+        super().__init__(
+            "ZeroTriggeringInputsError\n\n"
+            f"Node:\n    {flow_node.definition.name}\n\n"
+            f"Trigger policy:\n    {flow_node.trigger_policy.name}\n\n"
+            "A Node with at least one consumed artifact must declare at "
+            "least one TRIGGERING-role input unless its trigger_policy "
+            "is MANUAL -- otherwise it could never become eligible to "
+            "fire automatically."
         )
 
 
@@ -143,6 +191,16 @@ class ArtifactDependencyGraph:
 
         if produced_type in consumed_types:
             raise SelfFlowError(flow_node=flow_node, domain_type=produced_type)
+
+        if (
+            flow_node.consumed_artifacts
+            and flow_node.trigger_policy is not TriggerPolicy.MANUAL
+            and not any(
+                artifact.input_role is InputRole.TRIGGERING
+                for artifact in flow_node.consumed_artifacts
+            )
+        ):
+            raise ZeroTriggeringInputsError(flow_node=flow_node)
 
         existing_producer = self._producer_by_type.get(produced_type)
 

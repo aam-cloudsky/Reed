@@ -62,15 +62,41 @@ immediate caller's locals merged in as `extra_globalns`, if that
 first attempt raises `NameError`. This parser's own behavior --
 merge `extra_globalns` into `globalns` when given, do nothing extra
 when not -- is unchanged from the original Slice 1F addition.
+
+Slice 21B (GitHub issue #21) addition: `get_type_hints` is now called
+with `include_extras=True`, so an `Annotated[T, Sampled]`-annotated
+consumed parameter (`reed.composition.node.sampled.Sampled`) survives
+resolution instead of silently collapsing to plain `T`
+(references/ingested/sampled-input-annotated-detection-gap.md records
+this as a real, implementation-blocking gap in the original proposal).
+Every annotation this parser reads is unwrapped back down to its
+underlying type (`_unwrap_annotated`) before any identity/equality
+comparison (self-flow rejection, `NodeContext` detection, the produced
+return type) -- `Annotated[...]`'s only externally visible effect in
+this module is which parameter names land in the new
+`sampled_parameter_names` result field. `NodeContext[MemoryType,
+OutputType]` detection (`get_origin(annotation) is NodeContext`) is a
+plain generic subscript, never wrapped in `Annotated`, and is therefore
+unaffected by this change -- confirmed by
+tests/test_slice_21b_sampled_annotation_detection.py.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from inspect import Parameter, Signature, iscoroutinefunction, signature
-from typing import Callable, TypeAlias, get_args, get_origin, get_type_hints
+from typing import (
+    Annotated,
+    Callable,
+    TypeAlias,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from reed.composition.node.node_context import NodeContext
+from reed.composition.node.sampled import Sampled
 
 DomainConsumedParameter: TypeAlias = tuple[str, type]
 
@@ -82,6 +108,19 @@ class DomainNodeSignature:
 
     This is intentionally not `NodeDescription` (Priority 2) and does not
     use `ArtifactDescriptor` (Priority 3) -- both belong to Slice 1B.
+
+    `sampled_parameter_names` (Slice 21B) is additive: the subset of
+    `consumed_parameters`' names (by name, not by type -- a name is
+    unambiguous, matching how `consumed_parameters` itself is already
+    keyed) whose annotation was `Annotated[T, Sampled]`. Deliberately a
+    separate field rather than a third element on
+    `DomainConsumedParameter` (`tuple[str, type]`): this module produces
+    no `ArtifactDescriptor`/`InputRole` (see class docstring above --
+    that is Slice 1B's/21A's concern), so it exposes only the raw fact
+    an annotation carried the `Sampled` marker, leaving the
+    `InputRole` naming decision to `DomainNodeDescriptionBuilder`
+    (`domain_node_description.py`), which already owns
+    `ArtifactDescriptor` construction.
     """
 
     function: Callable
@@ -90,6 +129,7 @@ class DomainNodeSignature:
     context_memory_type: type | None
     context_output_type: type | None
     produced_type: type
+    sampled_parameter_names: frozenset[str] = frozenset()
 
 
 class DomainNodeSignatureParser:
@@ -114,7 +154,12 @@ class DomainNodeSignatureParser:
         if extra_globalns:
             globalns.update(extra_globalns)
 
-        self._type_hints = get_type_hints(function, globalns=globalns)
+        # Slice 21B: include_extras=True is required for Annotated[T, Sampled]
+        # to survive resolution at all -- see this module's docstring and
+        # references/ingested/sampled-input-annotated-detection-gap.md.
+        self._type_hints = get_type_hints(
+            function, globalns=globalns, include_extras=True
+        )
 
     def parse(self) -> DomainNodeSignature:
         if iscoroutinefunction(self._function):
@@ -128,10 +173,19 @@ class DomainNodeSignatureParser:
                 "must declare a return type."
             )
 
-        produced_type = self._type_hints["return"]
+        # Slice 21B: unwrap defensively -- Sampled has no meaning on a
+        # return type (it is not a designed use case), but produced_type
+        # must always be a plain type (ArtifactDescriptor.domain_type's
+        # own contract), never an Annotated[...] object, regardless of
+        # what include_extras=True now surfaces here. Any metadata on a
+        # return annotation is silently discarded, matching this
+        # parser's pre-21B behavior for every currently passing test
+        # (none annotates a return type with Annotated).
+        produced_type, _ = self._unwrap_annotated(self._type_hints["return"])
 
         (
             consumed_parameters,
+            sampled_parameter_names,
             context_parameter_name,
             context_memory_type,
             context_output_type,
@@ -147,6 +201,7 @@ class DomainNodeSignatureParser:
             context_memory_type=context_memory_type,
             context_output_type=context_output_type,
             produced_type=produced_type,
+            sampled_parameter_names=frozenset(sampled_parameter_names),
         )
 
     def _iter_declared_parameters(self) -> list[Parameter]:
@@ -159,11 +214,13 @@ class DomainNodeSignatureParser:
         self,
     ) -> tuple[
         list[DomainConsumedParameter],
+        set[str],
         str | None,
         type | None,
         type | None,
     ]:
         consumed_parameters: list[DomainConsumedParameter] = []
+        sampled_parameter_names: set[str] = set()
         context_parameter_name: str | None = None
         context_memory_type: type | None = None
         context_output_type: type | None = None
@@ -178,16 +235,26 @@ class DomainNodeSignatureParser:
                     "cannot declare *args or **kwargs."
                 )
 
-            annotation = self._type_hints.get(parameter.name)
+            raw_annotation = self._type_hints.get(parameter.name)
 
-            if annotation is None:
+            if raw_annotation is None:
                 raise TypeError(
                     f"Parameter '{parameter.name}' from node "
                     f"'{self._function.__name__}' must have "
                     "a type annotation."
                 )
 
+            annotation, is_sampled = self._unwrap_annotated(raw_annotation)
+
             if get_origin(annotation) is NodeContext:
+                if is_sampled:
+                    raise TypeError(
+                        f"Node function '{self._function.__name__}' "
+                        "cannot declare its NodeContext parameter as "
+                        "Sampled -- Sampled applies only to dataflow "
+                        "domain artifact parameters."
+                    )
+
                 if context_parameter_name is not None:
                     raise TypeError(
                         f"Node function '{self._function.__name__}' "
@@ -201,13 +268,44 @@ class DomainNodeSignatureParser:
                 continue
 
             consumed_parameters.append((parameter.name, annotation))
+            if is_sampled:
+                sampled_parameter_names.add(parameter.name)
 
         return (
             consumed_parameters,
+            sampled_parameter_names,
             context_parameter_name,
             context_memory_type,
             context_output_type,
         )
+
+    @staticmethod
+    def _unwrap_annotated(annotation: object) -> tuple[type, bool]:
+        """
+        Unwrap `Annotated[T, ...]` down to `T` (Slice 21B), reporting
+        whether `Sampled` (`reed.composition.node.sampled.Sampled`) was
+        present among its metadata. Returns `(annotation, False)`
+        unchanged for any non-`Annotated` annotation -- in particular,
+        for `NodeContext[MemoryType, OutputType]`, which is a plain
+        generic subscript, never wrapped in `Annotated`, so this is a
+        no-op for it and NodeContext detection is provably unaffected.
+
+        Declared to return `type`, not `object`: every annotation that
+        reaches this method is already one of resolved-type,
+        `NodeContext[...]`, or `Annotated[...]` (never an arbitrary
+        non-type value) -- an implicit contract this parser already
+        relied on before this slice (`get_type_hints`'s own return type
+        is `dict[str, Any]`, so `self._type_hints.get(...)` was always
+        `Any`, never independently type-checked, before this method
+        existed). The `object`-typed parameter is deliberately kept
+        precise for the input side; `cast` reflects the pre-existing
+        contract on the way out, not a new, unverified assumption.
+        """
+        if get_origin(annotation) is Annotated:
+            underlying_type, *metadata = get_args(annotation)
+            return underlying_type, any(marker is Sampled for marker in metadata)
+
+        return cast(type, annotation), False
 
     def _parse_context_arguments(self, annotation: object) -> tuple[type, type]:
         arguments = get_args(annotation)
