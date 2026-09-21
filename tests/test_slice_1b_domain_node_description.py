@@ -137,9 +137,21 @@ def test_builder_reuses_slice_1a_validation_for_context_output_mismatch():
 
 
 def test_artifact_descriptor_does_not_expose_artifact_record_concepts():
-    # ArtifactDescriptor is identity-only: domain_type, role, name. It must
-    # not carry a value/version/provenance field (that is ArtifactRecord,
-    # Priority 6, Milestone 2 -- see non-goals.md, "ArtifactRecord Is Not
-    # A Blind Parcel Rename").
+    # ArtifactDescriptor is identity-only. It must not carry a
+    # value/version/provenance field (that is ArtifactRecord, Priority 6,
+    # Milestone 2 -- see non-goals.md, "ArtifactRecord Is Not A Blind
+    # Parcel Rename").
+    #
+    # Test Integrity Rule (same treatment Slice 1A gave its own stale
+    # NodeContext.__slots__ == () pin -- see
+    # test_slice_1a_domain_signature_parsing.py,
+    # test_node_context_shell_is_generic_and_detectable): this assertion
+    # originally pinned the exact field set to {"domain_type", "role",
+    # "name"}. Slice 21A (GitHub issue #21) intentionally adds a fourth,
+    # defaulted field, input_role -- an identity-adjacent concept (which
+    # role a consumed artifact plays in firing eligibility), not an
+    # ArtifactRecord concept (value/version/provenance). The pin is
+    # updated to match rather than left to fail; the assertion still
+    # proves no value/version/provenance field ever gets added.
     field_names = {field for field in ArtifactDescriptor.__dataclass_fields__}
-    assert field_names == {"domain_type", "role", "name"}
+    assert field_names == {"domain_type", "role", "name", "input_role"}

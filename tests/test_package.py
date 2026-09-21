@@ -13,9 +13,26 @@ def test_public_api_exports_current_architecture_symbols():
 
 
 def test_public_api_exports_exactly_the_current_architecture_symbols():
+    # Test Integrity Rule (same treatment given to
+    # tests/test_slice_1b_domain_node_description.py's ArtifactDescriptor
+    # field-set pin for the same reason): this assertion originally
+    # pinned exactly {"Flow", "TriggerPolicy", "NodeContext", "Run"}.
+    # Slice 21D (GitHub issue #21) intentionally adds two new public
+    # types, InputRole and Sampled -- the same category as
+    # TriggerPolicy/NodeContext, not a retired or internal symbol (see
+    # .claude/reed-refactor/run-3G-20260912T205200Z/no_change_rationale.md
+    # for the precedent this follows). The pin is updated to match
+    # rather than left to fail.
     import reed
 
-    assert set(reed.__all__) == {"Flow", "TriggerPolicy", "NodeContext", "Run"}
+    assert set(reed.__all__) == {
+        "Flow",
+        "TriggerPolicy",
+        "NodeContext",
+        "Run",
+        "InputRole",
+        "Sampled",
+    }
 
 
 @pytest.mark.parametrize(

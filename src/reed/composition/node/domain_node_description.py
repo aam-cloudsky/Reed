@@ -43,7 +43,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from reed.composition.node.artifact_descriptor import ArtifactDescriptor, ArtifactRole
+from reed.composition.node.artifact_descriptor import (
+    ArtifactDescriptor,
+    ArtifactRole,
+    InputRole,
+)
 from reed.composition.node.domain_signature import DomainNodeSignatureParser
 
 
@@ -130,6 +134,15 @@ class DomainNodeDescriptionBuilder:
                 domain_type=parameter_type,
                 role=ArtifactRole.CONSUMED,
                 name=parameter_name,
+                # Slice 21B: a parameter annotated Annotated[T, Sampled]
+                # (detected by DomainNodeSignatureParser, Slice 21B) gets
+                # InputRole.SAMPLED; every other consumed parameter keeps
+                # today's only behavior, InputRole.TRIGGERING.
+                input_role=(
+                    InputRole.SAMPLED
+                    if parameter_name in parsed_signature.sampled_parameter_names
+                    else InputRole.TRIGGERING
+                ),
             )
             for parameter_name, parameter_type in parsed_signature.consumed_parameters
         )

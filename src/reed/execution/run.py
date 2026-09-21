@@ -2,7 +2,25 @@
 Run (Slice 2A, part of Priority 11/12 -- `Flow` / `Run` separation;
 Slice 2A follow-up -- Run-scoped repository ownership; Slice 2B, part of
 Priority 13 -- `NodeRuntime` ownership; Slice 2E, part of Priority 13 --
-the single-firing execution path, `Run.publish(...)`).
+the single-firing execution path, `Run.publish(...)`; Slice 21C, GitHub
+issue #21 -- firing eligibility evaluated over TRIGGERING-role consumed
+types only).
+
+Slice 21C ("Distinguish triggering inputs from sampled inputs in node
+firing rules"): a consumed artifact whose `ArtifactDescriptor.input_role`
+is `InputRole.SAMPLED` (Slice 21A/21B) still counts toward
+`_is_fully_covered` -- the node still cannot be called without a value
+for it -- but its arrival never by itself marks it fresh
+(`_fresh_since_last_firing`) and never by itself satisfies
+`ANY_INPUT_CHANGED`. Concretely: `_record_input` only adds a domain type
+to `_fresh_since_last_firing` when that type is one of `flow_node`'s
+TRIGGERING-role consumed types (`_triggering_types`); `_is_eligible_to_fire`
+now also takes the domain type that just arrived, so
+`TriggerPolicy.ANY_INPUT_CHANGED` can refuse to fire when that arrival is
+SAMPLED, even if it is the arrival that completes coverage. See
+reed-sampled-inputs-proposal.md's acceptance criterion 4 ("a SAMPLED
+arrival alone never fires") and
+tests/test_slice_21c_run_eligibility_sampled.py.
 
 Scope for this slice (docs/refactor_priority_order.md, Milestone 2, Slice
 2A; docs/architectural_decision.md, "Run"):
@@ -182,6 +200,7 @@ import uuid
 from pathlib import Path
 
 from reed.composition.flow.trigger_policy import TriggerPolicy
+from reed.composition.node.artifact_descriptor import InputRole
 from reed.execution.node_runtime import NodeRuntime
 from reed.observability.identity import NodeExecutionIdentity
 from reed.observability.provenance import ProvenanceEvent
@@ -458,13 +477,17 @@ class Run:
         (`._record_input`), checks that every one of its consumed types
         now has a value (`._is_fully_covered`; a node cannot be called
         with a missing parameter), and then consults
-        `flow_node.trigger_policy` (`._is_eligible_to_fire`) before ever
-        firing it. `TriggerPolicy.MANUAL` nodes are discovered (their
-        join-state is still tracked) but never auto-fired.
-        `ANY_INPUT_CHANGED` fires on every arrival once full coverage is
-        first reached; `ALL_INPUTS_CHANGED` fires only once every
+        `flow_node.trigger_policy` together with which domain type just
+        arrived (`._is_eligible_to_fire`) before ever firing it.
+        `TriggerPolicy.MANUAL` nodes are discovered (their join-state is
+        still tracked) but never auto-fired. `ANY_INPUT_CHANGED` fires on
+        a TRIGGERING-role arrival once full coverage is first reached (a
+        SAMPLED arrival never fires it by itself, Slice 21C);
+        `ALL_INPUTS_CHANGED` fires only once every TRIGGERING-role
         consumed type has gone fresh since the node's last firing, then
-        resets that freshness. An eligible node's full call-argument set
+        resets that freshness -- a SAMPLED type's freshness is never
+        tracked at all, so it can never block or force a refire. An
+        eligible node's full call-argument set
         is built from its last-known values (`._build_call_kwargs`)
         before calling `self._fire(...)`, and its committed output is
         enqueued for the next iteration. No per-version "already fired"
@@ -511,10 +534,11 @@ class Run:
                     # generalized to every policy).
                     continue
 
-                if not self._is_eligible_to_fire(flow_node):
+                if not self._is_eligible_to_fire(flow_node, domain_type):
                     # Covered but TriggerPolicy says wait (MANUAL: never;
-                    # ALL_INPUTS_CHANGED: not every input fresh since the
-                    # last firing yet).
+                    # ALL_INPUTS_CHANGED: not every TRIGGERING-role input
+                    # fresh since the last firing yet; ANY_INPUT_CHANGED:
+                    # this particular arrival is SAMPLED-role, Slice 21C).
                     continue
 
                 identity = self._begin_node_execution(flow_node)
@@ -536,19 +560,46 @@ class Run:
             descriptor.domain_type for descriptor in flow_node.consumed_artifacts
         }
 
+    def _triggering_types(self, flow_node: "FlowNode") -> set[type]:
+        """
+        The subset of `flow_node`'s consumed types whose
+        `ArtifactDescriptor.input_role` is `InputRole.TRIGGERING` (Slice
+        21C) -- the only types whose arrival can ever mark `flow_node`
+        fresh (`_record_input`) or, under `ANY_INPUT_CHANGED`, fire it
+        by itself (`_is_eligible_to_fire`). Coverage
+        (`_is_fully_covered`) is unaffected by this distinction and
+        still requires every consumed type, TRIGGERING and SAMPLED
+        alike.
+        """
+        return {
+            descriptor.domain_type
+            for descriptor in flow_node.consumed_artifacts
+            if descriptor.input_role is InputRole.TRIGGERING
+        }
+
     def _record_input(
         self, flow_node: "FlowNode", domain_type: type, value: object
     ) -> None:
         """
         Record `value` as the last-known committed value for
-        `domain_type` on `flow_node`, and mark `domain_type` fresh
-        since `flow_node`'s last firing (Slice 2I).
+        `domain_type` on `flow_node` (Slice 2I), and -- only when
+        `domain_type` is one of `flow_node`'s TRIGGERING-role consumed
+        types (Slice 21C) -- mark it fresh since `flow_node`'s last
+        firing. A SAMPLED-role arrival still updates
+        `_last_known_values` unconditionally (so a later TRIGGERING
+        firing can use its latest value), but never enters
+        `_fresh_since_last_firing`: it must never by itself cause
+        `ALL_INPUTS_CHANGED` to consider every input fresh, nor (via
+        `_is_eligible_to_fire`'s `arrived_domain_type` check)
+        `ANY_INPUT_CHANGED` to fire.
 
         Populated as commits are observed by the cascade's existing
         find-consumers loop -- no new traversal, no new index.
         """
         self._last_known_values.setdefault(flow_node, {})[domain_type] = value
-        self._fresh_since_last_firing.setdefault(flow_node, set()).add(domain_type)
+
+        if domain_type in self._triggering_types(flow_node):
+            self._fresh_since_last_firing.setdefault(flow_node, set()).add(domain_type)
 
     def _is_fully_covered(self, flow_node: "FlowNode") -> bool:
         """
@@ -559,17 +610,38 @@ class Run:
         known = self._last_known_values.get(flow_node, {})
         return self._consumed_types(flow_node) <= known.keys()
 
-    def _is_eligible_to_fire(self, flow_node: "FlowNode") -> bool:
+    def _is_eligible_to_fire(
+        self, flow_node: "FlowNode", arrived_domain_type: type
+    ) -> bool:
         """
         TriggerPolicy eligibility check, given `flow_node` is already
-        fully covered (Slice 2I; architectural_invariants.md #18-20).
+        fully covered (Slice 2I; extended by Slice 21C to distinguish
+        TRIGGERING from SAMPLED consumed types --
+        architectural_invariants.md #18-20).
 
         - MANUAL: never eligible via the cascade.
-        - ALL_INPUTS_CHANGED: eligible once every consumed type is
-          fresh since the last firing (or since ever, before the first
-          firing).
-        - ANY_INPUT_CHANGED: eligible on every arrival once full
-          coverage is reached (already guaranteed by the caller).
+        - ALL_INPUTS_CHANGED: eligible once every TRIGGERING-role
+          consumed type is fresh since the last firing (or since ever,
+          before the first firing). A SAMPLED type's freshness is never
+          tracked (`_record_input`), so it can neither block nor force
+          this condition.
+        - ANY_INPUT_CHANGED: eligible once full coverage is reached
+          (already guaranteed by the caller) *and* the arrival that
+          triggered this evaluation is itself TRIGGERING-role. A
+          SAMPLED arrival that happens to complete or refresh coverage
+          must not, by itself, fire the node (reed-sampled-inputs-
+          proposal.md acceptance criterion 4) -- the node still fires
+          on the next TRIGGERING arrival, using that SAMPLED value's
+          latest last-known value (`_build_call_kwargs`).
+
+        This originally read `self._consumed_types(flow_node) <= fresh`
+        for ALL_INPUTS_CHANGED, which would be permanently unsatisfiable
+        for a node with any SAMPLED consumed type once Slice 21C's
+        `_record_input` stopped marking SAMPLED arrivals fresh -- fixed
+        here rather than assumed correct, per this slice's own
+        SliceContract stop_condition ("confirm this by test, don't
+        assume it"); see
+        tests/test_slice_21c_run_eligibility_sampled.py.
         """
         policy = flow_node.trigger_policy
 
@@ -578,10 +650,10 @@ class Run:
 
         if policy is TriggerPolicy.ALL_INPUTS_CHANGED:
             fresh = self._fresh_since_last_firing.get(flow_node, set())
-            return self._consumed_types(flow_node) <= fresh
+            return self._triggering_types(flow_node) <= fresh
 
         # TriggerPolicy.ANY_INPUT_CHANGED
-        return True
+        return arrived_domain_type in self._triggering_types(flow_node)
 
     def _build_call_kwargs(
         self, flow_node: "FlowNode", identity: NodeExecutionIdentity
