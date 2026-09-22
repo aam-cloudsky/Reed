@@ -36,7 +36,7 @@ jobs:
           # Reed's only supported public execution model (the previous
           # decorator/Parcel/bind(...) programming model was retired --
           # see docs/refactor_state.md's legacy-removal entries).
-          required_exports = ("Flow", "TriggerPolicy", "NodeContext", "Run")
+          required_exports = ("Flow", "TriggerPolicy", "NodeContext", "Session")
           missing_exports = [name for name in required_exports if not hasattr(reed, name)]
 
           if missing_exports:

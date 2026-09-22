@@ -73,7 +73,7 @@ def test_zero_triggering_inputs_is_allowed_under_manual_trigger_policy():
 def test_zero_consumed_artifacts_source_node_is_exempt():
     # A pure source/producer node (zero consumed artifacts at all) is a
     # pre-existing, always-valid case unrelated to this validation -- it
-    # is never a Run.publish(...) cascade consumer of anything either
+    # is never a Session.push() cascade consumer of anything either
     # way, regardless of TriggerPolicy.
     def produce() -> Measurement:
         return Measurement(1)

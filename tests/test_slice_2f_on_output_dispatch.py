@@ -1,7 +1,7 @@
 """
 Focused tests for Slice 2F (on_output dispatch after commit: sync/async
 callback support and callback-failure isolation via
-`run.callback_failures`).
+`session.callback_failures`).
 
 These tests are additional to, and narrower than, this slice's three
 required target contracts
@@ -9,19 +9,19 @@ required target contracts
 `test_on_output_runs_after_commit_and_receives_domain_value`,
 `test_async_on_output_is_supported_after_commit`,
 `test_callback_failure_does_not_undo_committed_output`). They isolate
-each piece of the dispatch step this slice adds to `Run.publish(...)`:
+each piece of the dispatch step this slice adds to `Session.push()`:
 
     - a node with no declared `on_output` still publishes/commits
       normally (no dispatch attempted, no error);
     - a synchronous `on_output` runs inline, immediately after commit,
       and receives the domain value (not the `ArtifactRecord`);
     - an async `on_output`'s coroutine is queued rather than awaited
-      inside `publish(...)`, and is only driven to completion by an
-      explicit `run.wait_for_callbacks()` call;
+      inside `push()`, and is only driven to completion by an
+      explicit `session.wait_for_callbacks()` call;
     - a synchronous callback failure is isolated into
-      `run.callback_failures` without affecting the committed record;
+      `session.callback_failures` without affecting the committed record;
     - an async callback failure raised during `wait_for_callbacks()` is
-      isolated into `run.callback_failures` the same way;
+      isolated into `session.callback_failures` the same way;
     - `ArtifactRepository.get(domain_type)` is a thin, additive alias for
       `ArtifactRepository.get_artifact_record(domain_type)`.
 
@@ -53,14 +53,15 @@ def test_publish_with_no_on_output_declared_still_commits_normally():
 
     flow = Flow()
     flow.add(estimate)
-    run = flow.run()
+    session = flow.session()
 
-    result = run.publish(Measurement(9))
+    snapshot = session.invoke(Measurement(9))
+    result = snapshot[Estimate]
 
     assert isinstance(result, Estimate)
     assert result.value == 9
-    assert run.repository.get(Estimate).value.value == 9
-    assert run.callback_failures == []
+    assert session.repository.get(Estimate).value.value == 9
+    assert session.callback_failures == []
 
 
 def test_sync_on_output_runs_inline_and_receives_domain_value():
@@ -76,15 +77,16 @@ def test_sync_on_output_runs_inline_and_receives_domain_value():
 
     flow = Flow()
     flow.add(estimate, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(4))
+    session.feed(Measurement(4))
+    session.push()
 
     # No wait_for_callbacks() needed -- the sync callback already ran
-    # inline, before publish(...) returned.
+    # inline, before push() returned.
     assert len(observed) == 1
-    assert observed[0] is run.repository.get(Estimate).value
-    assert run.callback_failures == []
+    assert observed[0] is session.repository.get(Estimate).value
+    assert session.callback_failures == []
 
 
 def test_async_on_output_coroutine_is_not_awaited_before_wait_for_callbacks():
@@ -100,18 +102,19 @@ def test_async_on_output_coroutine_is_not_awaited_before_wait_for_callbacks():
 
     flow = Flow()
     flow.add(estimate, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(6))
+    session.feed(Measurement(6))
+    session.push()
 
-    # publish(...) itself stays synchronous; the coroutine has not run
+    # push() itself stays synchronous; the coroutine has not run
     # yet.
     assert observed == []
 
-    run.wait_for_callbacks()
+    session.wait_for_callbacks()
 
     assert observed == [6]
-    assert run.callback_failures == []
+    assert session.callback_failures == []
 
 
 def test_sync_callback_failure_is_isolated_and_does_not_undo_commit():
@@ -125,14 +128,15 @@ def test_sync_callback_failure_is_isolated_and_does_not_undo_commit():
 
     flow = Flow()
     flow.add(estimate, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    result = run.publish(Measurement(11))
+    snapshot = session.invoke(Measurement(11))
+    result = snapshot[Estimate]
 
     assert result.value == 11
-    assert run.repository.get(Estimate).value.value == 11
-    assert len(run.callback_failures) == 1
-    assert isinstance(run.callback_failures[0], RuntimeError)
+    assert session.repository.get(Estimate).value.value == 11
+    assert len(session.callback_failures) == 1
+    assert isinstance(session.callback_failures[0], RuntimeError)
 
 
 def test_async_callback_failure_is_isolated_via_wait_for_callbacks():
@@ -146,16 +150,17 @@ def test_async_callback_failure_is_isolated_via_wait_for_callbacks():
 
     flow = Flow()
     flow.add(estimate, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(13))
-    assert run.callback_failures == []  # not yet observed -- not awaited
+    session.feed(Measurement(13))
+    session.push()
+    assert session.callback_failures == []  # not yet observed -- not awaited
 
-    run.wait_for_callbacks()
+    session.wait_for_callbacks()
 
-    assert run.repository.get(Estimate).value.value == 13
-    assert len(run.callback_failures) == 1
-    assert isinstance(run.callback_failures[0], RuntimeError)
+    assert session.repository.get(Estimate).value.value == 13
+    assert len(session.callback_failures) == 1
+    assert isinstance(session.callback_failures[0], RuntimeError)
 
 
 def test_wait_for_callbacks_is_a_no_op_when_nothing_is_pending():
@@ -166,14 +171,15 @@ def test_wait_for_callbacks_is_a_no_op_when_nothing_is_pending():
 
     flow = Flow()
     flow.add(estimate)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
     # Should not raise even though no async on_output was ever declared.
-    run.wait_for_callbacks()
+    session.wait_for_callbacks()
 
-    assert run.callback_failures == []
+    assert session.callback_failures == []
 
 
 def test_artifact_repository_get_is_an_additive_alias_for_get_artifact_record():

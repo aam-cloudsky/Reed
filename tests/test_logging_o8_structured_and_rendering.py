@@ -51,9 +51,10 @@ def _console_output(flow, observability, publish_value) -> str:
     policy = resolve_presentation_policy(observability)
     presenter = build_presenter(policy, console=console)
 
-    run = flow.run()
-    run._presenter = presenter
-    run.publish(publish_value)
+    session = flow.session()
+    session._presenter = presenter
+    session.feed(publish_value)
+    session.push()
     return console.export_text()
 
 
@@ -136,11 +137,14 @@ def test_repeated_publication_shows_artifact_versions():
 
     console = Console(record=True, width=200)
     presenter = build_presenter(resolve_presentation_policy("propagation"), console=console)
-    run = flow.run()
-    run._presenter = presenter
-    run.publish(Measurement(1))
-    run.publish(Measurement(2))
-    run.publish(Measurement(3))
+    session = flow.session()
+    session._presenter = presenter
+    session.feed(Measurement(1))
+    session.push()
+    session.feed(Measurement(2))
+    session.push()
+    session.feed(Measurement(3))
+    session.push()
 
     output = console.export_text()
     assert "Estimate@v1" in output
@@ -214,10 +218,11 @@ def test_broken_composite_sub_presenter_does_not_affect_others_or_computation():
     composite = CompositePresenter([BrokenPresenter(), terminal])
 
     flow = _single_hop_flow()
-    run = flow.run(observability="silent")
-    run._presenter = composite
+    session = flow.session(observability="silent")
+    session._presenter = composite
 
-    result = run.publish(Measurement(4))
+    snapshot = session.invoke(Measurement(4))
+    result = snapshot[Estimate]
 
     assert isinstance(result, Estimate)
     assert result.value == 8
@@ -237,13 +242,14 @@ def test_error_remains_visible_and_broken_renderer_cannot_break_execution():
 
     flow = Flow()
     flow.add(failing)
-    run = flow.run(observability="silent")
-    run._presenter = BrokenPresenter()
+    session = flow.session(observability="silent")
+    session._presenter = BrokenPresenter()
 
     import pytest
 
     with pytest.raises(ValueError, match="node failure"):
-        run.publish(Measurement(1))
+        session.feed(Measurement(1))
+        session.push()
 
 
 # ---------------------------------------------------------------------------
@@ -258,16 +264,25 @@ def test_structured_log_presenter_emits_stable_field_events():
     sink_presenter = StructuredLogPresenter(sink=events.append)
 
     flow = _single_hop_flow()
-    run = flow.run(observability="silent")
-    run._presenter = sink_presenter
-    run.publish(Measurement(3))
+    session = flow.session(observability="silent")
+    session._presenter = sink_presenter
+    session.feed(Measurement(3))
+    session.push()
 
     event_names = {e["event"] for e in events}
     assert "node_started" in event_names
     assert "node_finished" in event_names
     assert "artifact_generated" in event_names
 
-    generated = next(e for e in events if e["event"] == "artifact_generated")
+    # feed()'s own commit of the externally fed Measurement now also
+    # emits an "artifact_generated" event for Measurement itself (Slice
+    # 22E), alongside produce's own for its committed Estimate output --
+    # select the one for Estimate specifically.
+    generated = next(
+        e
+        for e in events
+        if e["event"] == "artifact_generated" and e["artifact_type"] == "Estimate"
+    )
     assert generated["artifact_type"] == "Estimate"
     assert generated["artifact_version"] == 1
     assert "execution_id" in generated
@@ -288,11 +303,12 @@ def test_structured_log_presenter_reports_errors_with_error_severity():
 
     flow = Flow()
     flow.add(failing)
-    run = flow.run(observability="silent")
-    run._presenter = StructuredLogPresenter(sink=events.append)
+    session = flow.session(observability="silent")
+    session._presenter = StructuredLogPresenter(sink=events.append)
 
     try:
-        run.publish(Measurement(1))
+        session.feed(Measurement(1))
+        session.push()
     except RuntimeError:
         pass
 
@@ -308,8 +324,9 @@ def test_detail_level_never_changes_computation():
     results = {}
     for mode in ("silent", "errors", "progress", "instruments", "nodes", "propagation", "verbose"):
         flow = _single_hop_flow()
-        run = flow.run(observability=mode)
-        results[mode] = run.publish(Measurement(7)).value
+        session = flow.session(observability=mode)
+        snapshot = session.invoke(Measurement(7))
+        results[mode] = snapshot[Estimate].value
 
     assert len(set(results.values())) == 1
     assert next(iter(results.values())) == 14
@@ -324,8 +341,9 @@ def test_composite_presenter_lets_structured_logging_run_even_when_terminal_is_s
     composite = CompositePresenter([NullPresenter(), StructuredLogPresenter(sink=events.append)])
 
     flow = _single_hop_flow()
-    run = flow.run(observability="silent")
-    run._presenter = composite
-    run.publish(Measurement(2))
+    session = flow.session(observability="silent")
+    session._presenter = composite
+    session.feed(Measurement(2))
+    session.push()
 
     assert any(e["event"] == "artifact_generated" for e in events)

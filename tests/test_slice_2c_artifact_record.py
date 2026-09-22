@@ -3,10 +3,10 @@ Focused tests for Slice 2C (Domain Value <-> ArtifactRecord execution
 boundary).
 
 No target-architecture-contract test is expected to move for this slice.
-All remaining xfail tests either need `ctx.memory`/`.publish(...)`
+All remaining xfail tests either need `ctx.memory`/`feed()`+`push()`
 (Milestone 2D/2E) or `on_output` dispatch/serialization (2F/2G); none of
 them constructs or reads an `ArtifactRecord` directly, and
-`run.repository.get(...)` (used by the 2F-tagged tests) still does not
+`session.repository.get(...)` (used by the 2F-tagged tests) still does not
 exist -- see `reed/execution/artifact_record.py`'s module docstring for
 why that is explicitly out of scope here. This file is Slice 2C's
 dedicated focused verification, following the same rationale used for
@@ -25,10 +25,10 @@ establishes:
        next, producer/dependencies only overwritten when given).
     4. Dependencies are keyed by domain type, not by legacy `Parcel`
        subclass type.
-    5. `NodeRuntime.unwrap(record)` returns exactly the wrapped domain
-       value (the "NodeRuntime boundary -> unwrap -> DomainValue" step).
+    5. `NodeSession.unwrap(record)` returns exactly the wrapped domain
+       value (the "NodeSession boundary -> unwrap -> DomainValue" step).
     6. Nothing was made to (a) wrap/commit a domain value into the
-       repository, or (b) make `ArtifactRepository` (`run.repository`) able to hold
+       repository, or (b) make `ArtifactRepository` (`session.repository`) able to hold
        an `ArtifactRecord` -- both remain explicitly out of scope, and
        `ArtifactRepository`'s existing regression behavior (rejecting non-`Parcel`
        values) is unchanged.
@@ -39,6 +39,7 @@ from __future__ import annotations
 import pytest
 
 from reed.execution.artifact_record import (
+    ArtifactOrigin,
     ArtifactProvenance,
     ArtifactRecord,
     ArtifactVersion,
@@ -83,7 +84,7 @@ def test_artifact_version_orders_and_advances_like_parcel_version():
 def test_artifact_provenance_advance_moves_pending_to_initial_version():
     provenance = ArtifactProvenance()
 
-    provenance.advance()
+    provenance.advance(origin=ArtifactOrigin.NODE)
 
     assert provenance.version == ArtifactVersion.initial()
 
@@ -96,16 +97,17 @@ def test_artifact_provenance_advance_sets_producer_and_dependencies():
 
     flow = Flow()
     flow.add(produce_measurement)
-    run = flow.run()
-    producer_runtime = run.node_runtime(produce_measurement)
+    session = flow.session()
+    producer_session = session.node_session(produce_measurement)
 
     provenance = ArtifactProvenance()
     provenance.advance(
-        producer=producer_runtime,
+        origin=ArtifactOrigin.NODE,
+        producer=producer_session,
         dependencies={Measurement: ArtifactVersion.initial()},
     )
 
-    assert provenance.producer is producer_runtime
+    assert provenance.producer is producer_session
     assert provenance.dependencies == {Measurement: ArtifactVersion.initial()}
 
 
@@ -117,15 +119,15 @@ def test_artifact_provenance_advance_does_not_overwrite_when_not_given():
 
     flow = Flow()
     flow.add(produce_measurement)
-    run = flow.run()
-    producer_runtime = run.node_runtime(produce_measurement)
+    session = flow.session()
+    producer_session = session.node_session(produce_measurement)
 
     provenance = ArtifactProvenance()
-    provenance.advance(producer=producer_runtime, dependencies={})
+    provenance.advance(producer=producer_session, dependencies={}, origin=ArtifactOrigin.NODE)
 
-    provenance.advance()
+    provenance.advance(origin=ArtifactOrigin.NODE)
 
-    assert provenance.producer is producer_runtime
+    assert provenance.producer is producer_session
     assert provenance.version == ArtifactVersion.initial().next()
 
 
@@ -135,10 +137,10 @@ def test_artifact_provenance_copy_advances_independently_from_the_original():
     # .copy() before advancing further, without the two provenances
     # afterward sharing identity or state.
     previous = ArtifactProvenance()
-    previous.advance()
+    previous.advance(origin=ArtifactOrigin.NODE)
 
     current = previous.copy()
-    current.advance()
+    current.advance(origin=ArtifactOrigin.NODE)
 
     assert current.version == previous.version.next()
     assert previous.version == ArtifactVersion.initial()
@@ -146,7 +148,7 @@ def test_artifact_provenance_copy_advances_independently_from_the_original():
 
 def test_artifact_record_dependencies_are_keyed_by_domain_type():
     source = ArtifactRecord(value=Measurement(1))
-    source.provenance.advance()
+    source.provenance.advance(origin=ArtifactOrigin.NODE)
 
     derived = ArtifactRecord(
         value=Estimate(1),
@@ -154,14 +156,14 @@ def test_artifact_record_dependencies_are_keyed_by_domain_type():
             dependencies={Measurement: source.version}
         ),
     )
-    derived.provenance.advance()
+    derived.provenance.advance(origin=ArtifactOrigin.NODE)
 
     assert derived.dependencies == {Measurement: source.version}
     assert all(isinstance(key, type) for key in derived.dependencies)
     assert Measurement in derived.dependencies
 
 
-def test_node_runtime_unwrap_returns_the_wrapped_domain_value():
+def test_node_session_unwrap_returns_the_wrapped_domain_value():
     from reed import Flow
 
     def produce_estimate() -> Estimate:
@@ -169,13 +171,13 @@ def test_node_runtime_unwrap_returns_the_wrapped_domain_value():
 
     flow = Flow()
     flow.add(produce_estimate)
-    run = flow.run()
-    node_runtime = run.node_runtime(produce_estimate)
+    session = flow.session()
+    node_session = session.node_session(produce_estimate)
 
     domain_value = Estimate(9)
     record = ArtifactRecord(value=domain_value)
 
-    assert node_runtime.unwrap(record) is domain_value
+    assert node_session.unwrap(record) is domain_value
 
 
 def test_artifact_record_has_no_wrap_or_commit_capability_yet():
@@ -185,10 +187,10 @@ def test_artifact_record_has_no_wrap_or_commit_capability_yet():
     assert not hasattr(record, "commit")
 
 
-def test_node_runtime_wrap_capability_was_introduced():
-    # Slice 2E legitimately adds NodeRuntime.wrap as part of the commit
+def test_node_session_wrap_capability_was_introduced():
+    # Slice 2E legitimately adds NodeSession.wrap as part of the commit
     # path, making this test's original negative assertion
-    # (not hasattr(node_runtime, "wrap")) stale by construction --
+    # (not hasattr(node_session, "wrap")) stale by construction --
     # corrected here in place, the same Test Integrity Rule precedent
     # already applied in Slices 2B and 2D (see docs/refactor_state.md).
     from reed import Flow
@@ -198,8 +200,8 @@ def test_node_runtime_wrap_capability_was_introduced():
 
     flow = Flow()
     flow.add(produce_estimate)
-    run = flow.run()
-    node_runtime = run.node_runtime(produce_estimate)
+    session = flow.session()
+    node_session = session.node_session(produce_estimate)
 
-    assert hasattr(node_runtime, "wrap")
+    assert hasattr(node_session, "wrap")
 

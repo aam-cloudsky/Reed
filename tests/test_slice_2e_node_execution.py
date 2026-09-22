@@ -4,18 +4,18 @@ arguments, execute, wrap/commit ArtifactRecord, wire ctx.last_output).
 
 These tests are additional to, and narrower than, this slice's two
 required target contracts (`tests/test_target_architecture_contract.py`:
-`test_run_instances_isolate_node_memory`,
+`test_session_instances_isolate_node_memory`,
 `test_last_output_exposes_latest_committed_domain_value`). They isolate
 each piece of the firing pipeline this slice adds:
 
-    - `Run.publish(...)` for a stateless node (no NodeContext at all).
-    - `NodeRuntime.wrap(...)` / `.commit(...)` committing into
-      `run.repository`'s additive, domain-type-keyed ArtifactRecord
+    - `Session.feed(...)`/`Session.push()` for a stateless node (no NodeContext at all).
+    - `NodeSession.wrap(...)` / `.commit(...)` committing into
+      `session.repository`'s additive, domain-type-keyed ArtifactRecord
       storage (docs/parcel_boundary_decision.md, "Addendum: Slice 2E
       ArtifactRecord Commit Storage"), independent of `ArtifactRepository`'s existing
       Parcel storage path.
-    - `Run.publish(...)`'s explicit refusal to guess multi-node
-      dispatch/routing when the published type matches zero or more than
+    - `Session.push()`'s explicit refusal to guess multi-node
+      dispatch/routing when the fed type matches zero or more than
       one registered FlowNode.
 
 Multi-node graph propagation, TriggerPolicy-gated execution eligibility,
@@ -60,15 +60,16 @@ def test_publish_fires_the_matching_node_and_returns_its_output():
 
     flow = Flow()
     flow.add(estimate)
-    run = flow.run()
+    session = flow.session()
 
-    result = run.publish(Measurement(5))
+    snapshot = session.invoke(Measurement(5))
+    result = snapshot[Estimate]
 
     assert isinstance(result, Estimate)
     assert result.value == 10
 
 
-def test_publish_commits_an_artifact_record_into_run_repository():
+def test_publish_commits_an_artifact_record_into_session_repository():
     from reed import Flow
     from reed.execution.artifact_record import ArtifactRecord, ArtifactVersion
 
@@ -77,17 +78,18 @@ def test_publish_commits_an_artifact_record_into_run_repository():
 
     flow = Flow()
     flow.add(estimate)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(7))
+    session.feed(Measurement(7))
+    session.push()
 
-    committed = run.repository.get_artifact_record(Estimate)
+    committed = session.repository.get_artifact_record(Estimate)
     assert isinstance(committed, ArtifactRecord)
     assert committed.value.value == 7
     assert committed.version == ArtifactVersion.initial()
 
 
-def test_node_runtime_last_output_updates_after_publish():
+def test_node_session_last_output_updates_after_publish():
     from reed import Flow, NodeContext
 
     def track(
@@ -98,13 +100,14 @@ def test_node_runtime_last_output_updates_after_publish():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
+    session = flow.session()
 
-    assert run.node_runtime(track).last_output is None
+    assert session.node_session(track).last_output is None
 
-    run.publish(Measurement(4))
+    session.feed(Measurement(4))
+    session.push()
 
-    assert run.node_runtime(track).last_output.value == 4
+    assert session.node_session(track).last_output.value == 4
 
 
 def test_publish_passes_node_context_when_node_declares_one():
@@ -122,14 +125,15 @@ def test_publish_passes_node_context_when_node_declares_one():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(6))
+    session.feed(Measurement(6))
+    session.push()
 
     assert len(seen_memory) == 1
     assert seen_memory[0].previous_confidence == 0.6
-    # Same memory object identity as the NodeRuntime's own memoized memory.
-    assert run.node_runtime(track).memory is seen_memory[0]
+    # Same memory object identity as the NodeSession's own memoized memory.
+    assert session.node_session(track).memory is seen_memory[0]
 
 
 def test_publish_completes_without_firing_when_no_flow_node_consumes_the_published_type():
@@ -140,12 +144,12 @@ def test_publish_completes_without_firing_when_no_flow_node_consumes_the_publish
 
     flow = Flow()
     flow.add(estimate)
-    run = flow.run()
+    session = flow.session()
 
     published = OtherMeasurement(1)
-    result = run.publish(published)
+    snapshot = session.invoke(published)
 
-    assert result is published
+    assert snapshot[OtherMeasurement] is published
 
 
 def test_publish_fires_all_consumers_when_more_than_one_flow_node_consumes_the_published_type():
@@ -165,9 +169,10 @@ def test_publish_fires_all_consumers_when_more_than_one_flow_node_consumes_the_p
     flow = Flow()
     flow.add(estimate_a)
     flow.add(estimate_b)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
     assert [m.value for m in fired_a] == [1]
     assert [m.value for m in fired_b] == [1]

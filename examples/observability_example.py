@@ -3,11 +3,11 @@ Reed Observability example (Issue #7).
 
 Demonstrates the full observability stack implemented across Milestones O1-O7:
 
-    - Identity: stable flow_id/node_id, one execution_id per Run (Milestone O1).
+    - Identity: stable flow_id/node_id, one execution_id per Session (Milestone O1).
     - Instrument + Recording: typed Instrument Definitions, discovered
       dynamically at execution time -- ctx.record(SomeInstrument, value)
       (Milestone O2; redesigned at Milestone O7, Slice O7i).
-    - Local durable storage: opt-in via Flow.run(storage_root=...) -- writes
+    - Local durable storage: opt-in via Flow.session(storage_root=...) -- writes
       recordings.csv / provenance.csv / manifest.json / instruments.json
       (Milestone O3).
     - Provenance: "generated"/"used" events for artifacts flowing between
@@ -17,7 +17,7 @@ Demonstrates the full observability stack implemented across Milestones O1-O7:
     - Tooling: Instrument introspection (describe), cross-Execution
       aggregation (query), and a provenance-graph renderer (graph)
       (Milestone O6).
-    - Terminal presentation control: flow.run(observability=<preset>) --
+    - Terminal presentation control: flow.session(observability=<preset>) --
       silent, errors, progress, instruments, nodes, verbose (Milestone O7,
       Slices O7d/O7e). Presentation is purely a terminal *view* over
       Reed's observability model -- it never changes what gets collected
@@ -82,7 +82,7 @@ class LoggedAnomaly:
 #
 # There is no separate declaration step: an Instrument is discovered the
 # first time a Node calls ctx.record(SomeInstrument, value) during a real
-# Run. The class itself -- never an instance -- is passed to ctx.record(...).
+# Session. The class itself -- never an instance -- is passed to ctx.record(...).
 # ============================================================================
 
 
@@ -152,7 +152,7 @@ def main() -> None:
     # discovered dynamically rather than prospectively declared, it can
     # only report which Nodes exist -- not which Instruments (if any)
     # they will record. describe_instruments_manifest(...) below is what
-    # actually shows discovered Instrument bindings, once a Run exists.
+    # actually shows discovered Instrument bindings, once a Session exists.
     # ------------------------------------------------------------------
     print("=== reed describe (no execution required -- Nodes only, O7i) ===")
     console.print(describe_flow(flow))
@@ -160,22 +160,23 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Milestone O3: durable storage is opt-in via storage_root. Using a
     # temporary directory here so this example leaves nothing behind;
-    # omit storage_root entirely for an in-memory-only Run (Milestone O2
+    # omit storage_root entirely for an in-memory-only Session (Milestone O2
     # behavior, completely unaffected).
     # ------------------------------------------------------------------
     with tempfile.TemporaryDirectory() as tmp:
         storage_root = Path(tmp) / ".reed"
-        run = flow.run(storage_root=str(storage_root))
+        session = flow.session(storage_root=str(storage_root))
 
         readings = [SensorReading(celsius=c) for c in (18.0, 22.5, 91.3, 19.8, 95.0)]
         for reading in readings:
-            run.publish(reading)
+            session.feed(reading)
+            session.push()
 
-        print(f"\nexecution_id = {run.execution_id}")
+        print(f"\nexecution_id = {session.execution_id}")
         print(f"flow_id      = {flow.flow_id}")
 
         # ------------------------------------------------------------------
-        # Milestone O6, Slice O6b: now that this Run has discovered and
+        # Milestone O6, Slice O6b: now that this Session has discovered and
         # persisted real Instrument bindings, describe_instruments_manifest
         # can report them -- name/kind/unit, per Node.
         # ------------------------------------------------------------------
@@ -190,9 +191,9 @@ def main() -> None:
         # what ran, in what order -- as a Rich table.
         # ------------------------------------------------------------------
         print("\n=== reed trace (Level 1, live ring buffer) ===")
-        print_trace(run.trace)
+        print_trace(session.trace)
 
-        run_dir = storage_root / "runs" / run.execution_id
+        run_dir = storage_root / "runs" / session.execution_id
 
         # ------------------------------------------------------------------
         # Milestone O5, Slice O5c: post-hoc replay reading recordings.csv/
@@ -213,11 +214,12 @@ def main() -> None:
 
         # ------------------------------------------------------------------
         # Milestone O6, Slice O6c: query recordings.csv across every past
-        # Execution of this Flow -- a second Run below aggregates with the
+        # Execution of this Flow -- a second Session below aggregates with the
         # first via the same flow_id.
         # ------------------------------------------------------------------
-        second_run = flow.run(storage_root=str(storage_root))
-        second_run.publish(SensorReading(celsius=42.0))
+        second_session = flow.session(storage_root=str(storage_root))
+        second_session.feed(SensorReading(celsius=42.0))
+        second_session.push()
 
         rows = query_recordings(storage_root, flow.flow_id)
         print(
@@ -230,7 +232,7 @@ def main() -> None:
     # Milestone O7, Slices O7d/O7e: terminal presentation control.
     #
     # The SAME Flow is run six times below, once per preset, over the
-    # SAME published values. Only what is *shown in the terminal*
+    # SAME fed values. Only what is *shown in the terminal*
     # changes -- the computed domain results are identical every time
     # (verified by the assertion at the end of this section), and a
     # silent terminal does not stop Reed from persisting Recordings and
@@ -250,9 +252,9 @@ def main() -> None:
         preset_flow.add(detect_anomaly)
         preset_flow.add(log_anomaly)
 
-        preset_run = preset_flow.run(observability=preset)
-        result = preset_run.publish(SensorReading(celsius=91.3))
-        domain_results[preset] = result.celsius
+        preset_session = preset_flow.session(observability=preset)
+        snapshot = preset_session.invoke(SensorReading(celsius=91.3))
+        domain_results[preset] = snapshot[TrackedReading].celsius
 
     assert len(set(domain_results.values())) == 1, (
         "presentation choice must never change the computed domain result"
@@ -267,18 +269,19 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Collection vs. presentation are fully independent (Milestone O7,
     # Slice O7d): observability="silent" here still persists byte-for-byte
-    # the same Recordings/Provenance a "verbose" Run would.
+    # the same Recordings/Provenance a "verbose" Session would.
     # ------------------------------------------------------------------
     with tempfile.TemporaryDirectory() as tmp:
         silent_root = Path(tmp) / ".reed"
         silent_flow = Flow()
         silent_flow.add(track_temperature)
-        silent_run = silent_flow.run(storage_root=str(silent_root), observability="silent")
-        silent_run.publish(SensorReading(celsius=50.0))
+        silent_session = silent_flow.session(storage_root=str(silent_root), observability="silent")
+        silent_session.feed(SensorReading(celsius=50.0))
+        silent_session.push()
 
         from reed.observability.replay import load_recordings
 
-        run_dir = silent_root / "runs" / silent_run.execution_id
+        run_dir = silent_root / "runs" / silent_session.execution_id
         recordings = load_recordings(run_dir)
         print(
             f"\nobservability='silent' + storage_root=... -- terminal was "
@@ -313,22 +316,24 @@ def main() -> None:
         o8_flow = Flow()
         o8_flow.add(track_temperature)
         o8_flow.add(detect_anomaly)
-        o8_run = o8_flow.run(observability=preset)
-        o8_run.publish(SensorReading(celsius=91.3))
+        o8_session = o8_flow.session(observability=preset)
+        o8_session.feed(SensorReading(celsius=91.3))
+        o8_session.push()
 
     print("\n--- structured representation of the same events " + "-" * 10)
     captured_events: list[dict] = []
     o8_flow = Flow()
     o8_flow.add(track_temperature)
     o8_flow.add(detect_anomaly)
-    o8_run = o8_flow.run(observability="silent")
-    o8_run._presenter = CompositePresenter(
+    o8_session = o8_flow.session(observability="silent")
+    o8_session._presenter = CompositePresenter(
         [
             TerminalPresenter(resolve_presentation_policy("silent")),
             StructuredLogPresenter(sink=captured_events.append),
         ]
     )
-    o8_run.publish(SensorReading(celsius=91.3))
+    o8_session.feed(SensorReading(celsius=91.3))
+    o8_session.push()
     import json as _json
 
     for event in captured_events:

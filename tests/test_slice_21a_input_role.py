@@ -5,7 +5,7 @@ inputs from sampled inputs in node firing rules"):
 
 See `.claude/reed-refactor/run-21A-20260919T144759Z/slice_contract.yaml`
 for the full objective. This slice is purely additive: no detection
-wiring (Slice 21B) and no `Run` eligibility change (Slice 21C) happen
+wiring (Slice 21B) and no `Session` eligibility change (Slice 21C) happen
 here. These tests must actually pass (not xfail): the behavior under
 test is implemented in this slice.
 """

@@ -3,18 +3,18 @@ Automated end-to-end acceptance test for Slice 2K.
 
 This test asserts, as committed BEHAVIOR (never stdout), the exact
 quality-gate scenario reproduced verbatim in
-`examples/text_analysis_pipeline.py`: a single external publication must
+`examples/text_analysis_pipeline.py`: a single external feed()+push() must
 automatically fan out and propagate through the complete graph
 (RawText -> tokenize/normalize -> statistics/contains_python -> merge
 (TriggerPolicy.ALL_INPUTS_CHANGED) -> build_report -> save_report) with
-no manual intermediate republish or repository read required to make
+no manual intermediate re-feed or repository read required to make
 the pipeline progress, and NodeContext memory/last_output must be
-correctly preserved and updated across repeated publications.
+correctly preserved and updated across repeated feed()+push() cycles.
 
 Domain types and node functions are duplicated here rather than imported
 from `examples/text_analysis_pipeline.py`. That module is a standalone
-script (its `__main__` block itself calls `run.publish` twice and
-`run.wait_for_callbacks()`); importing it would either execute that
+script (its `__main__` block itself calls `session.feed`/`session.push` twice and
+`session.wait_for_callbacks()`); importing it would either execute that
 script body as an import-time side effect or require guarding it behind
 an `if __name__ == "__main__"` re-check that adds indirection for no
 benefit. Duplicating the small, stable domain/node definitions keeps
@@ -25,12 +25,12 @@ to the example file, matching the pattern already used by
 rather than imports from examples/).
 
 IMPORTANT -- Test Integrity / anti-regression intent: this test calls
-`run.publish(...)` in its exercise of the pipeline EXACTLY as many times
-as there are external inputs (once in the single-publish test, twice in
+`session.feed(...)` + `session.push()` in its exercise of the pipeline EXACTLY as many times
+as there are external inputs (once in the single-feed test, twice in
 the second test) and never anything else that advances execution. It
-reads `run.repository.get(...)` / `run.node_runtime(...)` ONLY in final
+reads `session.repository.get(...)` / `session.node_session(...)` ONLY in final
 assertions, after the pipeline has already run to completion via
-`run.wait_for_callbacks()`. If a future regression reintroduces a need
+`session.wait_for_callbacks()`. If a future regression reintroduces a need
 for manual republication or manual intermediate retrieval to make the
 graph progress (e.g. merge or build_report failing to fire
 automatically), the intermediate artifacts asserted here (Report,
@@ -133,7 +133,7 @@ def build_report(analysis: Analysis) -> Report:
 
 def save_report(report: Report) -> None:
     # No-op side effect target for the pipeline's terminal node; presence
-    # of the committed Report is asserted via run.repository instead of
+    # of the committed Report is asserted via session.repository instead of
     # any side effect performed here.
     return None
 
@@ -158,18 +158,19 @@ def test_quality_gate_single_publish_propagates_end_to_end_without_manual_republ
     committed_analyses: list[Analysis] = []
 
     flow = _build_flow(committed_analyses.append)
-    run = flow.run()
+    session = flow.session()
 
     # The ONLY call in this test's exercise of the pipeline that advances
-    # execution: exactly one external publication.
-    run.publish(
+    # execution: exactly one external feed()+push().
+    session.feed(
         RawText(text="Python type annotations make reactive graphs elegant.")
     )
-    run.wait_for_callbacks()
+    session.push()
+    session.wait_for_callbacks()
 
     # Observation-only reads below -- the pipeline has already completed.
-    report = run.repository.get(Report).value
-    analysis = run.repository.get(Analysis).value
+    report = session.repository.get(Report).value
+    analysis = session.repository.get(Analysis).value
 
     assert analysis.word_count == 7
     assert analysis.character_count == 47
@@ -179,43 +180,45 @@ def test_quality_gate_single_publish_propagates_end_to_end_without_manual_republ
     )
     assert len(committed_analyses) == 1
     assert committed_analyses[0] == analysis
-    assert run.callback_failures == []
+    assert session.callback_failures == []
 
 
 def test_quality_gate_second_publish_updates_memory_and_preserves_last_output():
     committed_analyses: list[Analysis] = []
 
     flow = _build_flow(committed_analyses.append)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(
+    session.feed(
         RawText(text="Python type annotations make reactive graphs elegant.")
     )
-    run.publish(
+    session.push()
+    session.feed(
         RawText(text="Reed should propagate artifacts automatically.")
     )
-    run.wait_for_callbacks()
+    session.push()
+    session.wait_for_callbacks()
 
-    # Observation-only reads below -- both publications have already
+    # Observation-only reads below -- both feed()+push() cycles have already
     # completed; nothing here re-drives the pipeline.
-    merge_runtime = run.node_runtime(merge)
+    merge_session = session.node_session(merge)
 
-    assert merge_runtime.memory.analyses_completed == 2
-    assert merge_runtime.last_output.word_count == 5
-    assert merge_runtime.last_output.character_count == 42
-    assert merge_runtime.last_output.contains_python is False
+    assert merge_session.memory.analyses_completed == 2
+    assert merge_session.last_output.word_count == 5
+    assert merge_session.last_output.character_count == 42
+    assert merge_session.last_output.contains_python is False
 
     assert len(committed_analyses) == 2
     assert committed_analyses[0].word_count == 7
     assert committed_analyses[0].character_count == 47
     assert committed_analyses[0].contains_python is True
-    assert committed_analyses[1] == merge_runtime.last_output
+    assert committed_analyses[1] == merge_session.last_output
 
-    report = run.repository.get(Report).value
+    report = session.repository.get(Report).value
     assert report.text == (
         "Words: 5\nCharacters: 42\nContains 'Python': False"
     )
-    assert run.callback_failures == []
+    assert session.callback_failures == []
 
 
 def test_quality_gate_merge_requires_both_inputs_before_firing():
@@ -243,28 +246,31 @@ def test_quality_gate_merge_requires_both_inputs_before_firing():
     flow.add(counting_merge, trigger_policy=TriggerPolicy.ALL_INPUTS_CHANGED)
     flow.add(build_report)
     flow.add(save_report)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(RawText(text="hello world"))
-    run.wait_for_callbacks()
+    session.feed(RawText(text="hello world"))
+    session.push()
+    session.wait_for_callbacks()
 
-    # merge must have fired exactly once per publish -- proving genuine
+    # merge must have fired exactly once per feed()+push() -- proving genuine
     # dependency-state gating (both Statistics and ContainsPython fresh)
     # rather than the node firing per-input or not at all.
     assert len(merge_calls) == 1
-    assert run.callback_failures == []
+    assert session.callback_failures == []
 
 
 def test_quality_gate_no_callback_failures():
     flow = _build_flow(lambda analysis: None)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(
+    session.feed(
         RawText(text="Python type annotations make reactive graphs elegant.")
     )
-    run.publish(
+    session.push()
+    session.feed(
         RawText(text="Reed should propagate artifacts automatically.")
     )
-    run.wait_for_callbacks()
+    session.push()
+    session.wait_for_callbacks()
 
-    assert run.callback_failures == []
+    assert session.callback_failures == []

@@ -3,8 +3,8 @@ Focused tests for Slice 2H (automatic propagation engine core --
 linear/fan-out, single-input consumers only).
 
 See `.claude/reed-refactor/run-2H-20260912T184226Z/slice_contract.yaml`
-for the full objective. These tests exercise `Run.publish(...)`'s new
-work-queue-driven cascade: a directly published domain value now
+for the full objective. These tests exercise `Session.push()`'s new
+work-queue-driven cascade: a fed domain value now
 triggers every reachable single-input consumer, not just one FlowNode,
 and the cascade continues transitively until no more eligible FlowNodes
 remain (quiescence). A discovered multi-input FlowNode is left inert
@@ -48,8 +48,8 @@ class _Memory:
 
 
 def test_linear_multi_hop_cascade_fires_every_downstream_node():
-    # A -> B -> C -> D: one publish(A) should cascade through all three
-    # hops without any further publish() calls.
+    # A -> B -> C -> D: one feed(A) + push() should cascade through all
+    # three hops without any further feed()/push() calls.
     calls: list[str] = []
 
     def to_b(a: _A, ctx: NodeContext[_Memory, _B]) -> _B:
@@ -68,19 +68,20 @@ def test_linear_multi_hop_cascade_fires_every_downstream_node():
     flow.add(to_b)
     flow.add(to_c)
     flow.add(to_d)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_A(1))
+    session.feed(_A(1))
+    session.push()
 
     assert calls == ["to_b", "to_c", "to_d"]
-    assert run.node_runtime(to_b).last_output.value == 2
-    assert run.node_runtime(to_c).last_output.value == 3
-    assert run.node_runtime(to_d).last_output.value == 4
+    assert session.node_session(to_b).last_output.value == 2
+    assert session.node_session(to_c).last_output.value == 3
+    assert session.node_session(to_d).last_output.value == 4
 
 
 def test_fan_out_fires_every_consumer_of_the_same_artifact_type():
     # A is consumed by both to_b and to_c -- both must fire from one
-    # publish(A) call.
+    # feed(A) + push() call.
     fired: list[str] = []
 
     def to_b(a: _A, ctx: NodeContext[_Memory, _B]) -> _B:
@@ -94,13 +95,14 @@ def test_fan_out_fires_every_consumer_of_the_same_artifact_type():
     flow = Flow()
     flow.add(to_b)
     flow.add(to_c)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_A(5))
+    session.feed(_A(5))
+    session.push()
 
     assert set(fired) == {"to_b", "to_c"}
-    assert run.node_runtime(to_b).last_output.value == 10
-    assert run.node_runtime(to_c).last_output.value == 15
+    assert session.node_session(to_b).last_output.value == 10
+    assert session.node_session(to_c).last_output.value == 15
 
 
 def test_multi_input_flow_node_fires_once_fully_covered_under_default_all_inputs_changed_policy():
@@ -108,7 +110,7 @@ def test_multi_input_flow_node_fires_once_fully_covered_under_default_all_inputs
     # is a join candidate. Under the default ALL_INPUTS_CHANGED policy it
     # must fire exactly once, with call arguments built from the
     # last-known value of each consumed type, once both have arrived
-    # from the same publish(_A(...)) cascade.
+    # from the same feed(_A(...)) + push() cascade.
     fired: list[str] = []
 
     def to_b(a: _A) -> _B:
@@ -127,13 +129,14 @@ def test_multi_input_flow_node_fires_once_fully_covered_under_default_all_inputs
     flow.add(to_b)
     flow.add(to_c)
     flow.add(to_d)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_A(7))
+    session.feed(_A(7))
+    session.push()
 
     assert "to_d" in fired
     assert fired.count("to_d") == 1
-    assert run.node_runtime(to_d).last_output.value == 14
+    assert session.node_session(to_d).last_output.value == 14
 
 
 def test_quiescence_terminates_a_finite_cascade_with_no_leftover_queue():
@@ -148,17 +151,18 @@ def test_quiescence_terminates_a_finite_cascade_with_no_leftover_queue():
     flow = Flow()
     flow.add(to_b)
     flow.add(to_c)
-    run = flow.run()
+    session = flow.session()
 
     # Must return promptly with the correct terminal state.
-    run.publish(_A(3))
+    session.feed(_A(3))
+    session.push()
 
-    assert run.node_runtime(to_b).last_output.value == 3
-    assert run.node_runtime(to_c).last_output.value == 3
+    assert session.node_session(to_b).last_output.value == 3
+    assert session.node_session(to_c).last_output.value == 3
 
 
-def test_cascade_fired_nodes_get_correct_node_runtime_and_on_output_dispatch():
-    # NodeRuntime memory/last_output/firing_lock and on_output dispatch
+def test_cascade_fired_nodes_get_correct_node_session_and_on_output_dispatch():
+    # NodeSession memory/last_output/firing_lock and on_output dispatch
     # must occur correctly for every cascade-fired node, not only the
     # directly-published one.
     on_output_seen: list[int] = []
@@ -176,22 +180,23 @@ def test_cascade_fired_nodes_get_correct_node_runtime_and_on_output_dispatch():
         to_c,
         on_output=lambda value: on_output_seen.append(value.value),
     )
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_A(1))
+    session.feed(_A(1))
+    session.push()
 
-    node_runtime_b = run.node_runtime(to_b)
-    node_runtime_c = run.node_runtime(to_c)
+    node_session_b = session.node_session(to_b)
+    node_session_c = session.node_session(to_c)
 
-    assert node_runtime_b.last_output.value == 101
-    assert node_runtime_c.last_output.value == 102
-    assert node_runtime_b.firing_lock is not None  # state-aware (has ctx)
+    assert node_session_b.last_output.value == 101
+    assert node_session_c.last_output.value == 102
+    assert node_session_b.firing_lock is not None  # state-aware (has ctx)
     assert on_output_seen == [102]
 
 
 def test_second_publish_call_re_fires_downstream_nodes_with_new_data():
-    # No per-version dedup: repeated publish() calls re-run the whole
-    # cascade and re-fire the same downstream nodes with new data.
+    # No per-version dedup: repeated feed()+push() cycles re-run the
+    # whole cascade and re-fire the same downstream nodes with new data.
     fire_count = {"to_b": 0, "to_c": 0}
 
     def to_b(a: _A, ctx: NodeContext[_Memory, _B]) -> _B:
@@ -205,19 +210,23 @@ def test_second_publish_call_re_fires_downstream_nodes_with_new_data():
     flow = Flow()
     flow.add(to_b)
     flow.add(to_c)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_A(1))
-    run.publish(_A(10))
+    session.feed(_A(1))
+    session.push()
+    session.feed(_A(10))
+    session.push()
 
     assert fire_count == {"to_b": 2, "to_c": 2}
-    assert run.node_runtime(to_b).last_output.value == 11
-    assert run.node_runtime(to_c).last_output.value == 12
+    assert session.node_session(to_b).last_output.value == 11
+    assert session.node_session(to_c).last_output.value == 12
 
 
-def test_publish_return_value_is_the_directly_fired_nodes_own_committed_value():
-    # publish()'s return value must remain the directly-fired node's own
-    # committed value, unaffected by the cascade it triggers downstream.
+def test_invoke_snapshot_reflects_the_directly_fired_nodes_own_committed_value():
+    # A Snapshot taken right after invoke() reflects the directly-fired
+    # node's own committed value for its type -- the successor to
+    # publish()'s old narrow "direct result" return, now read via
+    # Snapshot.__getitem__ instead of a return value.
     def to_b(a: _A) -> _B:
         return _B(a.value + 1)
 
@@ -227,9 +236,10 @@ def test_publish_return_value_is_the_directly_fired_nodes_own_committed_value():
     flow = Flow()
     flow.add(to_b)
     flow.add(to_c)
-    run = flow.run()
+    session = flow.session()
 
-    result = run.publish(_A(1))
+    snapshot = session.invoke(_A(1))
+    result = snapshot[_B]
 
     assert isinstance(result, _B)
     assert result.value == 2

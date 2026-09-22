@@ -179,7 +179,7 @@ def test_parallel_safe_branching_uses_distinct_output_artifact_types():
     assert enhance_node.produced_artifact.domain_type is EnhancedImage
 
 
-def test_run_instances_isolate_node_memory():
+def test_session_instances_isolate_node_memory():
     from reed import Flow, NodeContext
 
     def track(
@@ -192,14 +192,16 @@ def test_run_instances_isolate_node_memory():
     flow = Flow()
     flow.add(track)
 
-    first_run = flow.run()
-    second_run = flow.run()
+    first_session = flow.session()
+    second_session = flow.session()
 
-    first_run.publish(Measurement(1))
-    second_run.publish(Measurement(8))
+    first_session.feed(Measurement(1))
+    first_session.push()
+    second_session.feed(Measurement(8))
+    second_session.push()
 
-    assert first_run.node_runtime(track).context.memory.previous_confidence == 0.1
-    assert second_run.node_runtime(track).context.memory.previous_confidence == 0.8
+    assert first_session.node_session(track).context.memory.previous_confidence == 0.1
+    assert second_session.node_session(track).context.memory.previous_confidence == 0.8
 
 
 def test_last_output_exposes_latest_committed_domain_value():
@@ -216,10 +218,12 @@ def test_last_output_exposes_latest_committed_domain_value():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(1))
-    run.publish(Measurement(2))
+    session.feed(Measurement(1))
+    session.push()
+    session.feed(Measurement(2))
+    session.push()
 
     assert seen_previous[0] is None
     assert isinstance(seen_previous[1], Estimate)
@@ -239,11 +243,12 @@ def test_on_output_runs_after_commit_and_receives_domain_value():
 
     flow = Flow()
     flow.add(estimate, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(3))
+    session.feed(Measurement(3))
+    session.push()
 
-    committed = run.repository.get(Estimate)
+    committed = session.repository.get(Estimate)
     assert observed == [committed.value]
     assert isinstance(observed[0], Estimate)
     assert observed[0].value == 3
@@ -263,10 +268,11 @@ def test_async_on_output_is_supported_after_commit():
 
     flow = Flow()
     flow.add(estimate, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(5))
-    run.wait_for_callbacks()
+    session.feed(Measurement(5))
+    session.push()
+    session.wait_for_callbacks()
 
     assert observed == [5]
 
@@ -282,15 +288,16 @@ def test_callback_failure_does_not_undo_committed_output():
 
     flow = Flow()
     flow.add(estimate, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(7))
+    session.feed(Measurement(7))
+    session.push()
 
-    assert run.repository.get(Estimate).value.value == 7
-    assert run.callback_failures
+    assert session.repository.get(Estimate).value.value == 7
+    assert session.callback_failures
 
 
-def test_stateful_node_runtime_firings_are_serialized():
+def test_stateful_node_session_firings_are_serialized():
     from reed import Flow, NodeContext, TriggerPolicy
 
     active = 0
@@ -308,9 +315,11 @@ def test_stateful_node_runtime_firings_are_serialized():
 
     flow = Flow()
     flow.add(track, trigger_policy=TriggerPolicy.ANY_INPUT_CHANGED)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish_many([Measurement(1), Measurement(2)])
+    for value in [Measurement(1), Measurement(2)]:
+        session.feed(value)
+    session.push()
 
     assert max_active == 1
 

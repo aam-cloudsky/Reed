@@ -1,8 +1,8 @@
 """
 Flow (Slice 1F, remainder of Priority 11 -- `Flow.add(...)`; Slice 2A,
-part of Priority 11/12 -- `Flow.run()` / `Run` separation; Slice 2B,
+part of Priority 11/12 -- `Flow.session()` / `Session` separation; Slice 2B,
 part of Priority 13 -- adds a read-only `flow_nodes` accessor so
-`Run.node_runtime(...)` can resolve a node function to its
+`Session.node_session(...)` can resolve a node function to its
 `FlowNode`).
 
 Slice 1F connected the composition collaborators already built in
@@ -23,8 +23,8 @@ Priority 11):
 "Flow Composition"; docs/refactor_priority_order.md, Priority 11 target):
 it owns `FlowNode` registrations and validates topology (unique producer,
 self-flow) through one `ArtifactDependencyGraph` per `Flow` instance. It
-owns no Run-specific execution state (architectural_invariants.md #4, #6:
-`Flow != Run`).
+owns no Session-specific execution state (architectural_invariants.md #4, #6:
+`Flow != Session`).
 
 `add(...)`'s `trigger_policy` and `on_output` are keyword-only (matching
 `flow_composition_implementation_basis.md`'s recommended shape and
@@ -35,26 +35,26 @@ only -- this slice does not evaluate `trigger_policy` or invoke
 imply execution, `TriggerPolicy` decides eligibility but nothing here
 evaluates that eligibility, and `TriggerPolicy != on_output`).
 
-Slice 2A (docs/architectural_decision.md, "Run"; architectural_invariants.md
-#4, #6 -- `Flow != Run`, `Flow` owns no Run-specific execution state) adds
-`Flow.run()`, which creates and returns a new `Run`
-(`reed.execution.run.Run`) associated with this `Flow`. `Flow` itself
-stores nothing about the `Run`s it has created -- no list, no counter,
+Slice 2A (docs/architectural_decision.md, "Session"; architectural_invariants.md
+#4, #6 -- `Flow != Session`, `Flow` owns no Session-specific execution state) adds
+`Flow.session()`, which creates and returns a new `Session`
+(`reed.execution.session.Session`) associated with this `Flow`. `Flow` itself
+stores nothing about the `Session`s it has created -- no list, no counter,
 no last-created reference -- so it remains a plain, reusable composition
-object no matter how many times `run()` is called. `Run` owns a
-distinct, `ArtifactRepository`-backed repository instance per `Run` (Slice 2A
-follow-up) and a distinct `NodeRuntime` per materialized node (Slice
-2B, `run.node_runtime(...)`) -- `Flow` and `FlowNode` acquire none of
-that state; see `reed/execution/run.py`'s and
-`reed/execution/node_runtime.py`'s module docstrings for the exact
+object no matter how many times `session()` is called. `Session` owns a
+distinct, `ArtifactRepository`-backed repository instance per `Session` (Slice 2A
+follow-up) and a distinct `NodeSession` per materialized node (Slice
+2B, `session.node_session(...)`) -- `Flow` and `FlowNode` acquire none of
+that state; see `reed/execution/session.py`'s and
+`reed/execution/node_session.py`'s module docstrings for the exact
 scope of each.
 
 Explicitly out of scope for this slice (Milestone 2, later slices):
 
-    - `NodeRuntime` exists as of Slice 2B, but only as an
-      ownership boundary owned by `Run` (`run.node_runtime(...)`);
+    - `NodeSession` exists as of Slice 2B, but only as an
+      ownership boundary owned by `Session` (`session.node_session(...)`);
       `Flow` itself gains no new capability from it beyond exposing
-      `flow_nodes` for `Run` to resolve against. `NodeExecution`
+      `flow_nodes` for `Session` to resolve against. `NodeExecution`
       (2E) does not exist yet.
     - No `ArtifactRecord` wrapping/unwrapping (2C), no `NodeMemory`
       (2D), no `ctx.memory`/`ctx.last_output` runtime behavior (2D/2E).
@@ -90,7 +90,7 @@ from reed.composition.flow.artifact_dependency_graph import ArtifactDependencyGr
 from reed.composition.flow.flow_node import FlowNode
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.composition.node.domain_node_description import DomainNodeDescriptionBuilder
-from reed.execution.run import Run
+from reed.execution.session import Session
 from reed.observability.presentation import PresentationPolicy
 
 
@@ -104,9 +104,9 @@ class Flow:
 
     See module docstring for the exact scope. Owns `FlowNode`
     registrations and one `ArtifactDependencyGraph` for topology
-    validation; owns no Run-specific execution state, including after
-    `run()` is called any number of times. `flow_nodes` (Slice 2B) is
-    a read-only view of those registrations, added so `Run` can
+    validation; owns no Session-specific execution state, including after
+    `session()` is called any number of times. `flow_nodes` (Slice 2B) is
+    a read-only view of those registrations, added so `Session` can
     resolve a node function to its `FlowNode` without reaching into
     `Flow`'s private internals.
     """
@@ -123,7 +123,7 @@ class Flow:
 
         A read-only snapshot -- mutating the returned tuple is not
         possible, and mutating it would not affect `Flow`'s own
-        registrations either way. Added so `Run.node_runtime(...)`
+        registrations either way. Added so `Session.node_session(...)`
         can resolve a node function to its `FlowNode` without
         reaching into `Flow`'s private internals.
         """
@@ -134,7 +134,7 @@ class Flow:
         """
         This `Flow`'s stable observability identity (Milestone O1, Slice
         O1a/O1b; docs/observability_design.md Section 18 -- `flow_id`/
-        `node_id` cross-run stability).
+        `node_id` cross-session stability).
 
         Deterministically derived from the ordered tuple of this Flow's
         registered `FlowNode.node_id` values: a SHA-256 digest (first 16
@@ -182,10 +182,10 @@ class Flow:
         This `Flow`'s `ArtifactDependencyGraph` (Slice 2H).
 
         A minimal, read-only accessor mirroring the `flow_nodes`
-        property's exact precedent above -- added so `Run.publish(...)`
+        property's exact precedent above -- added so `Session.publish(...)`
         can query `consumers_of(...)` to discover cascade-eligible
         FlowNodes without reaching into `Flow`'s private state or
-        `Run` duplicating a second producer/consumer index of its own.
+        `Session` duplicating a second producer/consumer index of its own.
         The graph instance itself is the same one `add(...)` already
         registers every `FlowNode` against; this property does not
         construct a new one or copy it.
@@ -263,28 +263,28 @@ class Flow:
 
         return flow_node
 
-    def run(
+    def session(
         self,
         *,
         storage_root: str | None = None,
         observability: "str | PresentationPolicy | None" = None,
-    ) -> Run:
+    ) -> Session:
         """
-        Create a new `Run` -- one concrete execution instance of this
-        `Flow` (Slice 2A; docs/architectural_decision.md, "Run").
+        Create a new `Session` -- one concrete execution instance of this
+        `Flow` (Slice 2A; docs/architectural_decision.md, "Session").
 
-        Each call returns a distinct `Run`. `Flow` records nothing
-        about the `Run`s it creates, so it remains a reusable
+        Each call returns a distinct `Session`. `Flow` records nothing
+        about the `Session`s it creates, so it remains a reusable
         composition object -- `add(...)` can still be called, and
-        `run()` can be called again, after any number of prior
-        `run()` calls.
+        `session()` can be called again, after any number of prior
+        `session()` calls.
 
-        The returned `Run` cannot yet execute meaningful computation.
-        `NodeRuntime` exists as of Slice 2B as an ownership boundary
-        only (`run.node_runtime(...)`); commit semantics and callback
+        The returned `Session` cannot yet execute meaningful computation.
+        `NodeSession` exists as of Slice 2B as an ownership boundary
+        only (`session.node_session(...)`); commit semantics and callback
         dispatch remain Milestone 2C-2G -- see
-        `reed/execution/run.py`'s and
-        `reed/execution/node_runtime.py`'s module docstrings for the
+        `reed/execution/session.py`'s and
+        `reed/execution/node_session.py`'s module docstrings for the
         exact scope.
         """
-        return Run(self, storage_root=storage_root, observability=observability)
+        return Session(self, storage_root=storage_root, observability=observability)

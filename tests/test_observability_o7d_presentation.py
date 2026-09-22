@@ -60,9 +60,10 @@ def _console_output(flow, observability, publish_value=None) -> str:
     policy = resolve_presentation_policy(observability)
     presenter = build_presenter(policy, console=console)
 
-    run = flow.run()
-    run._presenter = presenter  # test-only: swap in a recording console
-    run.publish(publish_value or Measurement(1))
+    session = flow.session()
+    session._presenter = presenter  # test-only: swap in a recording console
+    session.feed(publish_value or Measurement(1))
+    session.push()
     return console.export_text()
 
 
@@ -93,11 +94,12 @@ def test_errors_only_reports_a_node_error():
 
     console = Console(record=True, width=200)
     presenter = build_presenter(resolve_presentation_policy("errors"), console=console)
-    run = flow.run()
-    run._presenter = presenter
+    session = flow.session()
+    session._presenter = presenter
 
     with pytest.raises(RuntimeError):
-        run.publish(Measurement(1))
+        session.feed(Measurement(1))
+        session.push()
 
     output = console.export_text()
     assert "ERROR" in output
@@ -148,8 +150,9 @@ def test_presentation_choice_does_not_change_execution_semantics():
     results = {}
     for mode in ("silent", "errors", "progress", "instruments", "nodes", "verbose"):
         flow, produce = _make_flow()
-        run = flow.run(observability=mode)
-        results[mode] = run.publish(Measurement(7)).value
+        session = flow.session(observability=mode)
+        snapshot = session.invoke(Measurement(7))
+        results[mode] = snapshot[Estimate].value
 
     assert len(set(results.values())) == 1
     assert results["silent"] == 7
@@ -162,18 +165,19 @@ def test_silent_terminal_does_not_disable_persistence_or_provenance(tmp_path):
     """
     flow, produce = _make_flow()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root), observability="silent")
-    run.publish(Measurement(1))
+    session = flow.session(storage_root=str(root), observability="silent")
+    session.feed(Measurement(1))
+    session.push()
 
     from reed.observability.replay import load_provenance, load_recordings
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     assert len(load_recordings(run_dir)) == 1
     assert len(load_provenance(run_dir)) >= 1
 
 
 def test_default_observability_is_not_silent():
-    """Flow.run() with no observability= argument still shows node lifecycle."""
+    """Flow.session() with no observability= argument still shows node lifecycle."""
     flow, produce = _make_flow()
     output = _console_output(flow, None)
     assert "produce" in output

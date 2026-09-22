@@ -1,7 +1,7 @@
 """
 OTel exporter adapter (Milestone O6, Slice O6a).
 
-Translates Reed's own Run/NodeExecution/Trigger events (Level 1, `ExecutionTrace`) and
+Translates Reed's own Session/NodeExecution/Trigger events (Level 1, `ExecutionTrace`) and
 `Recording`s (Level 2) into OpenTelemetry spans and metrics -- one *optional* consumer of
 both levels, never a foundation Reed's core sits on top of (design record Section 8: "OTel
 is an exporter target, not a foundation Reed's core sits on top of"; Section 2's own guiding

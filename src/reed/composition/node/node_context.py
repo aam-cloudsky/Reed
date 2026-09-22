@@ -9,10 +9,10 @@ docs/architectural_invariants.md #12-17):
     NodeContext[MemoryType, OutputType]
 
         ctx.memory        -- private, node-local mutable state, scoped to
-                              Run x NodeRuntime (architectural_invariants.md
+                              Session x NodeSession (architectural_invariants.md
                               #14, #16).
         ctx.last_output   -- latest successfully committed domain output
-                              for this NodeRuntime (architectural_invariants.md
+                              for this NodeSession (architectural_invariants.md
                               #15); always `None` in this slice -- nothing
                               commits a domain output yet (Slice 2E).
 
@@ -25,10 +25,10 @@ allowed to expose (architectural_invariants.md #13; docs/non-goals.md,
 
 `NodeContext` remains intentionally narrow (docs/non-goals.md, "NodeContext
 Scope"): it must not become an `InputPort`, a service locator, or a proxy
-to `Run`, `Flow`, `Repository`, `Bus`, `Outpost`, or `NodeRuntime`. This
+to `Session`, `Flow`, `Repository`, `Bus`, `Outpost`, or `NodeSession`. This
 class holds only the two plain values it is constructed with -- the
 memory instance and the last-output value -- and exposes nothing else.
-It does not hold a reference back to the `NodeRuntime` (or `Run`, `Flow`,
+It does not hold a reference back to the `NodeSession` (or `Session`, `Flow`,
 etc.) that constructed it, so there is no path from `ctx` to any internal
 execution infrastructure (architectural_invariants.md #26). This is a
 deliberately stronger boundary than "don't add convenience properties for
@@ -36,14 +36,14 @@ internal objects" -- there is no internal reference here at all to
 accidentally leak.
 
 Who constructs a `NodeContext` and how memory is initialized is
-`NodeRuntime`'s responsibility (`reed/execution/node_runtime.py`), not
-this class's: `NodeRuntime.context` builds a fresh `NodeContext` snapshot
+`NodeSession`'s responsibility (`reed/execution/node_session.py`), not
+this class's: `NodeSession.context` builds a fresh `NodeContext` snapshot
 from its own `.memory` (lazily instantiated from the owning `FlowNode`'s
 declared `MemoryType`, memoized so mutations persist across firings
-within one Run -- see `node_runtime.py`'s module docstring for exactly
+within one Session -- see `node_session.py`'s module docstring for exactly
 how) and `.last_output` (always `None` in this slice) on every access.
 This class must still not be instantiated directly by user code -- only
-`NodeRuntime.context` does, matching "injected by Reed"
+`NodeSession.context` does, matching "injected by Reed"
 (docs/node_context_decision.md, "Core Thesis").
 
 Explicitly out of scope for this slice (Milestone 2, later slices; see
@@ -63,7 +63,7 @@ docs/refactor_priority_order.md's Priority 13 traceability split
       here.
     - No stateful-firing serialization (architectural_invariants.md #17,
       Slice 2G) -- nothing in this slice executes a node function, so
-      there is no concurrent access to a `NodeRuntime`'s memory to
+      there is no concurrent access to a `NodeSession`'s memory to
       serialize against yet.
     - No `on_output` dispatch (Slice 2F).
     - No `ArtifactRecord` wrap/unwrap through this boundary -- `ctx.memory`
@@ -96,8 +96,8 @@ class NodeContext(Generic[MemoryType, OutputType]):
     (Slice 1A); real `ctx.memory`/`ctx.last_output` values as of Slice 2D.
 
     See module docstring for the exact scope. Constructed only by
-    `NodeRuntime.context` -- never directly by user code, and never
-    holding a reference back to the `NodeRuntime`, `Run`, `Flow`, or
+    `NodeSession.context` -- never directly by user code, and never
+    holding a reference back to the `NodeSession`, `Session`, `Flow`, or
     anything else internal to Reed's execution infrastructure.
     """
 
@@ -115,15 +115,15 @@ class NodeContext(Generic[MemoryType, OutputType]):
         self._last_output = last_output
         # Milestone O1, Slice O1f: a small, read-only observability
         # identity bundle -- plain values only (docs/observability/
-        # identity.py), never a back-reference to NodeRuntime, Run, or
+        # identity.py), never a back-reference to NodeSession, Session, or
         # Flow (architectural_invariants.md #26). Optional and defaults
         # to None so every existing construction of a NodeContext
-        # (`NodeRuntime.context`, direct test construction) keeps
+        # (`NodeSession.context`, direct test construction) keeps
         # working unchanged; only the real firing path
-        # (`Run._build_call_kwargs`) supplies one.
+        # (`Session._build_call_kwargs`) supplies one.
         self._identity = identity
         # Milestone O2, Slice O2c/O2d: a single, narrow, bound callable
-        # (never a reference to NodeRuntime/Run/Flow themselves) that
+        # (never a reference to NodeSession/Session/Flow themselves) that
         # `.record(...)` forwards to. Optional, same reasoning as
         # `identity` above -- every existing NodeContext construction is
         # unaffected; only the real firing path supplies one.
@@ -132,15 +132,15 @@ class NodeContext(Generic[MemoryType, OutputType]):
     @property
     def memory(self) -> MemoryType:
         """
-        This `NodeRuntime`'s private, node-local mutable memory
+        This `NodeSession`'s private, node-local mutable memory
         (docs/node_context_decision.md, "Memory";
-        architectural_invariants.md #14, #16 -- scoped to `Run x
-        NodeRuntime`, never shared across Runs).
+        architectural_invariants.md #14, #16 -- scoped to `Session x
+        NodeSession`, never shared across Sessions).
 
         The same object identity is returned across repeated
-        `NodeRuntime.context` accesses on the same `NodeRuntime`, so
+        `NodeSession.context` accesses on the same `NodeSession`, so
         in-place mutations (`ctx.memory.some_field = ...`) persist
-        across firings within one Run.
+        across firings within one Session.
         """
         return self._memory
 
@@ -148,7 +148,7 @@ class NodeContext(Generic[MemoryType, OutputType]):
     def last_output(self) -> OutputType | None:
         """
         The latest successfully committed domain output for this
-        `NodeRuntime` (docs/node_context_decision.md, "Last Output";
+        `NodeSession` (docs/node_context_decision.md, "Last Output";
         architectural_invariants.md #15 -- `NodeMemory != last_output`).
 
         Always `None` in this slice: nothing commits a domain output yet
@@ -188,13 +188,13 @@ class NodeContext(Generic[MemoryType, OutputType]):
 
         Raises `RuntimeError` if this `NodeContext` was constructed
         without a recorder (i.e. not built by a real firing --
-        `NodeRuntime.context`/direct construction never attach one).
+        `NodeSession.context`/direct construction never attach one).
         """
         if self._recorder is None:
             raise RuntimeError(
                 "This NodeContext has no recorder attached -- ctx.record(...) "
                 "is only available on a NodeContext built by a real Node "
-                "firing (Run._build_call_kwargs -> NodeRuntime.build_context)."
+                "firing (Session._build_call_kwargs -> NodeSession.build_context)."
             )
         return self._recorder(instrument, value, attributes=attributes)
 
@@ -210,7 +210,7 @@ class NodeContext(Generic[MemoryType, OutputType]):
         docstring. Exposing this is a deliberate, narrow exception to
         `NodeContext`'s "never a back-reference to execution
         infrastructure" rule (architectural_invariants.md #26): the
-        bundle carries no reference to `Run`, `Flow`, or `NodeRuntime`
+        bundle carries no reference to `Session`, `Flow`, or `NodeSession`
         themselves, only their observability identifiers.
         """
         return self._identity

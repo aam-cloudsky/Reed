@@ -13,7 +13,7 @@ Covers docs/observability_goals.md Section 6:
     4. instruments.json is discovered dynamically (Milestone O7, Slice
        O7i): it does not exist until a Node's first ctx.record(...) call
        is flushed, and is stable (untouched) once a given (node_id,
-       Instrument) binding is already known -- a second Run that
+       Instrument) binding is already known -- a second Session that
        discovers nothing new does not rewrite existing entries.
 """
 
@@ -63,24 +63,26 @@ def _make_flow_with_tracker():
 
 def test_no_storage_root_means_in_memory_only(tmp_path):
     flow, track, Speed = _make_flow_with_tracker()
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
-    assert run.recording_store is None
-    assert run.provenance_store is None
-    assert len(run.node_runtime(track).recordings) == 1
+    assert session.recording_store is None
+    assert session.provenance_store is None
+    assert len(session.node_session(track).recordings) == 1
     assert not (tmp_path / ".reed").exists()
 
 
 def test_storage_root_creates_expected_files(tmp_path):
     flow, track, Speed = _make_flow_with_tracker()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
+    session = flow.session(storage_root=str(root))
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     assert (run_dir / "recordings.csv").exists()
     assert (run_dir / "provenance.csv").exists()
     assert (run_dir / "manifest.json").exists()
@@ -92,12 +94,14 @@ def test_storage_root_creates_expected_files(tmp_path):
 def test_recordings_csv_has_documented_columns_and_one_row_per_record(tmp_path):
     flow, track, Speed = _make_flow_with_tracker()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
+    session = flow.session(storage_root=str(root))
 
-    run.publish(Measurement(1))
-    run.publish(Measurement(2))
+    session.feed(Measurement(1))
+    session.push()
+    session.feed(Measurement(2))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     with open(run_dir / "recordings.csv", newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
 
@@ -125,13 +129,14 @@ def test_recordings_csv_has_documented_columns_and_one_row_per_record(tmp_path):
 def test_manifest_json_has_schema_version_and_file_index(tmp_path):
     flow, track, Speed = _make_flow_with_tracker()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
-    run.publish(Measurement(1))
+    session = flow.session(storage_root=str(root))
+    session.feed(Measurement(1))
+    session.push()
 
     manifest = json.loads(
-        (root / "runs" / run.execution_id / "manifest.json").read_text()
+        (root / "runs" / session.execution_id / "manifest.json").read_text()
     )
-    assert manifest["execution_id"] == run.execution_id
+    assert manifest["execution_id"] == session.execution_id
     assert manifest["flow_id"] == flow.flow_id
     assert "schema_version" in manifest
     assert manifest["files"] == {
@@ -144,15 +149,17 @@ def test_instruments_json_merges_on_discovery_and_is_stable_once_known(tmp_path)
     flow, track, Speed = _make_flow_with_tracker()
     root = tmp_path / ".reed"
 
-    first_run = flow.run(storage_root=str(root))
-    first_run.publish(Measurement(1))
+    first_session = flow.session(storage_root=str(root))
+    first_session.feed(Measurement(1))
+    first_session.push()
 
     instruments_path = root / "flows" / flow.flow_id / "instruments.json"
     original_mtime = instruments_path.stat().st_mtime_ns
     original_content = instruments_path.read_text()
 
-    second_run = flow.run(storage_root=str(root))
-    second_run.publish(Measurement(2))
+    second_session = flow.session(storage_root=str(root))
+    second_session.feed(Measurement(2))
+    second_session.push()
 
     assert instruments_path.stat().st_mtime_ns == original_mtime
     assert instruments_path.read_text() == original_content

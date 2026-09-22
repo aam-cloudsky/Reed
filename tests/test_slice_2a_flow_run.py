@@ -1,12 +1,12 @@
 """
-Focused tests for Slice 2A (Flow / Run separation), including the Slice
-2A follow-up correcting Run-scoped repository ownership.
+Focused tests for Slice 2A (Flow / Session separation), including the Slice
+2A follow-up correcting Session-scoped repository ownership.
 
 No target-architecture-contract test is expected to move for this slice
 or this follow-up (docs/refactor_priority_order.md's Slice 2A row: "No
 target test moves alone"; confirmed by reading every one of the six
 remaining xfail tests in tests/test_target_architecture_contract.py --
-all six require NodeRuntime/commit semantics/callback dispatch/stateful
+all six require NodeSession/commit semantics/callback dispatch/stateful
 serialization, none of which exist yet). This file is Slice 2A's
 dedicated focused verification, following the same rationale used for
 Slices 1A/1B/1C/1D.
@@ -15,23 +15,23 @@ Covers exactly the five architectural properties the harness assigned to
 the original slice, plus the corrected repository-ownership contract
 added by the follow-up:
 
-    1. Flow.run() returns a Run.
-    2. Two Flow.run() calls return distinct Run instances.
-    3. Run is associated with the originating Flow.
+    1. Flow.session() returns a Session.
+    2. Two Flow.session() calls return distinct Session instances.
+    3. Session is associated with the originating Flow.
     4. Flow remains reusable (no error, no shared mutable state leak,
-       across repeated run() calls, and Flow.add(...) still works
-       normally after run() has been called).
-    5. Run-specific state is not stored on Flow.
-    6. Each Run owns its own repository instance, backed by ArtifactRepository, and
-       two Runs never share repository state or repository identity.
+       across repeated session() calls, and Flow.add(...) still works
+       normally after session() has been called).
+    5. Session-specific state is not stored on Flow.
+    6. Each Session owns its own repository instance, backed by ArtifactRepository, and
+       two Sessions never share repository state or repository identity.
 """
 
 from __future__ import annotations
 
 
-def test_flow_run_returns_a_run():
+def test_flow_session_returns_a_session():
     from reed import Flow
-    from reed.execution.run import Run
+    from reed.execution.session import Session
 
     def produce() -> int:
         return 1
@@ -39,27 +39,12 @@ def test_flow_run_returns_a_run():
     flow = Flow()
     flow.add(produce)
 
-    run = flow.run()
+    session = flow.session()
 
-    assert isinstance(run, Run)
-
-
-def test_two_flow_run_calls_return_distinct_run_instances():
-    from reed import Flow
-
-    def produce() -> int:
-        return 1
-
-    flow = Flow()
-    flow.add(produce)
-
-    first_run = flow.run()
-    second_run = flow.run()
-
-    assert first_run is not second_run
+    assert isinstance(session, Session)
 
 
-def test_run_is_associated_with_the_originating_flow():
+def test_two_flow_session_calls_return_distinct_session_instances():
     from reed import Flow
 
     def produce() -> int:
@@ -68,12 +53,27 @@ def test_run_is_associated_with_the_originating_flow():
     flow = Flow()
     flow.add(produce)
 
-    run = flow.run()
+    first_session = flow.session()
+    second_session = flow.session()
 
-    assert run.flow is flow
+    assert first_session is not second_session
 
 
-def test_distinct_flows_produce_runs_associated_with_their_own_flow():
+def test_session_is_associated_with_the_originating_flow():
+    from reed import Flow
+
+    def produce() -> int:
+        return 1
+
+    flow = Flow()
+    flow.add(produce)
+
+    session = flow.session()
+
+    assert session.flow is flow
+
+
+def test_distinct_flows_produce_sessions_associated_with_their_own_flow():
     from reed import Flow
 
     def produce_a() -> int:
@@ -88,15 +88,15 @@ def test_distinct_flows_produce_runs_associated_with_their_own_flow():
     flow_b = Flow()
     flow_b.add(produce_b)
 
-    run_a = flow_a.run()
-    run_b = flow_b.run()
+    session_a = flow_a.session()
+    session_b = flow_b.session()
 
-    assert run_a.flow is flow_a
-    assert run_b.flow is flow_b
-    assert run_a.flow is not run_b.flow
+    assert session_a.flow is flow_a
+    assert session_b.flow is flow_b
+    assert session_a.flow is not session_b.flow
 
 
-def test_flow_remains_reusable_across_multiple_runs():
+def test_flow_remains_reusable_across_multiple_sessions():
     from reed import Flow
 
     def produce() -> int:
@@ -105,15 +105,15 @@ def test_flow_remains_reusable_across_multiple_runs():
     flow = Flow()
     flow.add(produce)
 
-    runs = [flow.run() for _ in range(5)]
+    sessions = [flow.session() for _ in range(5)]
 
-    assert len({id(r) for r in runs}) == 5
-    assert all(r.flow is flow for r in runs)
+    assert len({id(r) for r in sessions}) == 5
+    assert all(r.flow is flow for r in sessions)
 
 
-def test_flow_add_still_works_after_run_has_been_called():
-    # Flow must remain a usable composition object after run() -- calling
-    # run() must not put Flow into some execution-only state.
+def test_flow_add_still_works_after_session_has_been_called():
+    # Flow must remain a usable composition object after session() -- calling
+    # session() must not put Flow into some execution-only state.
     from reed import Flow
 
     def produce_a() -> int:
@@ -124,16 +124,16 @@ def test_flow_add_still_works_after_run_has_been_called():
 
     flow = Flow()
     flow.add(produce_a)
-    flow.run()
+    flow.session()
 
     flow_node = flow.add(produce_b)
 
     assert flow_node.produced_artifact.domain_type is str
 
 
-def test_flow_instance_state_is_unchanged_by_run():
-    # Flow-owns-no-Run-specific-state, verified structurally: calling
-    # run() (repeatedly) must not add or mutate any attribute on the
+def test_flow_instance_state_is_unchanged_by_session():
+    # Flow-owns-no-Session-specific-state, verified structurally: calling
+    # session() (repeatedly) must not add or mutate any attribute on the
     # Flow instance itself.
     from reed import Flow
 
@@ -145,26 +145,33 @@ def test_flow_instance_state_is_unchanged_by_run():
 
     before = dict(vars(flow))
 
-    flow.run()
-    flow.run()
-    flow.run()
+    flow.session()
+    flow.session()
+    flow.session()
 
     after = dict(vars(flow))
 
     assert before.keys() == after.keys()
     for key in before:
         assert before[key] is after[key], (
-            f"Flow.{key} changed identity after calling run() -- "
-            "Flow must own no Run-specific mutable state"
+            f"Flow.{key} changed identity after calling session() -- "
+            "Flow must own no Session-specific mutable state"
         )
 
 
-def test_run_publish_capability_was_introduced():
-    # Slice 2E legitimately adds Run.publish as the real firing entry
-    # point, making this test's original negative assertion
-    # (not hasattr(run, "publish")) stale by construction -- corrected
-    # here in place, the same Test Integrity Rule precedent already
-    # applied in Slices 2B and 2D (see docs/refactor_state.md).
+def test_session_publish_capability_was_removed():
+    # Slice 2E legitimately added Session.publish as the real firing entry
+    # point, which made this test's original negative assertion
+    # (not hasattr(session, "publish")) stale by construction, and it was
+    # flipped in place to a positive assertion -- the same Test Integrity
+    # Rule precedent already applied in Slices 2B and 2D (see
+    # docs/refactor_state.md). Slice 22H-2 has now deleted
+    # Session.publish()/publish_many() entirely (issue #22's target public
+    # API is Flow.add/session()/feed()/push()/snapshot()/invoke(), per
+    # docs/refactor/session_snapshot_decision.md section 2), which makes
+    # that positive assertion stale by construction in turn -- flipped back
+    # here, renamed to describe what it now actually checks, following the
+    # same precedent (also used in this issue's own 22C/22F test rewrites).
     from reed import Flow
 
     def produce() -> int:
@@ -172,15 +179,15 @@ def test_run_publish_capability_was_introduced():
 
     flow = Flow()
     flow.add(produce)
-    run = flow.run()
+    session = flow.session()
 
-    assert hasattr(run, "publish")
-
-
-# --- Slice 2A follow-up: Run-scoped repository ownership -------------------
+    assert not hasattr(session, "publish")
 
 
-def test_run_has_a_repository_accessor():
+# --- Slice 2A follow-up: Session-scoped repository ownership -------------------
+
+
+def test_session_has_a_repository_accessor():
     from reed import Flow
 
     def produce() -> int:
@@ -188,13 +195,13 @@ def test_run_has_a_repository_accessor():
 
     flow = Flow()
     flow.add(produce)
-    run = flow.run()
+    session = flow.session()
 
-    assert hasattr(run, "repository")
-    assert run.repository is not None
+    assert hasattr(session, "repository")
+    assert session.repository is not None
 
 
-def test_run_repository_is_backed_by_artifact_repository():
+def test_session_repository_is_backed_by_artifact_repository():
     from reed import Flow
     from reed.synchronization.artifact_repository import ArtifactRepository
 
@@ -203,12 +210,12 @@ def test_run_repository_is_backed_by_artifact_repository():
 
     flow = Flow()
     flow.add(produce)
-    run = flow.run()
+    session = flow.session()
 
-    assert isinstance(run.repository, ArtifactRepository)
+    assert isinstance(session.repository, ArtifactRepository)
 
 
-def test_each_run_owns_a_distinct_repository_instance():
+def test_each_session_owns_a_distinct_repository_instance():
     from reed import Flow
 
     def produce() -> int:
@@ -217,16 +224,16 @@ def test_each_run_owns_a_distinct_repository_instance():
     flow = Flow()
     flow.add(produce)
 
-    first_run = flow.run()
-    second_run = flow.run()
+    first_session = flow.session()
+    second_session = flow.session()
 
-    assert first_run.repository is not second_run.repository
+    assert first_session.repository is not second_session.repository
 
 
-def test_two_runs_from_the_same_flow_do_not_share_repository_identity():
+def test_two_sessions_from_the_same_flow_do_not_share_repository_identity():
     # ArtifactRepository.identity is derived from the Bus it was constructed with;
-    # two Runs must each construct their own Bus, so their repositories'
-    # identities must differ even though both Runs came from one Flow.
+    # two Sessions must each construct their own Bus, so their repositories'
+    # identities must differ even though both Sessions came from one Flow.
     from reed import Flow
 
     def produce() -> int:
@@ -235,15 +242,15 @@ def test_two_runs_from_the_same_flow_do_not_share_repository_identity():
     flow = Flow()
     flow.add(produce)
 
-    first_run = flow.run()
-    second_run = flow.run()
+    first_session = flow.session()
+    second_session = flow.session()
 
-    assert first_run.repository.identity != second_run.repository.identity
+    assert first_session.repository.identity != second_session.repository.identity
 
 
 def test_flow_does_not_own_the_repository():
-    # Repository ownership belongs to Run, not Flow -- Flow's own
-    # instance state must still contain nothing Run-specific, repository
+    # Repository ownership belongs to Session, not Flow -- Flow's own
+    # instance state must still contain nothing Session-specific, repository
     # included.
     from reed import Flow
 
@@ -254,7 +261,7 @@ def test_flow_does_not_own_the_repository():
     flow.add(produce)
 
     before = dict(vars(flow))
-    flow.run()
+    flow.session()
     after = dict(vars(flow))
 
     assert before.keys() == after.keys()
@@ -262,7 +269,7 @@ def test_flow_does_not_own_the_repository():
     assert not hasattr(flow, "_repository")
 
 
-def test_repeated_flow_run_calls_remain_independent_with_distinct_repositories():
+def test_repeated_flow_session_calls_remain_independent_with_distinct_repositories():
     from reed import Flow
 
     def produce() -> int:
@@ -271,7 +278,7 @@ def test_repeated_flow_run_calls_remain_independent_with_distinct_repositories()
     flow = Flow()
     flow.add(produce)
 
-    runs = [flow.run() for _ in range(5)]
+    sessions = [flow.session() for _ in range(5)]
 
-    repository_identities = {run.repository.identity for run in runs}
+    repository_identities = {session.repository.identity for session in sessions}
     assert len(repository_identities) == 5

@@ -7,7 +7,7 @@ physical files under `<storage_root>/runs/<execution_id>/`, never shared
 across Executions (docs/observability_non_goals.md Section 7).
 `instruments.json` under `<storage_root>/flows/<flow_id>/` is
 write-once-if-absent (Section 17.3's resolved concurrency concern) --
-never rewritten by an ordinary run.
+never rewritten by an ordinary session.
 
 CSV is the V1 implementation; `RecordingStore`/`ProvenanceStore` are
 `Protocol`s so a future Parquet (or other) backend is a drop-in swap
@@ -29,7 +29,7 @@ independent post-O6 audit).
 `CSVProvenanceStore.append(...)` keeps its original one-fsync-per-call behavior: Provenance
 events are not the flagged hot path (`ctx.record()` specifically, invariant #13/#26) -- there
 are at most two Provenance events per firing (`"used"`/`"generated"`), emitted directly by
-`Run`, never called an unbounded number of times per firing the way `ctx.record()` can be.
+`Session`, never called an unbounded number of times per firing the way `ctx.record()` can be.
 """
 
 from __future__ import annotations
@@ -129,7 +129,7 @@ class CSVRecordingStore:
         Append and durably flush a single `Recording` immediately.
 
         Retained for direct/ad hoc use and for `ProvenanceStore` parity,
-        but `NodeRuntime` (Milestone O7, Slice O7c) no longer calls this
+        but `NodeSession` (Milestone O7, Slice O7c) no longer calls this
         per `ctx.record()` call on the Node hot path -- see
         `append_batch(...)`.
         """
@@ -226,23 +226,23 @@ def merge_discovered_instruments(
 
     Prior to O7i this manifest was written once, up front, from a Flow's
     prospectively *declared* `instruments=[...]` (write-once-if-absent --
-    there was nothing more to learn after the first Run, since every
+    there was nothing more to learn after the first Session, since every
     Instrument was already known statically). O7i removed prospective
     declaration entirely: Instruments are now discovered dynamically, the
     first time a Node actually calls `ctx.record(SomeInstrument, value)`
     (docs/observability_goals.md Section 2.3, superseded by
     `reed.observability.instrument`'s module docstring) -- so this
     manifest can only ever be as complete as what has actually been
-    observed across every Run of this `flow_id` so far, and must be
-    **merged**, not written once, as new Runs discover Instrument
-    bindings no earlier Run happened to exercise.
+    observed across every Session of this `flow_id` so far, and must be
+    **merged**, not written once, as new Sessions discover Instrument
+    bindings no earlier Session happened to exercise.
 
     `instruments` is `[(name, kind, unit, description), ...]` -- the
     Instrument bindings this one node_id newly discovered (already
-    filtered by the caller, `NodeRuntime`/`Run`, to bindings not
-    previously known to this NodeRuntime this Run; still merged
-    idempotently here in case a different Run already recorded the same
-    binding, since NodeRuntime's own dedup is scoped to one Run only).
+    filtered by the caller, `NodeSession`/`Session`, to bindings not
+    previously known to this NodeSession this Session; still merged
+    idempotently here in case a different Session already recorded the same
+    binding, since NodeSession's own dedup is scoped to one Session only).
     """
     flow_dir = root / "flows" / flow_id
     flow_dir.mkdir(parents=True, exist_ok=True)
@@ -267,9 +267,9 @@ def merge_discovered_instruments(
         existing_names.add(name)
         changed = True
 
-    # Only rewrite the file if something is actually new -- a second Run
+    # Only rewrite the file if something is actually new -- a second Session
     # of the same Flow that rediscovers only already-known bindings (its
-    # own NodeRuntime's per-Run dedup does not know what an earlier Run
+    # own NodeSession's per-Session dedup does not know what an earlier Session
     # already wrote here) must not touch the file's mtime/content, so
     # that a caller can tell "nothing new was learned" from the file
     # system alone.

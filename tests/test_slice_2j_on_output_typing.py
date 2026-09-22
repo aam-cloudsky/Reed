@@ -46,15 +46,16 @@ def test_on_output_still_runs_after_commit_and_receives_domain_value():
 
     flow = Flow()
     flow.add(estimate, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    result = run.publish(Measurement(9))
+    snapshot = session.invoke(Measurement(9))
+    result = snapshot[Estimate]
 
     assert isinstance(result, Estimate)
     assert result.value == 9
     assert len(observed) == 1
-    assert observed[0] is run.repository.get(Estimate).value
-    assert run.callback_failures == []
+    assert observed[0] is session.repository.get(Estimate).value
+    assert session.callback_failures == []
 
 
 def test_publish_with_no_on_output_declared_still_commits_normally():
@@ -67,13 +68,14 @@ def test_publish_with_no_on_output_declared_still_commits_normally():
 
     flow = Flow()
     flow.add(estimate)
-    run = flow.run()
+    session = flow.session()
 
-    result = run.publish(Measurement(3))
+    snapshot = session.invoke(Measurement(3))
+    result = snapshot[Estimate]
 
     assert isinstance(result, Estimate)
     assert result.value == 3
-    assert run.callback_failures == []
+    assert session.callback_failures == []
 
 
 def test_async_on_output_still_dispatches_via_wait_for_callbacks():
@@ -93,15 +95,16 @@ def test_async_on_output_still_dispatches_via_wait_for_callbacks():
 
     flow = Flow()
     flow.add(estimate, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(6))
+    session.feed(Measurement(6))
+    session.push()
     assert observed == []
 
-    run.wait_for_callbacks()
+    session.wait_for_callbacks()
 
     assert observed == [6]
-    assert run.callback_failures == []
+    assert session.callback_failures == []
 
 
 def test_flow_add_accepts_a_domain_typed_callback_with_a_different_domain_type():
@@ -124,9 +127,10 @@ def test_flow_add_accepts_a_domain_typed_callback_with_a_different_domain_type()
 
     flow = Flow()
     flow.add(sense, on_output=on_output)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(5))
+    session.feed(Measurement(5))
+    session.push()
 
     assert len(observed) == 1
     assert observed[0].value == 10

@@ -43,18 +43,20 @@ def test_query_recordings_aggregates_across_separate_executions(tmp_path):
     flow = _make_flow()
     root = tmp_path / ".reed"
 
-    first_run = flow.run(storage_root=str(root))
-    first_run.publish(Measurement(1))
+    first_session = flow.session(storage_root=str(root))
+    first_session.feed(Measurement(1))
+    first_session.push()
 
-    second_run = flow.run(storage_root=str(root))
-    second_run.publish(Measurement(2))
+    second_session = flow.session(storage_root=str(root))
+    second_session.feed(Measurement(2))
+    second_session.push()
 
     rows = query_recordings(root, flow.flow_id)
 
     assert len(rows) == 2
     assert {row["execution_id"] for row in rows} == {
-        first_run.execution_id,
-        second_run.execution_id,
+        first_session.execution_id,
+        second_session.execution_id,
     }
     assert {row["value"] for row in rows} == {"1", "2"}
 
@@ -82,18 +84,20 @@ def test_query_recordings_filters_by_flow_id():
 
         flow_a = Flow()
         flow_a.add(produce)
-        run_a = flow_a.run(storage_root=str(root))
-        run_a.publish(Measurement(1))
+        session_a = flow_a.session(storage_root=str(root))
+        session_a.feed(Measurement(1))
+        session_a.push()
 
         flow_b = Flow()
         flow_b.add(other_produce)
-        run_b = flow_b.run(storage_root=str(root))
-        run_b.publish(Measurement(2))
+        session_b = flow_b.session(storage_root=str(root))
+        session_b.feed(Measurement(2))
+        session_b.push()
 
         rows = query_recordings(root, flow_a.flow_id)
 
         assert len(rows) == 1
-        assert rows[0]["execution_id"] == run_a.execution_id
+        assert rows[0]["execution_id"] == session_a.execution_id
 
 
 def test_recordings_glob_pattern_matches_documented_shape(tmp_path):
@@ -108,8 +112,9 @@ def test_query_recordings_returns_empty_for_unknown_flow_id(tmp_path):
 
     flow = _make_flow()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
-    run.publish(Measurement(1))
+    session = flow.session(storage_root=str(root))
+    session.feed(Measurement(1))
+    session.push()
 
     rows = query_recordings(root, "nonexistent-flow-id")
     assert rows == []

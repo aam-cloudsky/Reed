@@ -58,10 +58,11 @@ def test_a_node_references_its_instrument_exactly_once_no_separate_declaration()
 
     flow = Flow()
     flow.add(track)  # no instruments= parameter exists anymore
-    run = flow.run()
-    run.publish(Measurement(91))
+    session = flow.session()
+    session.feed(Measurement(91))
+    session.push()
 
-    recording = run.node_runtime(track).recordings[0]
+    recording = session.node_session(track).recordings[0]
     assert recording.name == Temperature.instrument_name()
     assert recording.kind == "gauge"
     assert recording.unit == "celsius"

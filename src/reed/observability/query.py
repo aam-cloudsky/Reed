@@ -8,7 +8,7 @@ glob pattern over every past Execution's `recordings.csv`, filtered to one logic
 The canonical pattern (design record Section 16.4/17.1), which this module documents and
 provides a pure-Python reference implementation of, is a glob over
 `<storage_root>/runs/*/recordings.csv` filtered by the `flow_id` column (recordings.csv is
-partitioned by `execution_id`, i.e. one file per Run -- not by `flow_id` -- so filtering by
+partitioned by `execution_id`, i.e. one file per Session -- not by `flow_id` -- so filtering by
 `flow_id` is always a column filter across many files, never a directory selector):
 
     DuckDB:
@@ -20,7 +20,7 @@ partitioned by `execution_id`, i.e. one file per Run -- not by `flow_id` -- so f
 This module's `query_recordings(...)` is a pure-Python reference implementation of the same
 pattern (glob + `csv.DictReader` + filter) with no DuckDB/Polars dependency -- suitable for
 small local exploration and for this repository's own tests, not a replacement for either
-tool at any real Run volume. A user with many/large Executions should reach for DuckDB or
+tool at any real Session volume. A user with many/large Executions should reach for DuckDB or
 Polars directly using the query strings above, not this function.
 
 **Flow-shape-drift caveat (Section 17.2, explicitly not solved here, only documented):**
@@ -28,7 +28,7 @@ aggregating many Executions under one `flow_id` implicitly assumes those Executi
 structurally comparable Flow. If a Node's Instrument `unit` changes, or a Node is added or
 removed, between two Executions that still share a `flow_id` (because the code changed in a
 way `flow_id`'s registration-order-sensitive hash did not happen to change -- Section 18.4's
-known accepted limitation), a cross-run query can silently mix incompatible series. This is
+known accepted limitation), a cross-session query can silently mix incompatible series. This is
 left as a user judgment call, exactly as Section 17.2 states -- `query_recordings(...)` does
 not attempt to detect or warn about it.
 """

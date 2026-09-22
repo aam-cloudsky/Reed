@@ -12,9 +12,9 @@ receives and hands its `to_dict()` to a sink callable -- by default, one JSON li
 printed to stdout.
 
 This module intentionally shares the `Presenter` Protocol (`reed.observability.
-presenter`) as its only integration point with `Run` -- there is no second hook
-mechanism, no new `Run`-facing concept. See `CompositePresenter` in `presenter.py` for
-how a `Run` can drive both a `TerminalPresenter` and a `StructuredLogPresenter` from the
+presenter`) as its only integration point with `Session` -- there is no second hook
+mechanism, no new `Session`-facing concept. See `CompositePresenter` in `presenter.py` for
+how a `Session` can drive both a `TerminalPresenter` and a `StructuredLogPresenter` from the
 one `Presenter` it holds.
 """
 
@@ -100,10 +100,10 @@ class StructuredLogPresenter(Presenter):
     into a `LogEvent` and passes its `to_dict()` to `sink` -- default: one JSON
     line to stdout, the simplest possible structured sink. Any other sink (a
     file, a queue, a future OTel Logs adapter) is a different `sink` callable,
-    never a change to this class or to `Run`.
+    never a change to this class or to `Session`.
 
     Composes with `TerminalPresenter` via `CompositePresenter`
-    (`reed.observability.presenter`) so a `Run` can render for humans and emit
+    (`reed.observability.presenter`) so a `Session` can render for humans and emit
     structured events at the same time, from the same underlying facts.
     """
 

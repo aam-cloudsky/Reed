@@ -8,9 +8,9 @@ machinery (`docs/observability_non_goals.md` Section 9 forbids that).
 
 The legacy `EventRenderer` subscribed live to Bus traffic and printed as messages arrived.
 This renderer is deliberately simpler for V1: it is a pull-based snapshot renderer over
-`run.trace.events` (a `tuple`, already an immutable point-in-time view -- Slice O5a), not a
+`session.trace.events` (a `tuple`, already an immutable point-in-time view -- Slice O5a), not a
 live subscriber. A caller renders whenever it wants a picture of the trace so far (after
-each `run.publish(...)`, or once at the end, or periodically) rather than this module
+each `session.push()`, or once at the end, or periodically) rather than this module
 pushing output as events occur. This is a legitimate, explicitly scoped V1 simplification: it
 needs no callback/subscription mechanism on `ExecutionTrace` (which does not have one), and
 it still reconstructs the same trace-id-correlated, Node-named, state-labeled shape the

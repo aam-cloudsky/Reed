@@ -50,7 +50,7 @@ validation alongside self-flow and duplicate-producer rejection:
 consumed artifact but none with `InputRole.TRIGGERING`
 (`ZeroTriggeringInputsError`), unless its `trigger_policy` is
 `MANUAL`. Such a node could never become eligible to fire through the
-`Run.publish(...)` cascade (Slice 21C: `_is_eligible_to_fire`
+`Session.publish(...)` cascade (Slice 21C: `_is_eligible_to_fire`
 evaluates both TriggerPolicy branches over `flow_node`'s
 TRIGGERING-role consumed types only) -- surfacing this as a
 registration-time error, matching this file's own
@@ -58,7 +58,7 @@ SelfFlowError/DuplicateArtifactProducerError precedent, is preferred
 over letting such a node silently never fire. A node with zero
 consumed artifacts at all (a pure source/producer node) is exempt --
 it was never part of this concern before Sampled existed, and is
-never a `Run.publish(...)` cascade consumer of anything either way.
+never a `Session.publish(...)` cascade consumer of anything either way.
 """
 
 from __future__ import annotations
@@ -118,9 +118,9 @@ class ZeroTriggeringInputsError(RuntimeError):
     """
     Raised when a `FlowNode` has at least one consumed artifact but none
     with `InputRole.TRIGGERING`, under a non-`MANUAL` `TriggerPolicy`
-    (architectural_invariants.md #18-20; Slice 21C, "Run eligibility
+    (architectural_invariants.md #18-20; Slice 21C, "Session eligibility
     redefinition"). Such a node could never become eligible to fire
-    through the automatic `Run.publish(...)` cascade -- both
+    through the automatic `Session.publish(...)` cascade -- both
     `TriggerPolicy.ALL_INPUTS_CHANGED` and `TriggerPolicy.ANY_INPUT_CHANGED`
     evaluate eligibility over TRIGGERING-role consumed types only -- so a
     node with none can only ever be fired by a `MANUAL` caller.

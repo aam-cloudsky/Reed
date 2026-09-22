@@ -43,13 +43,20 @@ def test_render_replay_table_interleaves_recordings_and_provenance(tmp_path):
 
     flow, produce, Speed = _make_flow_with_recording()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
-    run.publish(Measurement(1))
+    session = flow.session(storage_root=str(root))
+    session.feed(Measurement(1))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     table = render_replay_table(run_dir)
 
-    assert table.row_count == 2  # one recording row, one "generated" provenance row
+    # One recording row, plus three provenance rows: feed()'s own
+    # "generated" event for the fed Measurement, the "used" event for
+    # Measurement that produce's firing now emits (it already has a
+    # committed record, unlike under the old publish()), and the
+    # "generated" event for produce's own committed Estimate output
+    # (Slice 22E; session_snapshot_decision.md section 1, point 2).
+    assert table.row_count == 4
 
 
 def test_load_recordings_and_provenance_read_back_rows(tmp_path):
@@ -57,17 +64,21 @@ def test_load_recordings_and_provenance_read_back_rows(tmp_path):
 
     flow, produce, Speed = _make_flow_with_recording()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
-    run.publish(Measurement(1))
+    session = flow.session(storage_root=str(root))
+    session.feed(Measurement(1))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     recordings = load_recordings(run_dir)
     provenance = load_provenance(run_dir)
 
     assert len(recordings) == 1
     assert recordings[0]["name"] == Speed.instrument_name()
-    assert len(provenance) == 1
-    assert provenance[0]["event_type"] == "generated"
+    # feed()'s own "generated" event for Measurement, produce's "used"
+    # event for the now-already-committed Measurement, and produce's
+    # own "generated" event for Estimate (Slice 22E).
+    assert len(provenance) == 3
+    assert [row["event_type"] for row in provenance] == ["generated", "used", "generated"]
 
 
 def test_replay_raises_when_no_storage_was_configured(tmp_path):
@@ -84,10 +95,11 @@ def test_print_replay_renders_detail_text(tmp_path):
 
     flow, produce, Speed = _make_flow_with_recording()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
-    run.publish(Measurement(1))
+    session = flow.session(storage_root=str(root))
+    session.feed(Measurement(1))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     console = Console(record=True, width=200)
     print_replay(run_dir, console=console)
     output = console.export_text()

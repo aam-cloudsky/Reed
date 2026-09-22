@@ -70,21 +70,22 @@ def test_export_trace_to_spans_translates_started_finished_pairs():
 
     flow = Flow()
     flow.add(produce)
-    run = flow.run()
-    run.publish(Measurement(1))
+    session = flow.session()
+    session.feed(Measurement(1))
+    session.push()
 
     tracer, exporter = _make_tracer()
 
     from reed.observability.otel_export import export_trace_to_spans
 
-    count = export_trace_to_spans(run.trace, tracer=tracer)
+    count = export_trace_to_spans(session.trace, tracer=tracer)
     spans = exporter.get_finished_spans()
 
     assert count == 1
     assert len(spans) == 1
     assert spans[0].name.endswith("produce")
-    assert spans[0].attributes["reed.execution_id"] == run.execution_id
-    assert spans[0].attributes["reed.flow_id"] == run.flow_id
+    assert spans[0].attributes["reed.execution_id"] == session.execution_id
+    assert spans[0].attributes["reed.flow_id"] == session.flow_id
 
 
 def test_export_trace_to_spans_skips_incomplete_pairs():
@@ -119,10 +120,11 @@ def test_export_recording_to_metric_gauge():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
-    run.publish(Measurement(7))
+    session = flow.session()
+    session.feed(Measurement(7))
+    session.push()
 
-    recording = run.node_runtime(track).recordings[0]
+    recording = session.node_session(track).recordings[0]
 
     meter, reader = _make_meter()
 
@@ -181,10 +183,11 @@ def test_export_recording_to_metric_counter():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
-    run.publish(Measurement(1))
+    session = flow.session()
+    session.feed(Measurement(1))
+    session.push()
 
-    recording = run.node_runtime(track).recordings[0]
+    recording = session.node_session(track).recordings[0]
     meter, reader = _make_meter()
 
     from reed.observability.otel_export import export_recording_to_metric
