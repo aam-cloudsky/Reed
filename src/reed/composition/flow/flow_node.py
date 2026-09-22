@@ -106,7 +106,7 @@ class FlowNode:
         """
         This `FlowNode`'s stable observability identity (Milestone O1,
         Slice O1c; docs/observability_design.md Section 18 -- `flow_id`/
-        `node_id` cross-run stability).
+        `node_id` cross-session stability).
 
         Deterministically derived from the wrapped function's module and
         qualified name (`f"{function.__module__}.{function.__qualname__}"`),

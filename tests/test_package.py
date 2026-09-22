@@ -9,14 +9,14 @@ def test_public_api_exports_current_architecture_symbols():
     assert reed.Flow is not None
     assert reed.TriggerPolicy is not None
     assert reed.NodeContext is not None
-    assert reed.Run is not None
+    assert reed.Session is not None
 
 
 def test_public_api_exports_exactly_the_current_architecture_symbols():
     # Test Integrity Rule (same treatment given to
     # tests/test_slice_1b_domain_node_description.py's ArtifactDescriptor
     # field-set pin for the same reason): this assertion originally
-    # pinned exactly {"Flow", "TriggerPolicy", "NodeContext", "Run"}.
+    # pinned exactly {"Flow", "TriggerPolicy", "NodeContext", "Session"}.
     # Slice 21D (GitHub issue #21) intentionally adds two new public
     # types, InputRole and Sampled -- the same category as
     # TriggerPolicy/NodeContext, not a retired or internal symbol (see
@@ -29,7 +29,7 @@ def test_public_api_exports_exactly_the_current_architecture_symbols():
         "Flow",
         "TriggerPolicy",
         "NodeContext",
-        "Run",
+        "Session",
         "InputRole",
         "Sampled",
     }

@@ -105,11 +105,12 @@ def test_ctx_record_with_typed_instrument_discovers_it_dynamically():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(10))
+    session.feed(Measurement(10))
+    session.push()
 
-    recordings = run.node_runtime(track).recordings
+    recordings = session.node_session(track).recordings
     assert len(recordings) == 2
     assert all(r.name == Speed.instrument_name() for r in recordings)
     assert all(r.kind == "gauge" for r in recordings)
@@ -131,10 +132,11 @@ def test_ctx_record_rejects_a_plain_string_name():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
+    session = flow.session()
 
     with pytest.raises(TypeError):
-        run.publish(Measurement(1))
+        session.feed(Measurement(1))
+        session.push()
 
 
 def test_ctx_record_rejects_an_instrument_instance_not_the_class():
@@ -154,10 +156,11 @@ def test_ctx_record_rejects_an_instrument_instance_not_the_class():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
+    session = flow.session()
 
     with pytest.raises(TypeError):
-        run.publish(Measurement(1))
+        session.feed(Measurement(1))
+        session.push()
 
 
 def test_recording_value_must_be_scalar():
@@ -177,10 +180,11 @@ def test_recording_value_must_be_scalar():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
+    session = flow.session()
 
     with pytest.raises(TypeError):
-        run.publish(Measurement(1))
+        session.feed(Measurement(1))
+        session.push()
 
 
 def test_ctx_record_without_recorder_raises():
@@ -216,8 +220,9 @@ def test_recording_kind_matches_the_instrument_definition():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
-    run.publish(Measurement(1))
+    session = flow.session()
+    session.feed(Measurement(1))
+    session.push()
 
-    recordings = run.node_runtime(track).recordings
+    recordings = session.node_session(track).recordings
     assert recordings[0].kind == "counter"

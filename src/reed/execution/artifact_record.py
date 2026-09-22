@@ -67,8 +67,8 @@ Explicitly out of scope for this slice (Milestone 2, later slices):
       `ArtifactRecord` directly (`ArtifactRecord(value=...)`) is plain
       object construction, not a firing-tied "wrap"; it is what this
       slice's own tests use to build fixtures.
-    - No repository storage of `ArtifactRecord`s. `run.repository`
-      (`reed.execution.run.Run.repository`, Slice 2A follow-up) remains
+    - No repository storage of `ArtifactRecord`s. `session.repository`
+      (`reed.execution.session.Session.repository`, Slice 2A follow-up) remains
       backed directly by `ArtifactRepository`, whose `get_parcel`/`set_parcel` are
       hard-typed to `Parcel` instances (`ArtifactRepository.set_parcel` raises
       `TypeError` for anything that is not a `Parcel`) -- `ArtifactRepository` cannot
@@ -82,7 +82,7 @@ Explicitly out of scope for this slice (Milestone 2, later slices):
       need repository storage to work: nothing commits an
       `ArtifactRecord` anywhere yet (that is 2E's job), so there is
       nothing to store. See docs/refactor_state.md's Open Architectural
-      Questions for the recorded finding: how `run.repository` will
+      Questions for the recorded finding: how `session.repository` will
       actually hold `ArtifactRecord`s is a decision Slice 2E (or 3A)
       must make, not this slice.
     - No `NodeContext` runtime behavior, no `ctx.memory`, no
@@ -105,12 +105,37 @@ Explicitly out of scope for this slice (Milestone 2, later slices):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Generic, Optional, TypeVar
 
 if TYPE_CHECKING:
-    from reed.execution.node_runtime import NodeRuntime
+    from reed.execution.node_session import NodeSession
 
 DomainType = TypeVar("DomainType")
+
+
+class ArtifactOrigin(Enum):
+    """
+    Where a committed `ArtifactRecord`'s value came from (Slice 22B,
+    GitHub issue #22, `docs/refactor/session_snapshot_decision.md`
+    section 6 "Unified versioning and `ArtifactOrigin`";
+    `docs/refactor/architectural_invariants.md` #29).
+
+    Exactly two members -- `NODE` (a node firing, via
+    `NodeSession.wrap()`) and `EXTERNAL` (an externally fed value, via
+    the not-yet-implemented `Session.feed()`, Slice 22E). Deliberately
+    no third `PENDING`/`UNSET` value: a not-yet-advanced
+    `ArtifactProvenance` (`ArtifactVersion.pending()`, version `0`) never
+    becomes a reachable, committed `ArtifactRecord` anywhere in the
+    system, and every real commit path passes `origin` explicitly the
+    moment it advances (`ArtifactProvenance.advance(...)`'s `origin`
+    parameter is required, keyword-only, with no default) -- so there is
+    no observable state where a committed record's origin is meaningfully
+    unset.
+    """
+
+    NODE = auto()
+    EXTERNAL = auto()
 
 
 @dataclass(frozen=True, order=True)
@@ -142,43 +167,65 @@ class ArtifactVersion:
 @dataclass
 class ArtifactProvenance:
     """
-    An artifact record's lineage (Slice 2C).
+    An artifact record's lineage (Slice 2C; `origin` field added Slice
+    22B).
 
     Mirrors `reed.synchronization.parcel.provenance.ParcelProvenance`'s
-    shape and `.advance(...)` mechanic, with two adaptations:
+    shape and `.advance(...)` mechanic, with three adaptations:
 
-    1. `producer` references a `NodeRuntime` (Slice 2B; "one node
-       participation materialized inside one run" --
-       docs/architectural_decision.md, "Node Runtime") instead of the
+    1. `producer` references a `NodeSession` (Slice 2B; "one node
+       participation materialized inside one session" --
+       docs/architectural_decision.md, "Node Session") instead of the
        legacy `NodeId`, since `ArtifactRecord`s belong to the new
-       `Run`/`NodeRuntime` execution model, not the legacy
+       `Session`/`NodeSession` execution model, not the legacy
        `Bus`/`Outpost` one. Stays `None` until a real firing sets it --
        no firing exists yet (Slice 2E), so this field is always `None`
        in this slice's own tests.
     2. `dependencies` is keyed by domain type, not by `Parcel` subclass
        type (docs/refactor_priority_order.md, Priority 7, item 4).
+    3. `origin: Optional[ArtifactOrigin]` (Slice 22B,
+       docs/refactor/session_snapshot_decision.md section 6; no
+       equivalent field exists on legacy `ParcelProvenance`). Stays
+       `None` until `.advance(...)` is first called, exactly like
+       `producer` -- `ArtifactOrigin` has no third "pending"/"unset"
+       member (architectural_invariants.md #29), so `None` here means
+       only "never advanced yet", the same thing `version ==
+       ArtifactVersion.pending()` already means, not a third enum value.
     """
 
-    producer: Optional["NodeRuntime"] = None
+    producer: Optional["NodeSession"] = None
     version: ArtifactVersion = field(default_factory=ArtifactVersion.pending)
     dependencies: dict[type, ArtifactVersion] = field(default_factory=dict)
+    origin: Optional["ArtifactOrigin"] = None
 
     def advance(
         self,
         *,
-        producer: Optional["NodeRuntime"] = None,
+        origin: "ArtifactOrigin",
+        producer: Optional["NodeSession"] = None,
         dependencies: Optional[dict[type, ArtifactVersion]] = None,
     ) -> None:
         """
         Publish a new provenance revision in place.
 
-        Mirrors `ParcelProvenance.advance(...)` exactly: the version
-        always moves forward by one (`pending` (0) -> `initial` (1) on
-        first call, `.next()` after); `producer` and `dependencies` are
-        only overwritten when explicitly given.
+        Mirrors `ParcelProvenance.advance(...)` exactly for the version/
+        producer/dependencies mechanics: the version always moves forward
+        by one (`pending` (0) -> `initial` (1) on first call, `.next()`
+        after); `producer` and `dependencies` are only overwritten when
+        explicitly given.
+
+        `origin` (Slice 22B, docs/refactor/session_snapshot_decision.md
+        section 6) has no legacy `ParcelProvenance` equivalent: it is
+        required and keyword-only, with no default -- every real commit
+        path (`NodeSession.wrap()` today; `Session.feed()`, Slice 22E)
+        must state explicitly where the value it is advancing provenance
+        for came from, and is always overwritten on every call (unlike
+        `producer`/`dependencies`, which are only overwritten when
+        given) since a provenance revision always has exactly one origin.
         """
 
         self.version = self.version.next()
+        self.origin = origin
 
         if producer is not None:
             self.producer = producer
@@ -191,6 +238,7 @@ class ArtifactProvenance:
             producer=self.producer,
             version=self.version,
             dependencies=dict(self.dependencies),
+            origin=self.origin,
         )
 
 
@@ -203,7 +251,7 @@ class ArtifactRecord(Generic[DomainType]):
     See module docstring for the exact scope and the composition-over-
     inheritance distinction from legacy `Parcel`. `value` is a plain
     instance of the user's own domain type -- node functions never see
-    this wrapper, only what `NodeRuntime.unwrap(...)` returns from it
+    this wrapper, only what `NodeSession.unwrap(...)` returns from it
     (`.value`).
     """
 
@@ -217,3 +265,52 @@ class ArtifactRecord(Generic[DomainType]):
     @property
     def dependencies(self) -> dict[type, ArtifactVersion]:
         return self.provenance.dependencies
+
+    def advance(
+        self,
+        value: object,
+        *,
+        origin: "ArtifactOrigin",
+        producer: Optional["NodeSession"] = None,
+    ) -> None:
+        """
+        Publish a new value for this record in place (Slice 22C,
+        `docs/refactor/session_snapshot_decision.md` section 7
+        "`ArtifactRecord` becomes mutable in place";
+        `architectural_invariants.md` #27).
+
+        Unlike plain `ArtifactRecord(value=...)` construction (still how
+        `NodeSession.wrap()` produces a record for this slice -- wiring
+        `wrap()` to call this method instead is slice 22D, not this one),
+        this mutates `self.value` and advances `self.provenance` on the
+        *same* object rather than building a new `ArtifactRecord`. Every
+        other reference to this record -- e.g. one already returned by
+        `ArtifactRepository.get_artifact_record(...)` and held by a
+        caller -- is therefore **aliased** to it (see
+        `references/ingested/glossary.md`, "Aliasing" / "In-place
+        mutation") and observes the mutation too, rather than retaining
+        the independent **value semantics** an `ArtifactRecord` had
+        before this slice. A caller that still needs the old guarantee
+        -- an independent snapshot unaffected by a later `.advance()` --
+        must copy explicitly (e.g. `dataclasses.replace(record,
+        provenance=record.provenance.copy())`), the same way
+        `ArtifactProvenance.copy()` already exists for that purpose.
+
+        Raises `TypeError` if `type(value) is not type(self.value)`: an
+        `ArtifactRecord`'s domain type is fixed at first commit (it is
+        the `ArtifactRepository` dict key, keyed by `type(record.value)`
+        -- see `ArtifactRepository.set_artifact_record`) and cannot
+        change across an in-place advance.
+        """
+
+        if type(value) is not type(self.value):
+            raise TypeError(
+                "ArtifactRecord.advance() cannot change a record's domain "
+                f"type: this record holds {type(self.value).__name__}, "
+                f"got {type(value).__name__}. A record's domain type is "
+                "fixed at first commit -- construct a new ArtifactRecord "
+                "for a different type instead."
+            )
+
+        self.value = value
+        self.provenance.advance(origin=origin, producer=producer)

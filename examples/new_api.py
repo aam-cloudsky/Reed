@@ -14,12 +14,12 @@ Acceptance requirements demonstrated here:
   complete eligible graph.
 - Branching and multi-input joins propagate automatically.
 - TriggerPolicy controls node firing.
-- NodeContext provides per-Run/per-NodeRuntime memory and last_output.
+- NodeContext provides per-Session/per-NodeSession memory and last_output.
 - on_output observes successfully committed domain outputs.
 - Intermediate ArtifactRecords and repository operations are completely
   hidden from ordinary user code.
 - Repeated publications propagate again through the graph while
-  preserving NodeContext state within the same Run.
+  preserving NodeContext state within the same Session.
 
 No manual retrieval or republication of intermediate artifacts is
 allowed in this example.
@@ -205,38 +205,40 @@ flow.add(save_report)
 if __name__ == "__main__":
 
     print("=" * 72)
-    print("Creating Run")
+    print("Creating Session")
     print("=" * 72)
 
-    run = flow.run()
+    session = flow.session()
 
     print()
 
     print("=" * 72)
-    print("First publication")
+    print("First feed()+push()")
     print("=" * 72)
 
-    run.publish(
+    session.feed(
         RawText(
             text="Python type annotations make reactive graphs elegant."
         )
     )
+    session.push()
 
     print()
 
     print("=" * 72)
-    print("Second publication")
+    print("Second feed()+push()")
     print("=" * 72)
 
-    run.publish(
+    session.feed(
         RawText(
             text="Reed should propagate artifacts automatically."
         )
     )
+    session.push()
 
     # Required only to ensure asynchronous observational callbacks have
     # completed before this standalone example exits.
-    run.wait_for_callbacks()
+    session.wait_for_callbacks()
 
-    if run.callback_failures:
-        print("Callback failures:", run.callback_failures)
+    if session.callback_failures:
+        print("Callback failures:", session.callback_failures)

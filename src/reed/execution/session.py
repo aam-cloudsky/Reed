@@ -1,8 +1,8 @@
 """
-Run (Slice 2A, part of Priority 11/12 -- `Flow` / `Run` separation;
-Slice 2A follow-up -- Run-scoped repository ownership; Slice 2B, part of
-Priority 13 -- `NodeRuntime` ownership; Slice 2E, part of Priority 13 --
-the single-firing execution path, `Run.publish(...)`; Slice 21C, GitHub
+Session (Slice 2A, part of Priority 11/12 -- `Flow` / `Session` separation;
+Slice 2A follow-up -- Session-scoped repository ownership; Slice 2B, part of
+Priority 13 -- `NodeSession` ownership; Slice 2E, part of Priority 13 --
+the single-firing execution path, `Session.publish(...)`; Slice 21C, GitHub
 issue #21 -- firing eligibility evaluated over TRIGGERING-role consumed
 types only).
 
@@ -23,32 +23,32 @@ arrival alone never fires") and
 tests/test_slice_21c_run_eligibility_sampled.py.
 
 Scope for this slice (docs/refactor_priority_order.md, Milestone 2, Slice
-2A; docs/architectural_decision.md, "Run"):
+2A; docs/architectural_decision.md, "Session"):
 
     Flow
-        v (run())
-    Run
+        v (session())
+    Session
         v (owns)
     repository (ArtifactRepository, for now -- see below)
-    NodeRuntime instances (one per (Run, FlowNode) pair -- see below)
+    NodeSession instances (one per (Session, FlowNode) pair -- see below)
 
-`Run` represents one concrete execution instance of a `Flow`
-(docs/architectural_decision.md: "A `Run` represents one concrete
+`Session` represents one concrete execution instance of a `Flow`
+(docs/architectural_decision.md: "A `Session` represents one concrete
 execution of a flow. It owns execution-specific state, including: shared
 state for that execution; node runtime instances; local state for each
 node runtime; artifact versions created during the execution; activation
 status; event and message history; execution traces."). This slice
-establishes the identity/ownership *boundary* -- `Run` is the correct
+establishes the identity/ownership *boundary* -- `Session` is the correct
 owner for all of the above -- and, as of the Slice 2A follow-up and Slice
-2B below, makes two pieces of that ownership concrete: Run-scoped
-repository storage, and Run-scoped `NodeRuntime` materialization. It does
+2B below, makes two pieces of that ownership concrete: Session-scoped
+repository storage, and Session-scoped `NodeSession` materialization. It does
 not implement the rest yet (architectural_invariants.md #4, #6:
-`Flow != Run`; `Flow` owns no Run-specific execution state).
+`Flow != Session`; `Flow` owns no Session-specific execution state).
 
-Run-scoped repository ownership (Slice 2A follow-up):
+Session-scoped repository ownership (Slice 2A follow-up):
 
-    Each `Run` constructs and owns its own repository instance, exposed
-    as `run.repository`. For this migration stage the repository is the
+    Each `Session` constructs and owns its own repository instance, exposed
+    as `session.repository`. For this migration stage the repository is the
     existing `ArtifactRepository`, constructed the same way the current,
     regression-protected execution path already constructs one
     (`reed.synchronization.logistics.Logistics.__init__`):
@@ -58,18 +58,18 @@ Run-scoped repository ownership (Slice 2A follow-up):
 
     This is the temporary migration strategy
     `docs/refactor_priority_order.md`'s Slice 2A row and its
-    accompanying prose describe: "`Run` gets a `.repository` accessor
+    accompanying prose describe: "`Session` gets a `.repository` accessor
     from this point on, backed by whatever the current storage class is
     called internally (still `ArtifactRepository` until Milestone 3, slice 3A) ...
     Milestone 2 can and should pass its tests while the underlying
     storage class is still internally called `ArtifactRepository`." It is not the
     final repository architecture: `ArtifactRepository` is not renamed, no
     `ArtifactRecord`-aware `get`/`set` API is defined here, and no
-    adapter/protocol/factory layer is introduced. `Run.repository` is a
-    plain pass-through to the `ArtifactRepository` instance this `Run` constructed
+    adapter/protocol/factory layer is introduced. `Session.repository` is a
+    plain pass-through to the `ArtifactRepository` instance this `Session` constructed
     for itself -- nothing more.
 
-    Each `Run` gets its own `Bus` and its own `ArtifactRepository`: two `Run`s
+    Each `Session` gets its own `Bus` and its own `ArtifactRepository`: two `Session`s
     created from the same `Flow` share no repository state and no
     repository identity (`ArtifactRepository.identity` differs because each is built
     from a distinct `Bus`).
@@ -84,54 +84,54 @@ Run-scoped repository ownership (Slice 2A follow-up):
     sockets -- `Bus.create()` just wraps an in-process `MessageHub()`),
     and `docs/non-goals.md`'s "Repository Exposure" / "Execution
     Infrastructure Exposure" sections are scoped explicitly to
-    `NodeContext` and the public node-function-body API, not to `Run`'s
-    own accessor -- they say nothing about `Run`. This module corrects
+    `NodeContext` and the public node-function-body API, not to `Session`'s
+    own accessor -- they say nothing about `Session`. This module corrects
     that deferral rather than leaving it for a later slice; see
     docs/refactor_state.md's Slice 2A record and Refactor State Log for
     the corrected history.
 
-Run-scoped `NodeRuntime` ownership (Slice 2B):
+Session-scoped `NodeSession` ownership (Slice 2B):
 
-    `Run.node_runtime(node)` returns this `Run`'s `NodeRuntime`
-    (`reed.execution.node_runtime.NodeRuntime`) for the `FlowNode` whose
+    `Session.node_session(node)` returns this `Session`'s `NodeSession`
+    (`reed.execution.node_session.NodeSession`) for the `FlowNode` whose
     underlying function is `node` -- `node` is the same callable
     originally passed to `Flow.add(...)`, matched by identity, exactly
     as `tests/test_target_architecture_contract.py`'s target-contract
-    tests already call it (`run.node_runtime(track)`; that is the
+    tests already call it (`session.node_session(track)`; that is the
     accepted access shape, followed here rather than inventing another
-    one). The lookup is get-or-create and memoized per `Run`: repeated
-    calls for the same node return the same `NodeRuntime` instance,
-    while two different `Run`s -- even created from the same `Flow` --
+    one). The lookup is get-or-create and memoized per `Session`: repeated
+    calls for the same node return the same `NodeSession` instance,
+    while two different `Session`s -- even created from the same `Flow` --
     never share one, even for the same `FlowNode`
-    (architectural_invariants.md #2: `FlowNode != NodeRuntime`; #3:
-    `NodeRuntime != NodeExecution`). See
-    `reed/execution/node_runtime.py`'s module docstring for
-    `NodeRuntime`'s own exact scope.
+    (architectural_invariants.md #2: `FlowNode != NodeSession`; #3:
+    `NodeSession != NodeExecution`). See
+    `reed/execution/node_session.py`'s module docstring for
+    `NodeSession`'s own exact scope.
 
 Single-firing execution path (Slice 2E; docs/refactor_priority_order.md,
 Milestone 2, Slice 2E row):
 
-    `Run.publish(domain_value)` gives `Run` a real, single-firing
+    `Session.publish(domain_value)` gives `Session` a real, single-firing
     execution path:
 
-        1. find the one `FlowNode` on this `Run`'s `Flow` that consumes
+        1. find the one `FlowNode` on this `Session`'s `Flow` that consumes
            `type(domain_value)`;
         2. build that node's call arguments -- the published domain
            value for its one consumed dataflow parameter, plus a
            constructed `NodeContext` snapshot
-           (`self.node_runtime(...).context`) for the parameter named by
+           (`self.node_session(...).context`) for the parameter named by
            `FlowNode.context.parameter_name`, when the node declares one;
         3. call the node function directly (no `NodeExecution` object is
            introduced yet -- see below);
         4. wrap the returned domain value into an `ArtifactRecord` via
-           `NodeRuntime.wrap(...)` and commit it via
-           `NodeRuntime.commit(...)`, which together update
-           `run.repository`'s additive `ArtifactRecord` storage
+           `NodeSession.wrap(...)` and commit it via
+           `NodeSession.commit(...)`, which together update
+           `session.repository`'s additive `ArtifactRecord` storage
            (`reed/synchronization/depot.py`) and the firing
-           `NodeRuntime`'s `.last_output` in one call.
+           `NodeSession`'s `.last_output` in one call.
 
     This is deliberately narrow, matching this slice's two target
-    contracts (`test_run_instances_isolate_node_memory`,
+    contracts (`test_session_instances_isolate_node_memory`,
     `test_last_output_exposes_latest_committed_domain_value`) and no
     more:
 
@@ -144,7 +144,7 @@ Milestone 2, Slice 2E row):
       the ambiguity the SliceContract's stop_conditions name, so it is
       surfaced as an explicit error instead of guessed at.
     - `TriggerPolicy` is not consulted. The one matching `FlowNode`
-      always executes; `Run.publish(...)` does not check execution
+      always executes; `Session.publish(...)` does not check execution
       eligibility (Priority 10 recommended-work item 4, still not
       absorbed by any completed slice).
     - No `on_output` dispatch (Slice 2F).
@@ -169,11 +169,11 @@ Milestone 2, Slice 2E row):
 Explicitly still out of scope for this slice (Milestone 2, later slices):
 
     - No domain-facing `repository.get(domain_type)` /
-      `repository.set(...)` API on `Run` itself. `run.repository`
+      `repository.set(...)` API on `Session` itself. `session.repository`
       exposes the raw `ArtifactRepository` instance as-is (its existing
       `get_parcel`/`set_parcel`/`get_pallet` methods, plus Slice 2E's
       additive `set_artifact_record`/`get_artifact_record`); a
-      `Run`-level accessor wired into `on_output` dispatch is Slice 2F's
+      `Session`-level accessor wired into `on_output` dispatch is Slice 2F's
       job.
     - The `Depot` -> `ArtifactRepository` rename itself (Milestone 3,
       slice 3A; docs/non-goals.md, "Broad Renaming") is now done -- this
@@ -181,9 +181,9 @@ Explicitly still out of scope for this slice (Milestone 2, later slices):
     - No new node-participation identity semantics, no distributed
       execution, no advanced scheduling -- unchanged from Milestone 1.
 
-`Run`'s responsibilities in this slice: exist as a distinct object per
-`Flow.run()` call, know which `Flow` created it, own a distinct
-repository instance, own a distinct, per-node `NodeRuntime` for each node
+`Session`'s responsibilities in this slice: exist as a distinct object per
+`Flow.session()` call, know which `Flow` created it, own a distinct
+repository instance, own a distinct, per-node `NodeSession` for each node
 materialized through it, and support one real, single-node firing via
 `.publish(...)`.
 """
@@ -201,7 +201,8 @@ from pathlib import Path
 
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.composition.node.artifact_descriptor import InputRole
-from reed.execution.node_runtime import NodeRuntime
+from reed.execution.node_session import NodeSession
+from reed.execution.snapshot import Snapshot
 from reed.observability.identity import NodeExecutionIdentity
 from reed.observability.provenance import ProvenanceEvent
 from reed.observability.trace import ExecutionTrace, TraceEvent, TraceEventType
@@ -218,10 +219,8 @@ from reed.observability.storage import (
     merge_discovered_instruments,
     write_manifest,
 )
+from reed.execution.artifact_record import ArtifactOrigin, ArtifactRecord
 from reed.synchronization.artifact_repository import ArtifactRepository
-
-if TYPE_CHECKING:
-    from reed.execution.artifact_record import ArtifactRecord
 from reed.transportation.bus import Bus
 
 if TYPE_CHECKING:
@@ -229,17 +228,17 @@ if TYPE_CHECKING:
     from reed.composition.flow.flow_node import FlowNode
 
 
-class Run:
+class Session:
     """
     One concrete execution instance of a `Flow` (Slice 2A; repository
-    ownership corrected by the Slice 2A follow-up; `NodeRuntime`
+    ownership corrected by the Slice 2A follow-up; `NodeSession`
     ownership added by Slice 2B; single-firing execution path,
     `.publish(...)`, added by Slice 2E).
 
-    See module docstring for the exact scope. `Run` owns an
+    See module docstring for the exact scope. `Session` owns an
     identity/ownership boundary plus its own repository instance
     (`.repository`, currently backed directly by `ArtifactRepository`), its own
-    `NodeRuntime` per materialized node (`.node_runtime(...)`), and a
+    `NodeSession` per materialized node (`.node_session(...)`), and a
     single-node firing path (`.publish(...)`) -- it exists so that later
     slices (2F-2G) have somewhere correct to attach callback dispatch and
     stateful-firing serialization, without any of that state ever being
@@ -255,9 +254,9 @@ class Run:
     ) -> None:
         self._flow = flow
         self._repository = ArtifactRepository(bus=Bus.create())
-        self._node_runtimes: dict[FlowNode, NodeRuntime] = {}
+        self._node_sessions: dict[FlowNode, NodeSession] = {}
         # Milestone O1, Slice O1b/O1e: observability identity. `execution_id`
-        # is minted once per Run instance; `_execution_seq_counter` is
+        # is minted once per Session instance; `_execution_seq_counter` is
         # incremented once per node_execution_id minted (Section 13.1 --
         # deterministic observation order, never causality), scoped to
         # this one execution_id.
@@ -268,7 +267,7 @@ class Run:
         # (docs/observability_implementation_state.md's O3a-e entry
         # records this as a deliberate default -- omitting `storage_root`
         # keeps Recordings in-memory only, exactly as Milestone O2 left
-        # them, so every existing caller of `Flow.run()`/`Run(flow)` is
+        # them, so every existing caller of `Flow.session()`/`Session(flow)` is
         # completely unaffected and no test or script silently starts
         # writing files to disk).
         self._recording_store: RecordingStore | None = None
@@ -282,15 +281,15 @@ class Run:
             )
             # Milestone O7, Slice O7i: instruments.json is no longer
             # written up front from prospectively declared Instruments --
-            # there is nothing to write yet at Run-construction time.
+            # there is nothing to write yet at Session-construction time.
             # `.record_discovered_instruments(...)` merges bindings in as
-            # NodeRuntimes discover them during execution.
+            # NodeSessions discover them during execution.
             run_dir = root / "runs" / self._execution_id
             self._recording_store = CSVRecordingStore(run_dir / "recordings.csv")
             self._provenance_store = CSVProvenanceStore(run_dir / "provenance.csv")
         self.callback_failures: list[BaseException] = []
         self._pending_callback_coroutines: list[Any] = []
-        # Slice 2I: per-(Run, FlowNode) join-state bookkeeping for the
+        # Slice 2I: per-(Session, FlowNode) join-state bookkeeping for the
         # cascade's TriggerPolicy eligibility check -- see module
         # docstring's "Multi-input joins" section. `_last_known_values`
         # holds the last committed value observed for each consumed
@@ -326,17 +325,17 @@ class Run:
 
     @property
     def flow(self) -> Flow:
-        """The `Flow` that created this `Run` via `Flow.run()`."""
+        """The `Flow` that created this `Session` via `Flow.session()`."""
         return self._flow
 
     @property
     def execution_id(self) -> str:
         """
-        This `Run`'s observability identity (Milestone O1, Slice O1b;
+        This `Session`'s observability identity (Milestone O1, Slice O1b;
         docs/observability_goals.md Section 3): a uuid4 minted once in
         `__init__`, identifying this one concrete execution instance.
         Distinct from `flow_id`, which identifies the logical `Flow`
-        definition this `Run` was created from, not this particular
+        definition this `Session` was created from, not this particular
         execution of it.
         """
         return self._execution_id
@@ -344,16 +343,16 @@ class Run:
     @property
     def recording_store(self) -> "RecordingStore | None":
         """
-        This `Run`'s `RecordingStore` (Milestone O3), or `None` if this
-        `Run` was created with no `storage_root` -- Recordings then stay
-        in-memory only (`NodeRuntime.recordings`), exactly as Milestone
+        This `Session`'s `RecordingStore` (Milestone O3), or `None` if this
+        `Session` was created with no `storage_root` -- Recordings then stay
+        in-memory only (`NodeSession.recordings`), exactly as Milestone
         O2 left them.
         """
         return self._recording_store
 
     @property
     def provenance_store(self) -> "ProvenanceStore | None":
-        """This `Run`'s `ProvenanceStore` (Milestone O4), or `None` -- see `.recording_store`."""
+        """This `Session`'s `ProvenanceStore` (Milestone O4), or `None` -- see `.recording_store`."""
         return self._provenance_store
 
     def record_discovered_instruments(
@@ -366,10 +365,10 @@ class Run:
         """
         Merge newly-discovered Instrument bindings for `node_id` into
         this Flow's `instruments.json` manifest (Milestone O7, Slice
-        O7i). Called from `NodeRuntime.flush_recordings(...)` -- see
+        O7i). Called from `NodeSession.flush_recordings(...)` -- see
         that method's docstring for why this stays proportional to
         genuinely new bindings, not once per `ctx.record(...)` call.
-        A no-op if this Run has no `storage_root` configured.
+        A no-op if this Session has no `storage_root` configured.
         """
         if self._storage_root is None:
             return
@@ -391,21 +390,21 @@ class Run:
 
     @property
     def presenter(self):
-        """This `Run`'s terminal `Presenter` (Milestone O7, Slice O7d)."""
+        """This `Session`'s terminal `Presenter` (Milestone O7, Slice O7d)."""
         return self._presenter
 
     @property
     def presentation_policy(self) -> PresentationPolicy:
         """
-        This `Run`'s compiled terminal `PresentationPolicy` (Milestone O7,
-        Slice O7d) -- read-only; set once via `Flow.run(observability=...)`.
+        This `Session`'s compiled terminal `PresentationPolicy` (Milestone O7,
+        Slice O7d) -- read-only; set once via `Flow.session(observability=...)`.
         """
         return self._presentation_policy
 
     @property
     def trace(self) -> ExecutionTrace:
         """
-        This `Run`'s Level 1 Execution Trace (Milestone O5, Slice O5a): an
+        This `Session`'s Level 1 Execution Trace (Milestone O5, Slice O5a): an
         in-memory ring buffer of `TraceEvent`s recording which Node fired,
         in what order, correlated by the same identity Recordings/
         Provenance use. Not durable -- see `docs/observability_design.md`
@@ -416,7 +415,7 @@ class Run:
     @property
     def flow_id(self) -> str:
         """
-        The observability identity of the `Flow` that created this `Run`
+        The observability identity of the `Flow` that created this `Session`
         (Milestone O1, Slice O1b) -- a passthrough to `self.flow.flow_id`.
         See `Flow.flow_id` for the derivation and its stability
         guarantees.
@@ -426,96 +425,252 @@ class Run:
     @property
     def repository(self) -> ArtifactRepository:
         """
-        This `Run`'s own repository instance.
+        This `Session`'s own repository instance.
 
         Backed directly by `ArtifactRepository` for this migration stage (Slice 2A
         follow-up; docs/refactor_priority_order.md's Slice 2A row).
-        Every `Run` constructs its own `Bus` + `ArtifactRepository` pair, so two
-        `Run`s -- even from the same `Flow` -- never share repository
+        Every `Session` constructs its own `Bus` + `ArtifactRepository` pair, so two
+        `Session`s -- even from the same `Flow` -- never share repository
         state or repository identity.
         """
         return self._repository
 
-    def node_runtime(self, node: Callable) -> NodeRuntime:
+    def _commit(
+        self,
+        value: object,
+        *,
+        origin: "ArtifactOrigin",
+        producer: "NodeSession | None" = None,
+    ) -> "ArtifactRecord":
         """
-        This `Run`'s `NodeRuntime` for the `FlowNode` wrapping `node`
-        (Slice 2B).
+        The one shared commit operation (Slice 22D,
+        docs/refactor/session_snapshot_decision.md section 6 "Unified
+        versioning and ArtifactOrigin"; architectural invariants #10,
+        #27, #28).
 
-        `node` is the original callable passed to `Flow.add(...)`,
-        matched by identity against each of this `Run`'s `Flow`'s
-        registered `FlowNode`s. Get-or-create and memoized per `Run`:
-        calling this twice for the same node returns the same
-        `NodeRuntime`; calling it on a different `Run` never does, even
-        for the same node.
+        Both real commit paths route through here instead of two
+        parallel implementations: `NodeSession.wrap()` (this slice)
+        calls it with `origin=ArtifactOrigin.NODE, producer=<that
+        NodeSession>`; the not-yet-implemented `Session.feed()` (Slice
+        22E) will call it with `origin=ArtifactOrigin.EXTERNAL,
+        producer=None`.
 
-        Raises `ValueError` if `node` was never registered on this
-        `Run`'s `Flow` via `Flow.add(...)`.
+        Reads `self.repository.get_artifact_record(type(value))`. If a
+        record already exists for that domain type, advances it in
+        place (`ArtifactRecord.advance(...)`, Slice 22C) and returns
+        that *same* object -- so the next version for a type is always
+        derived from that type's *current* `ArtifactRecord` in the
+        repository (invariant #28), never from a private, per-node or
+        per-type running counter. If absent, constructs a fresh
+        `ArtifactRecord` holding `value` and advances its (freshly
+        default-constructed, pending) provenance exactly once --
+        `ArtifactVersion.pending()` (0) -> `.next()` == `.initial()`
+        (1) -- via the same `ArtifactProvenance.advance(...)` mechanic
+        `ArtifactRecord.advance()` itself uses, so a first commit here
+        is byte-identical to a first commit via the in-place path: same
+        version (`ArtifactVersion.initial()`), same `origin`, same
+        `producer`, same empty `dependencies`. Stores the new record via
+        `self.repository.set_artifact_record(...)` and returns it.
         """
-        flow_node = self._find_flow_node(node)
+        existing = self._repository.get_artifact_record(type(value))
+        if existing is not None:
+            existing.advance(value, origin=origin, producer=producer)
+            return existing
 
-        if flow_node not in self._node_runtimes:
-            self._node_runtimes[flow_node] = NodeRuntime(self, flow_node)
+        record = ArtifactRecord(value=value)
+        record.provenance.advance(origin=origin, producer=producer)
+        self._repository.set_artifact_record(record)
+        return record
 
-        return self._node_runtimes[flow_node]
-
-    def publish(self, domain_value: object) -> object:
+    def feed(self, value: object) -> None:
         """
-        Entry point to the automatic propagation cascade (Slice 2H;
-        Slice 2E's original single-firing dispatch is now
-        `Run._fire(...)`, reused unchanged by both direct publication
-        and cascade propagation; Slice 2I adds real `TriggerPolicy`
-        eligibility gating and multi-input join firing on top of the
-        same FIFO loop).
+        Record and commit an externally supplied domain value (Slice 22E;
+        docs/refactor/session_snapshot_decision.md section 4 "`feed()` is a
+        node"; architectural_invariants.md #10, #29, #30, #31).
 
-        `domain_value` is treated as an already-committed input and
-        seeds a FIFO queue of pending committed domain values. While the
-        queue is non-empty, this pops one committed value, uses
-        `self._flow.dependency_graph.consumers_of(type(value))` to find
-        every `FlowNode` consuming that type, and for each discovered
-        consumer -- single- or multi-input alike -- records the
-        arriving value into this `Run`'s per-FlowNode join-state
-        (`._record_input`), checks that every one of its consumed types
-        now has a value (`._is_fully_covered`; a node cannot be called
-        with a missing parameter), and then consults
-        `flow_node.trigger_policy` together with which domain type just
-        arrived (`._is_eligible_to_fire`) before ever firing it.
-        `TriggerPolicy.MANUAL` nodes are discovered (their join-state is
-        still tracked) but never auto-fired. `ANY_INPUT_CHANGED` fires on
-        a TRIGGERING-role arrival once full coverage is first reached (a
-        SAMPLED arrival never fires it by itself, Slice 21C);
-        `ALL_INPUTS_CHANGED` fires only once every TRIGGERING-role
-        consumed type has gone fresh since the node's last firing, then
-        resets that freshness -- a SAMPLED type's freshness is never
-        tracked at all, so it can never block or force a refire. An
-        eligible node's full call-argument set
-        is built from its last-known values (`._build_call_kwargs`)
-        before calling `self._fire(...)`, and its committed output is
-        enqueued for the next iteration. No per-version "already fired"
-        bookkeeping beyond this join-state is introduced: a fresh
-        cascade runs to quiescence (queue empty) on every call, so a
-        second `publish(...)` call re-fires downstream nodes again with
-        new data (subject to the same `TriggerPolicy` gating).
+        `feed()` is modeled architecturally as a node whose function is the
+        identity, triggered manually instead of by the eligibility cascade:
 
-        Returns the domain value produced by firing the `FlowNode`(s)
-        that directly consume `domain_value` itself -- specifically,
-        the last such direct firing's committed value, unaffected by
-        anything the cascade goes on to fire afterward. If nothing
-        consumes `type(domain_value)`, returns `domain_value` itself
-        (there was no direct firing to report a result for).
+        1. Performs the existing input-recording bookkeeping unchanged, via
+           `._record_input(...)` -- the same method `publish(...)`'s cascade
+           loop calls -- for every `FlowNode` on this `Session`'s `Flow` that
+           consumes `type(value)` (`self._flow.dependency_graph.consumers_of`).
+           This updates `_last_known_values` per consuming `FlowNode` and marks
+           `_fresh_since_last_firing` only for `InputRole.TRIGGERING` consumed
+           types (issue #21's existing distinction) -- a `SAMPLED` edge is
+           still recorded but never marked fresh by this alone.
+        2. Commits `value` into `self.repository` through the same shared
+           commit path a node firing uses (`Session._commit`, Slice 22D),
+           tagged `origin=ArtifactOrigin.EXTERNAL, producer=None`. Per
+           invariant 30, this deliberately performs no
+           `DuplicateArtifactProducerError`-style guard against `type(value)`
+           already having a declared producer `FlowNode` -- `feed()` never
+           participated in the declared `Flow`/`ArtifactDependencyGraph`
+           composition graph in the first place (invariant 10 governs only
+           `Flow.add(...)`-registered `FlowNode`s against each other), so
+           overwriting a declared producer's type here is an intentional
+           escape hatch, not a bug. `Session._commit`'s fresh-record path
+           (no prior `ArtifactRecord` for the type) never sets
+           `dependencies`, so the resulting record's `dependencies` is always
+           `{}` -- a fed value depends on nothing.
+        3. Fires the same observability hooks a node firing does, via the
+           exact methods `Session._fire(...)` calls around a node's own
+           commit (reused here, not duplicated): a `"node_finished"`
+           `TraceEvent` (`._record_trace_event`) and a `"generated"`
+           `ProvenanceEvent` (`._emit_generated_provenance_event`), both
+           keyed to a freshly minted `NodeExecutionIdentity` exactly as a
+           real firing mints one (`._begin_node_execution`'s own pattern:
+           `self._execution_seq_counter` incremented once, a fresh
+           `node_execution_id`). Because `feed()` has no `FlowNode` of its
+           own -- it is a node only in the identity-function sense, never a
+           `Flow.add(...)`-registered one -- its `node_id` is the fed
+           domain type's own stable identity (`._artifact_id`, the same
+           `module.qualname` derivation `FlowNode.node_id` itself uses, per
+           `._artifact_id`'s own docstring): "the node" `feed()` models here
+           IS the type's identity function, so its identity-bundle `node_id`
+           is the type's identity. If `type(value)` has a declared producer
+           `FlowNode` (`self._flow.dependency_graph.producer_of`), that
+           producer's `on_output` is dispatched with the fed value
+           (`._dispatch_on_output`, unchanged) -- the same callback that
+           would run had that producer computed this value itself, since
+           from `on_output`'s perspective (invariant 21: "executes only
+           after successful commit"; invariant 22: "receives domain
+           values") a fresh, successfully committed value for its type is
+           what it reacts to, regardless of which commit path produced it.
+           If no producer is declared for the type, there is no `on_output`
+           to dispatch, exactly as an undeclared `on_output` is already a
+           no-op elsewhere in this module. This is a genuine, deliberate
+           behavior change from today's `publish()`, which fires none of
+           this for a root-published value -- not suppressed here.
+
+        Does **not** evaluate firing eligibility and does **not** fire any
+        node itself (invariant 31) -- that is `Session.push()`'s job
+        (Slice 22F, not yet implemented).
         """
-        # Milestone O7, Slice O7d: `depth` (propagation depth from the
-        # externally published value, 0-based) travels alongside each
-        # pending value purely for the "propagation" terminal
-        # presentation dimension's indentation -- it is presentation-only
-        # bookkeeping, never used for firing order, eligibility, or any
-        # other execution decision (Milestone O7's own constraint:
-        # presentation must never become the observability/execution
-        # model itself).
-        pending: list[tuple[object, int]] = [(domain_value, 0)]
-        direct_result: object = domain_value
-        is_first_iteration = True
+        domain_type = type(value)
 
-        self._safe_presenter_call(self._presenter.on_publish_start, domain_value)
+        for flow_node in self._flow.dependency_graph.consumers_of(domain_type):
+            self._record_input(flow_node, domain_type, value)
+
+        record = self._commit(value, origin=ArtifactOrigin.EXTERNAL, producer=None)
+
+        self._execution_seq_counter += 1
+        identity = NodeExecutionIdentity(
+            execution_id=self._execution_id,
+            flow_id=self.flow_id,
+            node_id=self._artifact_id(domain_type),
+            node_execution_id=str(uuid.uuid4()),
+            execution_seq=self._execution_seq_counter,
+        )
+
+        self._record_trace_event("node_finished", identity)
+        self._emit_generated_provenance_event(record, identity)
+
+        producer_node = self._flow.dependency_graph.producer_of(domain_type)
+        if producer_node is not None:
+            self._dispatch_on_output(producer_node, record.value)
+
+
+    def push(self) -> None:
+        """
+        Fire every `FlowNode` made eligible by a `feed()` since the last
+        `push()`, cascading to quiescence (Slice 22F;
+        docs/refactor/session_snapshot_decision.md section 5 "`push()` and
+        `snapshot()`"; architectural_invariants.md #18, #19, #31, #32).
+
+        Adapts `publish()`'s existing eligibility -> fire ->
+        cascade-to-quiescence loop (unchanged there -- see
+        `Session.publish`'s own docstring; this method has its own,
+        separate copy of that loop so `publish()` remains byte-for-byte
+        untouched until it is removed in Slice 22H) so that it is seeded
+        by every `FlowNode` that has received a `feed()`-driven
+        TRIGGERING-role arrival since the last `push()`, instead of by
+        one directly-published value's consumers.
+
+        Seed set: every `FlowNode` with a non-empty
+        `_fresh_since_last_firing` entry -- the exact "since last
+        firing" freshness bookkeeping `_record_input` already maintains
+        for `publish()`'s own `ALL_INPUTS_CHANGED` gate, and that
+        `feed()` (Slice 22E) already populates for TRIGGERING-role
+        consumed types only (issue #21's SAMPLED/TRIGGERING split,
+        unchanged and reused here -- a `feed()` of a SAMPLED-role value
+        alone never adds anything to this set, so it can never seed a
+        node). A `FlowNode` in this set may hold values for more than
+        one recently-fed TRIGGERING type at once; any one of them is a
+        valid stand-in for "arrived_domain_type" in
+        `_is_eligible_to_fire`, since `ALL_INPUTS_CHANGED` ignores that
+        argument entirely and `ANY_INPUT_CHANGED` only checks that it is
+        TRIGGERING-role -- true by construction for every member of this
+        set.
+
+        Each seeded node is checked for full coverage
+        (`_is_fully_covered`) and `TriggerPolicy` eligibility
+        (`_is_eligible_to_fire`) exactly as `publish()`'s loop checks a
+        newly-arrived value's consumers, then fired (`_fire`) if both
+        hold; its committed output seeds the same FIFO
+        cascade-to-quiescence loop `publish()` runs, so downstream
+        nodes fire in turn using the identical mechanism, all the way
+        to quiescence (multi-hop cascades behave exactly as they do
+        under `publish()`).
+
+        Resetting "since last push": every `FlowNode` this call actually
+        fires (from the seed pass or from the cascade) has its
+        `_fresh_since_last_firing` entry cleared to the empty set
+        immediately after it fires -- regardless of `TriggerPolicy`
+        (`_fire()` itself only clears this for `ALL_INPUTS_CHANGED`,
+        since that is all `publish()` ever needed; `push()` additionally
+        clears it here for `ANY_INPUT_CHANGED` firings too, since an
+        `ANY_INPUT_CHANGED` node's freshness would otherwise never be
+        spent and would wrongly re-seed the next `push()` call with no
+        intervening `feed()`). A seeded node that is *not* fired this
+        call (not fully covered yet, or `TriggerPolicy` says wait) keeps
+        its freshness untouched, exactly like `publish()` today -- so
+        that partial progress toward `ALL_INPUTS_CHANGED` coverage made
+        by one `feed()` is not silently discarded by an intervening
+        `push()` that could not yet fire it. Together, this makes a
+        second `push()` with no intervening `feed()` a genuine no-op:
+        every node that fired last time now has an empty freshness set
+        (so it is not reseeded), and every node that did not fire is
+        re-evaluated against unchanged state and again does not fire --
+        quiescent immediately, nothing fires (invariant #18: dirty state
+        does not imply immediate execution).
+
+        Returns `None`, strictly (invariant #32) -- unlike `publish()`,
+        there is no "direct result" to report; `Session.snapshot()`
+        (Slice 22G, not yet implemented) is the separate call for
+        reading resulting state.
+        """
+        seeded_flow_nodes = [
+            flow_node
+            for flow_node, fresh in self._fresh_since_last_firing.items()
+            if fresh
+        ]
+
+        pending: list[tuple[object, int]] = []
+
+        for flow_node in seeded_flow_nodes:
+            if not self._is_fully_covered(flow_node):
+                # Not every consumed type has a value yet -- discovered
+                # via feed(), but not callable, regardless of
+                # TriggerPolicy. Its freshness is left untouched so a
+                # later feed() completing coverage can still find it.
+                continue
+
+            arrived_domain_type = next(
+                iter(self._fresh_since_last_firing[flow_node])
+            )
+            if not self._is_eligible_to_fire(flow_node, arrived_domain_type):
+                # Covered but TriggerPolicy says wait. Freshness is left
+                # untouched (e.g. ALL_INPUTS_CHANGED still needs another
+                # TRIGGERING type fed before every consumed TRIGGERING
+                # type is fresh at once).
+                continue
+
+            identity = self._begin_node_execution(flow_node)
+            call_kwargs = self._build_call_kwargs(flow_node, identity)
+            result = self._fire(flow_node, call_kwargs, identity, depth=0)
+            self._fresh_since_last_firing[flow_node] = set()
+            pending.append((result, 1))
 
         while pending:
             current_value, depth = pending.pop(0)
@@ -527,33 +682,77 @@ class Run:
                 self._record_input(flow_node, domain_type, current_value)
 
                 if not self._is_fully_covered(flow_node):
-                    # Not every consumed type has a value yet -- the
-                    # node cannot be called with a missing parameter,
-                    # regardless of TriggerPolicy. Discovered, not
-                    # fired, no error (Slice 2H's join precedent,
-                    # generalized to every policy).
                     continue
 
                 if not self._is_eligible_to_fire(flow_node, domain_type):
-                    # Covered but TriggerPolicy says wait (MANUAL: never;
-                    # ALL_INPUTS_CHANGED: not every TRIGGERING-role input
-                    # fresh since the last firing yet; ANY_INPUT_CHANGED:
-                    # this particular arrival is SAMPLED-role, Slice 21C).
                     continue
 
                 identity = self._begin_node_execution(flow_node)
                 call_kwargs = self._build_call_kwargs(flow_node, identity)
                 result = self._fire(flow_node, call_kwargs, identity, depth=depth)
+                self._fresh_since_last_firing[flow_node] = set()
                 pending.append((result, depth + 1))
 
-                if is_first_iteration:
-                    direct_result = result
+        return None
 
-            is_first_iteration = False
+    def snapshot(self) -> Snapshot:
+        """
+        The full current state of this `Session`'s repository, as plain
+        domain values (Slice 22G;
+        docs/refactor/session_snapshot_decision.md section 5 "`push()` and
+        `snapshot()`"; architectural_invariants.md #33).
 
-        self._safe_presenter_call(self._presenter.on_publish_end)
+        Reads every domain type currently committed in `self.repository` at
+        the moment this method is called -- not scoped to whatever the most
+        recent `push()` touched -- and returns an immutable `Snapshot`
+        exposing plain domain values only, never `ArtifactRecord`
+        (`reed/execution/snapshot.py`'s own docstring covers why and how).
+        There is no automatic history: each call builds a fresh `Snapshot`
+        reflecting repository state at that moment, and a later commit into
+        the repository never changes a `Snapshot` already returned.
+        `self.repository` remains the lower-level escape hatch it is today
+        ("latest known value of X, whenever committed"); `snapshot()`
+        answers "what does the repository look like right now."
+        """
+        return Snapshot.from_repository(self._repository)
 
-        return direct_result
+    def invoke(self, value: object) -> Snapshot:
+        """
+        Convenience, single-input round trip (Slice 22G;
+        docs/refactor/session_snapshot_decision.md section 8 "Target public
+        API reference").
+
+        Equivalent to calling `feed(value)`, then `push()`, then
+        `snapshot()`, and returning that `Snapshot` -- for the common case
+        of feeding exactly one value and immediately wanting the resulting
+        state back, without a caller needing to sequence the three calls
+        itself.
+        """
+        self.feed(value)
+        self.push()
+        return self.snapshot()
+
+    def node_session(self, node: Callable) -> NodeSession:
+        """
+        This `Session`'s `NodeSession` for the `FlowNode` wrapping `node`
+        (Slice 2B).
+
+        `node` is the original callable passed to `Flow.add(...)`,
+        matched by identity against each of this `Session`'s `Flow`'s
+        registered `FlowNode`s. Get-or-create and memoized per `Session`:
+        calling this twice for the same node returns the same
+        `NodeSession`; calling it on a different `Session` never does, even
+        for the same node.
+
+        Raises `ValueError` if `node` was never registered on this
+        `Session`'s `Flow` via `Flow.add(...)`.
+        """
+        flow_node = self._find_flow_node(node)
+
+        if flow_node not in self._node_sessions:
+            self._node_sessions[flow_node] = NodeSession(self, flow_node)
+
+        return self._node_sessions[flow_node]
 
     def _consumed_types(self, flow_node: "FlowNode") -> set[type]:
         return {
@@ -673,10 +872,10 @@ class Run:
         }
 
         if flow_node.context is not None:
-            node_runtime = self.node_runtime(flow_node.definition.function)
-            recorder = functools.partial(node_runtime.accept_recording, identity)
+            node_session = self.node_session(flow_node.definition.function)
+            recorder = functools.partial(node_session.accept_recording, identity)
             call_kwargs[flow_node.context.parameter_name] = (
-                node_runtime.build_context(identity, recorder)
+                node_session.build_context(identity, recorder)
             )
 
         return call_kwargs
@@ -694,7 +893,7 @@ class Run:
         (docs/observability_design.md Section 18/21).
 
         `node_execution_id` is a fresh uuid4 per call (one per firing,
-        never reused). `execution_seq` is this `Run`'s own monotonic
+        never reused). `execution_seq` is this `Session`'s own monotonic
         counter, incremented once per call -- a deterministic
         observation order scoped to this `execution_id`, never a
         causality claim (Section 13.1; docs/observability_invariants.md
@@ -727,7 +926,7 @@ class Run:
 
         Calls the node function, wraps the returned domain value into
         an `ArtifactRecord`, commits it into `self.repository`, updates
-        the firing `NodeRuntime`'s `.last_output`, dispatches
+        the firing `NodeSession`'s `.last_output`, dispatches
         `on_output`, and -- for `TriggerPolicy.ALL_INPUTS_CHANGED` --
         clears `flow_node`'s freshness set so a later partial update
         round does not immediately re-trigger it. Returns the produced
@@ -739,8 +938,8 @@ class Run:
         time a type is consumed with no prior producer), before calling
         the node function, and a `"generated"` event for the artifact
         this firing itself commits, after `.commit(...)` succeeds. Both
-        are no-ops when this `Run` has no `provenance_store` configured
-        (`storage_root` was not passed to `Flow.run(...)`).
+        are no-ops when this `Session` has no `provenance_store` configured
+        (`storage_root` was not passed to `Flow.session(...)`).
 
         Milestone O5 (Slice O5a): records a `"node_started"` `TraceEvent`
         into `self.trace` before calling the node function, and a
@@ -749,19 +948,19 @@ class Run:
         (design record Section 11.1; `self._trace` is always constructed).
 
         Milestone O7 (Slice O7c): flushes this firing's buffered
-        `Recording`s (`node_runtime.flush_recordings(...)`) in a `finally`
+        `Recording`s (`node_session.flush_recordings(...)`) in a `finally`
         block covering the node function call -- the NodeExecution
         durability boundary applies whether the firing succeeds or
         raises (docs/observability_goals.md Section 5), not only on the
         success path.
         """
-        node_runtime = self.node_runtime(flow_node.definition.function)
+        node_session = self.node_session(flow_node.definition.function)
 
         self._emit_used_provenance_events(flow_node, identity)
         self._record_trace_event("node_started", identity)
         self._safe_presenter_call(self._presenter.on_node_started, identity, depth=depth)
 
-        firing_lock = node_runtime.firing_lock
+        firing_lock = node_session.firing_lock
 
         start_time = time.monotonic()
         if firing_lock is not None:
@@ -770,8 +969,8 @@ class Run:
             try:
                 result = flow_node.definition.function(**call_kwargs)
 
-                record = node_runtime.wrap(result)
-                node_runtime.commit(record)
+                record = node_session.wrap(result)
+                node_session.commit(record)
             except BaseException as exc:
                 # Milestone O7, Slice O7d: report the failure to the
                 # terminal presenter -- a pure observer, never a handler
@@ -788,7 +987,7 @@ class Run:
                 )
                 raise
             finally:
-                node_runtime.flush_recordings(identity.node_execution_id)
+                node_session.flush_recordings(identity.node_execution_id)
         finally:
             if firing_lock is not None:
                 firing_lock.release()
@@ -827,7 +1026,7 @@ class Run:
         Milestone O8, Slice O8b -- reports the same fact to the terminal
         `Presenter` via `on_artifact_consumed`, regardless of whether durable
         storage is configured. Presentation must never depend on the durable
-        storage opt-in (docs/observability_invariants.md #35): a `Run` with no
+        storage opt-in (docs/observability_invariants.md #35): a `Session` with no
         `storage_root` still renders `propagation` terminal output.
         """
         for descriptor in flow_node.consumed_artifacts:
@@ -930,31 +1129,10 @@ class Run:
             )
         )
 
-    def publish_many(self, domain_values: "list[object]") -> None:
-        """
-        Publish each value in `domain_values`, in order, via
-        `self.publish(...)` (Slice 2G).
-
-        A thin, sequential convenience wrapper -- not a second
-        execution path, a queue, or a scheduler: it calls
-        `self.publish(value)` once per value, exactly as if the caller
-        had called `.publish(...)` in a loop themselves. See
-        `test_stateful_node_runtime_firings_are_serialized`
-        (tests/test_target_architecture_contract.py), which uses this
-        method; the actual concurrency guarantee it relies on
-        (`architectural_invariants.md #17) comes from
-        `NodeRuntime.firing_lock`, not from this method firing
-        concurrently -- see module docstring and the SliceContract's
-        stop_conditions for why a sequential loop, plus a real
-        per-NodeRuntime lock, is the correct shape here.
-        """
-        for domain_value in domain_values:
-            self.publish(domain_value)
-
     def _dispatch_on_output(self, flow_node: "FlowNode", domain_value: object) -> None:
         """
         Invoke `flow_node`'s declared `on_output` callback with
-        `domain_value`, strictly after `NodeRuntime.commit(...)` has
+        `domain_value`, strictly after `NodeSession.commit(...)` has
         already succeeded (Slice 2F; architectural_invariants.md #21,
         #22, #23).
 
@@ -1020,6 +1198,6 @@ class Run:
                 return flow_node
 
         raise ValueError(
-            f"{node!r} is not registered on this Run's Flow via "
+            f"{node!r} is not registered on this Session's Flow via "
             "Flow.add(...)"
         )

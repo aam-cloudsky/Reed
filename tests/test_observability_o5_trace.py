@@ -40,42 +40,61 @@ def _make_flow():
 
 def test_firing_records_started_then_finished_events():
     flow, produce = _make_flow()
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
-    events = run.trace.events
-    assert len(events) == 2
-    assert events[0].event_type == "node_started"
-    assert events[1].event_type == "node_finished"
-    assert events[0].node_execution_id == events[1].node_execution_id
-    assert events[0].execution_seq == events[1].execution_seq
+    events = session.trace.events
+    # feed()'s own commit of the externally supplied Measurement also
+    # records a "node_finished" TraceEvent (Slice 22E), but never a
+    # "node_started" one -- feed() is not a real function call with a
+    # start/end duration. Only push()'s firing of produce gets the
+    # started+finished pair.
+    assert len(events) == 3
+    produce_events = [e for e in events if e.node_id.endswith("produce")]
+    assert len(produce_events) == 2
+    assert produce_events[0].event_type == "node_started"
+    assert produce_events[1].event_type == "node_finished"
+    assert produce_events[0].node_execution_id == produce_events[1].node_execution_id
+    assert produce_events[0].execution_seq == produce_events[1].execution_seq
 
 
 def test_trace_events_carry_identity_fields():
     flow, produce = _make_flow()
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
-    event = run.trace.events[0]
-    assert event.execution_id == run.execution_id
-    assert event.flow_id == run.flow_id
-    assert event.node_id.endswith("produce")
-    assert event.execution_seq == 1
+    for event in session.trace.events:
+        assert event.execution_id == session.execution_id
+        assert event.flow_id == session.flow_id
+
+    # feed()'s own "node_finished" event for Measurement comes first
+    # (execution_seq 1, node_id the fed type's own identity); produce's
+    # own started/finished pair follows with execution_seq 2 (Slice
+    # 22E: feed() mints a real NodeExecutionIdentity too).
+    produce_event = next(
+        e for e in session.trace.events if e.node_id.endswith("produce")
+    )
+    assert produce_event.execution_seq == 2
 
 
 def test_trace_is_populated_with_no_storage_root_configured():
     """Level 1 has no opt-in -- unlike recording_store/provenance_store,
     trace is always populated regardless of storage_root."""
     flow, produce = _make_flow()
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
-    assert run.recording_store is None
-    assert run.provenance_store is None
-    assert len(run.trace) == 2
+    assert session.recording_store is None
+    assert session.provenance_store is None
+    # feed()'s own "node_finished" event plus produce's
+    # "node_started"/"node_finished" pair (Slice 22E).
+    assert len(session.trace) == 3
 
 
 def test_ring_buffer_drops_oldest_past_capacity():

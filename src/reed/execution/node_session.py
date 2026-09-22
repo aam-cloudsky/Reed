@@ -1,34 +1,34 @@
 """
-NodeRuntime (Slice 2B, part of Priority 13 -- `Node` -> `NodeRuntime`,
+NodeSession (Slice 2B, part of Priority 13 -- `Node` -> `NodeSession`,
 runtime-ownership portion; Slice 2C, part of Priority 13 -- the
 `ArtifactRecord` unwrap boundary; Slice 2D, part of Priority 13 -- memory
 and `.context` construction; Slice 2E, part of Priority 13 -- wrap/commit,
 the firing-tied direction).
 
 Scope for this slice (docs/refactor_priority_order.md, Milestone 2, Slice
-2B row: "`Node` migrated to `NodeRuntime`: run-local ownership of one
-`FlowNode`'s execution state, created and held by `Run`"; Priority 13's
+2B row: "`Node` migrated to `NodeSession`: session-local ownership of one
+`FlowNode`'s execution state, created and held by `Session`"; Priority 13's
 own traceability split: "runtime ownership -> 2B"; docs/architectural_
-decision.md, "Node Runtime"; docs/flow_composition_implementation_basis.md,
-"FlowNode" -- the `NodeDefinition -> FlowNode -> NodeRuntime ->
+decision.md, "Node Session"; docs/flow_composition_implementation_basis.md,
+"FlowNode" -- the `NodeDefinition -> FlowNode -> NodeSession ->
 NodeExecution` model):
 
     FlowNode
-        v (materialized inside one Run)
-    NodeRuntime
+        v (materialized inside one Session)
+    NodeSession
 
-`NodeRuntime` represents one node participation (`FlowNode`) materialized
-inside one `Run` (docs/architectural_decision.md, "Node Runtime": "A
-`NodeRuntime` represents one node participation materialized inside one
-run. It is distinct from `NodeDefinition`. This distinction prevents a
+`NodeSession` represents one node participation (`FlowNode`) materialized
+inside one `Session` (docs/architectural_decision.md, "Node Session": "A
+`NodeSession` represents one node participation materialized inside one
+session. It is distinct from `NodeDefinition`. This distinction prevents a
 reusable node definition from accidentally carrying state across
 unrelated executions.").
 
-Slice 2B established only the ownership/identity boundary (a `NodeRuntime`
-exists per (`Run`, `FlowNode`) pair, created and held by `Run`, stable
-within a `Run`, never shared across `Run`s). Slice 2C added exactly one
-thing on top of that: `NodeRuntime.unwrap(record)`, a pure passthrough
-(`record.value`) for the "NodeRuntime boundary -> unwrap -> DomainValue"
+Slice 2B established only the ownership/identity boundary (a `NodeSession`
+exists per (`Session`, `FlowNode`) pair, created and held by `Session`, stable
+within a `Session`, never shared across `Session`s). Slice 2C added exactly one
+thing on top of that: `NodeSession.unwrap(record)`, a pure passthrough
+(`record.value`) for the "NodeSession boundary -> unwrap -> DomainValue"
 step (see `reed/execution/artifact_record.py`'s module docstring for that
 boundary's own exact scope).
 
@@ -38,8 +38,8 @@ Priority 13's traceability split "context/memory wiring -> 2D";
 docs/node_context_decision.md; docs/architectural_invariants.md #14, #15,
 #16):
 
-    NodeRuntime
-        .memory        -- lazily instantiated from this NodeRuntime's
+    NodeSession
+        .memory        -- lazily instantiated from this NodeSession's
                            FlowNode's declared MemoryType (a zero-argument
                            construction -- docs/refactor_priority_order.md,
                            Priority 5, "instantiate memory from
@@ -48,27 +48,27 @@ docs/node_context_decision.md; docs/architectural_invariants.md #14, #15,
                            subsequent access.
         .last_output   -- the latest committed domain output, set by
                            `.commit(record)` (Slice 2E). `None` until this
-                           NodeRuntime's first successful commit.
+                           NodeSession's first successful commit.
         .context       -- a fresh NodeContext(memory=.., last_output=..)
                            snapshot built from the two properties above.
 
 Both `.memory` and `.last_output` (and therefore `.context`, which is
-built from them) raise `AttributeError` if this `NodeRuntime`'s node
+built from them) raise `AttributeError` if this `NodeSession`'s node
 function does not declare a `NodeContext[MemoryType, OutputType]`
 parameter at all (`self.flow_node.context is None` -- see `FlowNode.context`,
 Slice 1C, delegating to `NodeContextDescriptor`, Slice 1B). `AttributeError`
-is used deliberately, not `ValueError`: it lets `hasattr(node_runtime,
+is used deliberately, not `ValueError`: it lets `hasattr(node_session,
 "memory")` correctly report `False` for such a node (Python's `hasattr`
 only swallows `AttributeError`), matching the intuition that a node
 without a `NodeContext` parameter simply has no memory/context/last_output
 capability -- there is no `MemoryType` to construct from and no declared
 `OutputType` for `last_output` to be typed against.
 
-Because two different `Run`s never share a `NodeRuntime` (Slice 2B) and
-each `NodeRuntime`'s `.memory` is memoized on the `NodeRuntime` instance
+Because two different `Session`s never share a `NodeSession` (Slice 2B) and
+each `NodeSession`'s `.memory` is memoized on the `NodeSession` instance
 itself (not on `FlowNode` or `Flow`), `NodeMemory` is scoped to exactly
-`Run x NodeRuntime` (architectural_invariants.md #14) and is never shared
-across `Run`s (architectural_invariants.md #16) as a direct structural
+`Session x NodeSession` (architectural_invariants.md #14) and is never shared
+across `Session`s (architectural_invariants.md #16) as a direct structural
 consequence of Slice 2B's ownership boundary -- this slice does not need
 to add any additional isolation mechanism of its own.
 
@@ -77,10 +77,10 @@ order.md, Milestone 2, Slice 2E row; docs/parcel_boundary_decision.md,
 "Parcel As Internal Envelope" -- `wrap: U -> Parcel[U]`, read here as
 `wrap: DomainValue -> ArtifactRecord[DomainValue]`):
 
-    NodeRuntime
+    NodeSession
         .wrap(domain_value)   -- wraps a returned domain value into a
                                   fresh ArtifactRecord, with this
-                                  NodeRuntime recorded as its producer
+                                  NodeSession recorded as its producer
                                   (docs/architectural_decision.md's
                                   ArtifactProvenance.producer) and its
                                   version advanced from pending (0) to
@@ -88,7 +88,7 @@ order.md, Milestone 2, Slice 2E row; docs/parcel_boundary_decision.md,
         .commit(record)       -- the successful-commit path only
                                   (docs/node_context_decision.md,
                                   "Transaction Semantics"): stores
-                                  `record` into `self.run.repository`'s
+                                  `record` into `self.session.repository`'s
                                   additive ArtifactRecord storage (see
                                   `reed/synchronization/depot.py`,
                                   `set_artifact_record`) and updates
@@ -98,12 +98,12 @@ order.md, Milestone 2, Slice 2E row; docs/parcel_boundary_decision.md,
                                   semantics for a firing that raises
                                   partway through are explicitly out of
                                   scope for this slice (see
-                                  `run.py`'s `publish` docstring and the
+                                  `session.py`'s `publish` docstring and the
                                   SliceContract's stop_conditions) --
                                   neither target test this slice must
                                   pass exercises them.
 
-`Run.publish(domain_value)` (`reed/execution/run.py`, Slice 2E) is what
+`Session.publish(domain_value)` (`reed/execution/session.py`, Slice 2E) is what
 actually calls `.wrap(...)` and `.commit(...)` as part of one firing; this
 class only owns the two operations themselves, not the decision of when
 to fire.
@@ -116,25 +116,25 @@ Explicitly out of scope for this slice (Milestone 2, later slices; see
       (2F).
     - No stateful-firing serialization (architectural_invariants.md #17,
       2G) -- `.commit(...)` here is not itself a lock/serialization
-      mechanism; concurrent firings of the same NodeRuntime are not
+      mechanism; concurrent firings of the same NodeSession are not
       guarded against yet.
     - No transactional rollback for a firing that fails partway through
       wrap/commit -- only the successful-commit path is implemented (see
       above and the SliceContract's stop_conditions for why guessing a
       rollback mechanism here would be wrong).
     - No multi-node dispatch/routing, no TriggerPolicy-gated execution
-      eligibility -- both remain `Run.publish(...)`'s concern (2E) and,
+      eligibility -- both remain `Session.publish(...)`'s concern (2E) and,
       for TriggerPolicy specifically, out of this slice entirely.
     - No new executors, schedulers, managers, factories, or lifecycle
       frameworks.
 
-`NodeRuntime`'s responsibilities in this slice: exist as a distinct
-object per (`Run`, `FlowNode`) pair, know which `Run` and which
+`NodeSession`'s responsibilities in this slice: exist as a distinct
+object per (`Session`, `FlowNode`) pair, know which `Session` and which
 `FlowNode` it materializes, unwrap an `ArtifactRecord` into its domain
 value on request, own a private, node-local memory instance and a
 last-committed-output slot (both scoped to itself), construct a
 `NodeContext` snapshot exposing both, and wrap/commit a successfully
-produced domain value into the run's repository.
+produced domain value into the session's repository.
 """
 
 from __future__ import annotations
@@ -143,19 +143,19 @@ import threading
 from typing import TYPE_CHECKING
 
 from reed.composition.node.node_context import NodeContext
-from reed.execution.artifact_record import ArtifactProvenance, ArtifactRecord
+from reed.execution.artifact_record import ArtifactOrigin, ArtifactRecord
 from reed.observability.identity import NodeExecutionIdentity
 from reed.observability.instrument import Instrument, InstrumentKind
 from reed.observability.recording import Recording, ScalarValue
 
 if TYPE_CHECKING:
     from reed.composition.flow.flow_node import FlowNode
-    from reed.execution.run import Run
+    from reed.execution.session import Session
 
 
-class NodeRuntime:
+class NodeSession:
     """
-    One node participation (`FlowNode`) materialized inside one `Run`
+    One node participation (`FlowNode`) materialized inside one `Session`
     (Slice 2B; `ArtifactRecord` unwrap boundary added by Slice 2C; memory
     and `.context` construction added by Slice 2D; wrap/commit added by
     Slice 2E).
@@ -163,8 +163,8 @@ class NodeRuntime:
     See module docstring for the exact scope: an identity/ownership
     boundary, a pure unwrap operation, a private, node-local memory
     instance plus a `.context` snapshot, and now the wrap/commit
-    operations `Run.publish(...)` uses to complete one firing.
-    `NodeRuntime` still owns no execution-eligibility policy and no
+    operations `Session.publish(...)` uses to complete one firing.
+    `NodeSession` still owns no execution-eligibility policy and no
     callback dispatch -- it exists so that later slices (2F-2G) have
     somewhere correct to attach callback dispatch and stateful-firing
     serialization, without any of that state ever being stored on
@@ -172,8 +172,8 @@ class NodeRuntime:
     or on `Flow` itself.
     """
 
-    def __init__(self, run: Run, flow_node: FlowNode) -> None:
-        self._run = run
+    def __init__(self, session: Session, flow_node: FlowNode) -> None:
+        self._session = session
         self._flow_node = flow_node
         self._memory: object | None = None
         self._last_output: object | None = None
@@ -186,36 +186,34 @@ class NodeRuntime:
         # Milestone O7, Slice O7i: Instruments are discovered dynamically
         # -- there is nothing to pre-populate here anymore (no more
         # `flow_node.instruments`). `_observed_instruments` remembers
-        # every distinct Instrument subclass this NodeRuntime has already
-        # seen this Run, keyed by `instrument_name()`, purely so a
+        # every distinct Instrument subclass this NodeSession has already
+        # seen this Session, keyed by `instrument_name()`, purely so a
         # second `ctx.record(SomeInstrument, ...)` call for the same
         # Instrument does not repeat the (cheap, but non-zero) manifest
         # bookkeeping done on first discovery -- see `.flush_recordings`.
         self._observed_instruments: dict[str, "type[Instrument]"] = {}
         self._newly_observed_this_firing: list["type[Instrument]"] = []
 
-        # Milestone O7, Slice O7b: a running `ArtifactProvenance` owned by
-        # this NodeRuntime, advanced (never replaced) on every `.wrap(...)`
-        # call -- fixes a confirmed defect where each firing constructed a
-        # *fresh* `ArtifactProvenance()`, so every committed `ArtifactRecord`
-        # read `version.number == 1` forever, regardless of how many times
-        # this Node had already fired in this Run. Each Artifact type has
-        # exactly one producer within a Flow (architectural invariant #24),
-        # so one running counter per NodeRuntime is the correct scope: it
-        # need not be keyed by domain type.
-        self._provenance = ArtifactProvenance()
+        # Milestone O7, Slice O7b: a running per-NodeSession
+        # `ArtifactProvenance` used to live here, but Slice 22D removes
+        # it entirely -- `.wrap(...)` now routes through
+        # `Session._commit(...)`, which derives the next version from
+        # the repository's own current `ArtifactRecord` for the type
+        # (invariant #28) instead of a private, per-node running
+        # counter. See `.wrap(...)`'s docstring for the corrected
+        # mechanics.
         # Milestone O7, Slice O7c: per-NodeExecution Recording batch,
         # keyed by node_execution_id -- accumulated in memory during a
         # firing and flushed as one batch (one fsync) at that firing's
         # own durability boundary (`.flush_recordings(...)`, called from
-        # `Run._fire`'s `finally` block), not written through to the
+        # `Session._fire`'s `finally` block), not written through to the
         # store on every individual `ctx.record()` call.
         self._pending_recordings: dict[str, list[Recording]] = {}
 
     @property
-    def run(self) -> Run:
-        """The `Run` this `NodeRuntime` was materialized inside."""
-        return self._run
+    def session(self) -> Session:
+        """The `Session` this `NodeSession` was materialized inside."""
+        return self._session
 
     @property
     def flow_node(self) -> FlowNode:
@@ -238,35 +236,45 @@ class NodeRuntime:
     def wrap(self, domain_value: object) -> "ArtifactRecord":
         """
         Wrap `domain_value` -- a node function's returned domain value --
-        into a fresh `ArtifactRecord` (Slice 2E; version mechanics fixed
-        at Milestone O7, Slice O7b).
+        into a committed `ArtifactRecord` (Slice 2E; version mechanics
+        fixed at Milestone O7, Slice O7b; unified onto the shared
+        `Session._commit(...)` path at Slice 22D).
 
-        This `NodeRuntime` is recorded as the record's producer.
-        `self._provenance` (one running `ArtifactProvenance` per
-        NodeRuntime, Slice O7b) is advanced in place on every call --
-        pending (0) -> initial (1) on this NodeRuntime's first firing,
-        `.next()` on every firing after that -- so repeated firings of
-        the same Node produce monotonically increasing, causally distinct
-        versions instead of every firing reading "version 1" forever.
+        Slice 22D (docs/refactor/session_snapshot_decision.md section 6
+        "Unified versioning and ArtifactOrigin"): this NodeSession no
+        longer owns a private, per-node running `ArtifactProvenance`
+        counter (`self._provenance`, removed this slice). Instead it
+        delegates to `self._session._commit(domain_value,
+        origin=ArtifactOrigin.NODE, producer=self)`, which reads this
+        domain type's *current* `ArtifactRecord` straight from the
+        repository (`self.session.repository`) and advances it in place
+        if one exists, or constructs a fresh one at
+        `ArtifactVersion.initial()` if this is the type's first commit
+        (architectural_invariants.md #28). This is the same version
+        source `Session.feed()` (Slice 22E) will use, so repeated
+        firings of the same Node keep producing monotonically
+        increasing, causally distinct versions -- now derived from one
+        shared, type-keyed source instead of two parallel per-path
+        counters.
 
-        Each returned `ArtifactRecord` gets its own immutable *snapshot*
-        (`.copy()`) of `self._provenance` at the moment of this call, not
-        a shared reference to the running object -- otherwise an already-
-        committed record's `.version` would silently change out from
-        under it the next time this Node fires (`self._provenance` keeps
-        advancing after this call returns). This is the "wrap" half of
-        docs/parcel_boundary_decision.md's boundary diagram (`U -> wrap ->
-        Parcel[U]`, read here as `ArtifactRecord`); it does not commit
-        anything by itself -- see `.commit(...)`.
+        Unlike the pre-22D implementation, the returned `ArtifactRecord`
+        is the *same* object the repository holds for this domain type
+        (an aliased reference per Slice 22C's in-place-mutation model,
+        docs/refactor/session_snapshot_decision.md section 7), not an
+        independent snapshot -- `.commit(...)` re-storing it under the
+        same key is therefore idempotent. This is the "wrap" half of
+        docs/parcel_boundary_decision.md's boundary diagram (`U -> wrap
+        -> Parcel[U]`, read here as `ArtifactRecord`); it does not
+        change what `.commit(...)` is responsible for (updating
+        `self._last_output`).
         """
-        self._provenance.advance(producer=self)
-        return ArtifactRecord(value=domain_value, provenance=self._provenance.copy())
+        return self._session._commit(domain_value, origin=ArtifactOrigin.NODE, producer=self)
 
     def commit(self, record: "ArtifactRecord") -> None:
         """
         Commit `record` -- the successful-commit path only (Slice 2E).
 
-        Stores `record` into `self.run.repository`'s additive,
+        Stores `record` into `self.session.repository`'s additive,
         domain-type-keyed `ArtifactRecord` storage
         (`reed/synchronization/depot.py`, `set_artifact_record`,
         docs/parcel_boundary_decision.md's "Addendum: Slice 2E
@@ -283,19 +291,19 @@ class NodeRuntime:
         explicitly out of scope (see module docstring and the
         SliceContract's stop_conditions).
         """
-        self._run.repository.set_artifact_record(record)
+        self._session.repository.set_artifact_record(record)
         self._last_output = record.value
 
     @property
     def memory(self) -> object:
         """
-        This `NodeRuntime`'s private memory instance (Slice 2D), lazily
+        This `NodeSession`'s private memory instance (Slice 2D), lazily
         instantiated from its `FlowNode`'s declared `MemoryType` and
         memoized: the same object is returned -- and can be mutated in
         place -- on every subsequent access for as long as this
-        `NodeRuntime` (one per (`Run`, `FlowNode`) pair, Slice 2B) lives.
+        `NodeSession` (one per (`Session`, `FlowNode`) pair, Slice 2B) lives.
 
-        Raises `AttributeError` if this `NodeRuntime`'s node function
+        Raises `AttributeError` if this `NodeSession`'s node function
         does not declare a `NodeContext` parameter -- there is no
         `MemoryType` to construct from.
         """
@@ -314,9 +322,9 @@ class NodeRuntime:
     def last_output(self) -> object | None:
         """
         The latest successfully committed domain output for this
-        `NodeRuntime` (Slice 2D representation; wired to a real
+        `NodeSession` (Slice 2D representation; wired to a real
         committed value by `.commit(...)`, Slice 2E). `None` until this
-        `NodeRuntime` has completed its first successful commit.
+        `NodeSession` has completed its first successful commit.
 
         Raises `AttributeError` for the same reason and under the same
         condition as `.memory` -- see its docstring.
@@ -332,23 +340,23 @@ class NodeRuntime:
     @property
     def firing_lock(self) -> "threading.Lock | None":
         """
-        This `NodeRuntime`'s own mutual-exclusion primitive (Slice 2G;
-        architectural_invariants.md #17, "Stateful NodeRuntime firings
+        This `NodeSession`'s own mutual-exclusion primitive (Slice 2G;
+        architectural_invariants.md #17, "Stateful NodeSession firings
         are serialized").
 
         Lazily instantiated and memoized exactly like `.memory`, and
         gated by the same state-awareness signal `.memory`/`.last_output`
         already use (`self.flow_node.context is not None`): a
-        `NodeRuntime` whose node function declares no `NodeContext`
+        `NodeSession` whose node function declares no `NodeContext`
         parameter has nothing to race on and gets no `Lock` at all --
         this property returns `None` for it rather than constructing an
         unnecessary lock.
 
-        For a state-aware `NodeRuntime`, `Run.publish(...)` acquires
+        For a state-aware `NodeSession`, `Session.publish(...)` acquires
         this `Lock` immediately before calling the node function and
         releases it (via try/finally) immediately after
         `.commit(...)` completes, so that at most one firing of this
-        `NodeRuntime` is ever in flight at the same time -- across
+        `NodeSession` is ever in flight at the same time -- across
         threads, and reentrantly within the same thread (a plain
         `threading.Lock`, not an `RLock`, so a reentrant firing blocks
         rather than silently nesting).
@@ -365,9 +373,9 @@ class NodeRuntime:
     def context(self) -> NodeContext:
         """
         A fresh `NodeContext` snapshot (Slice 2D) exposing this
-        `NodeRuntime`'s current `.memory` and `.last_output`.
+        `NodeSession`'s current `.memory` and `.last_output`.
 
-        Raises `AttributeError` (via `.memory`) if this `NodeRuntime`'s
+        Raises `AttributeError` (via `.memory`) if this `NodeSession`'s
         node function does not declare a `NodeContext` parameter.
         """
         return NodeContext(memory=self.memory, last_output=self.last_output)
@@ -375,7 +383,7 @@ class NodeRuntime:
     @property
     def recordings(self) -> tuple[Recording, ...]:
         """
-        Every `Recording` accepted on this `NodeRuntime` so far (Milestone
+        Every `Recording` accepted on this `NodeSession` so far (Milestone
         O2, Slice O2c/O2d), in acceptance order. In-memory only -- see
         Milestone O3 for durable persistence.
         """
@@ -394,7 +402,7 @@ class NodeRuntime:
         (Milestone O2, Slice O2c/O2d; redesigned at Milestone O7, Slice
         O7i for typed Instrument Definitions), bound (via
         `functools.partial`) into the `NodeContext.record`-facing
-        recorder built by `Run._build_call_kwargs` for one firing's
+        recorder built by `Session._build_call_kwargs` for one firing's
         `identity`.
 
         `instrument` must be an `Instrument` subclass (never an
@@ -435,10 +443,10 @@ class NodeRuntime:
         )
         self._recordings.append(recording)
         try:
-            self._run.presenter.on_recording(recording)
+            self._session.presenter.on_recording(recording)
         except BaseException:  # noqa: BLE001 -- O7g: isolate presenter failures (invariant #25)
             pass
-        if self._run.recording_store is not None:
+        if self._session.recording_store is not None:
             # Milestone O7, Slice O7c: buffer in memory for this firing;
             # `.flush_recordings(...)` writes the whole batch, with one
             # fsync, at this firing's own NodeExecution durability
@@ -455,15 +463,15 @@ class NodeRuntime:
         `node_execution_id` as one batch (Milestone O7, Slice O7c) --
         the NodeExecution durability boundary (docs/observability_goals.md
         Section 5; architectural invariants #20/#21). Called from
-        `Run._fire`'s `finally` block, so it runs whether the firing
+        `Session._fire`'s `finally` block, so it runs whether the firing
         succeeded or raised. A no-op if this firing made no
         `ctx.record(...)` calls (nothing buffered) or if no
         `recording_store` is configured (`storage_root` was not passed
-        to `Flow.run(...)`).
+        to `Flow.session(...)`).
 
         Milestone O7, Slice O7i: also flushes any newly-*discovered*
         Instrument bindings observed during this firing into the Flow's
-        `instruments.json` manifest (`Run.record_discovered_instruments`),
+        `instruments.json` manifest (`Session.record_discovered_instruments`),
         at the same durability boundary -- proportional only to how many
         genuinely new (node_id, Instrument) bindings this firing
         introduced (usually zero after the first firing of a given
@@ -473,22 +481,22 @@ class NodeRuntime:
         """
         newly_observed = self._newly_observed_this_firing
         self._newly_observed_this_firing = []
-        if newly_observed and self._run.recording_store is not None:
-            self._run.record_discovered_instruments(
+        if newly_observed and self._session.recording_store is not None:
+            self._session.record_discovered_instruments(
                 node_id=self._flow_node.node_id,
                 node_name=self._flow_node.node_name,
                 instruments=newly_observed,
             )
 
         batch = self._pending_recordings.pop(node_execution_id, None)
-        if not batch or self._run.recording_store is None:
+        if not batch or self._session.recording_store is None:
             return
-        self._run.recording_store.append_batch(batch)
+        self._session.recording_store.append_batch(batch)
 
     def _newly_observed_this_firing_note(
         self, instrument: "type[Instrument]", name: str
     ) -> None:
-        """Record that `instrument` was newly discovered this Run, if it was."""
+        """Record that `instrument` was newly discovered this Session, if it was."""
         if name not in self._observed_instruments:
             self._observed_instruments[name] = instrument
             self._newly_observed_this_firing.append(instrument)
@@ -544,16 +552,16 @@ class NodeRuntime:
         bundle (Milestone O1, Slice O1f).
 
         Identical to `.context` except for the added `identity=...`
-        argument -- used exclusively by `Run._build_call_kwargs(...)` to
+        argument -- used exclusively by `Session._build_call_kwargs(...)` to
         build the `NodeContext` that is actually injected into a real
-        firing, once `Run._begin_node_execution(...)` has minted that
+        firing, once `Session._begin_node_execution(...)` has minted that
         firing's identity. Kept as a separate method rather than an
         optional parameter on `.context` because `.context` is a
         property (called without parentheses throughout the existing,
         regression-protected call sites) and properties cannot take
         arguments.
 
-        Raises `AttributeError` (via `.memory`) if this `NodeRuntime`'s
+        Raises `AttributeError` (via `.memory`) if this `NodeSession`'s
         node function does not declare a `NodeContext` parameter --
         same as `.context`.
         """

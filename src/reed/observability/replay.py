@@ -2,15 +2,15 @@
 Post-hoc replay of a past Execution (Milestone O5, Slice O5c, optional).
 
 Extends the O5b terminal renderer to also read `recordings.csv`/`provenance.csv` (Milestone
-O3) for a Run whose process has already exited -- strictly more capable than the old
+O3) for a Session whose process has already exited -- strictly more capable than the old
 Bus-based system, which could only show live request/reply traffic (design record Section
 8's "it can show provenance and recordings, not only Bus request/reply pairs").
 
-This is read-only: it never reconstructs a live `Run`/`ExecutionTrace`, only a static
+This is read-only: it never reconstructs a live `Session`/`ExecutionTrace`, only a static
 snapshot table built directly from the two CSV files a past Execution left behind under
 `<storage_root>/runs/<execution_id>/`. It requires `storage_root` to have been configured for
 that Execution (Milestone O3's opt-in) -- there is nothing to replay for an in-memory-only
-Run, and this module raises `FileNotFoundError` rather than silently rendering an empty
+Session, and this module raises `FileNotFoundError` rather than silently rendering an empty
 table in that case, so a caller does not mistake "no storage was configured" for "this
 Execution recorded nothing."
 """
@@ -28,7 +28,7 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         raise FileNotFoundError(
             f"{path} does not exist -- was storage_root configured for this "
-            "execution_id, and did the Run actually fire any Nodes?"
+            "execution_id, and did the Session actually fire any Nodes?"
         )
     with open(path, newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))

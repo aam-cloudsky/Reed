@@ -38,13 +38,14 @@ def test_presenter_hook_failure_does_not_break_publish():
             raise RuntimeError("boom: presenter is broken")
 
     flow = _make_flow()
-    run = flow.run(observability="silent")
-    # Force a broken presenter onto the Run to simulate a rendering
+    session = flow.session(observability="silent")
+    # Force a broken presenter onto the Session to simulate a rendering
     # failure (e.g. a Rich/Console error) without needing a real broken
     # terminal.
-    run._presenter = BrokenPresenter()
+    session._presenter = BrokenPresenter()
 
-    result = run.publish(Measurement(3))
+    snapshot = session.invoke(Measurement(3))
+    result = snapshot[Estimate]
 
     assert isinstance(result, Estimate)
     assert result.value == 6
@@ -70,10 +71,11 @@ def test_presenter_hook_failure_does_not_break_recording():
 
     flow = Flow()
     flow.add(produce)
-    run = flow.run(observability="silent")
-    run._presenter = BrokenPresenter()
+    session = flow.session(observability="silent")
+    session._presenter = BrokenPresenter()
 
-    result = run.publish(Measurement(5))
+    snapshot = session.invoke(Measurement(5))
+    result = snapshot[Estimate]
 
     assert isinstance(result, Estimate)
     assert result.value == 5

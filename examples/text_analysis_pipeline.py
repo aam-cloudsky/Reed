@@ -127,17 +127,19 @@ flow.add(save_report)
 
 
 if __name__ == "__main__":
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(
+    session.feed(
         RawText(text="Python type annotations make reactive graphs elegant.")
     )
+    session.push()
 
-    run.publish(
+    session.feed(
         RawText(text="Reed should propagate artifacts automatically.")
     )
+    session.push()
 
-    run.wait_for_callbacks()
+    session.wait_for_callbacks()
 
-    if run.callback_failures:
-        print("Callback failures:", run.callback_failures)
+    if session.callback_failures:
+        print("Callback failures:", session.callback_failures)

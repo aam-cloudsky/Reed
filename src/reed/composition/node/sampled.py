@@ -8,7 +8,7 @@ slice_contract.yaml; reed-sampled-inputs-proposal.md):
     A node declares a consumed parameter as sampled -- contributing to
     the node's argument coverage but never, by itself, to its firing
     eligibility (see `reed.composition.node.artifact_descriptor.InputRole`,
-    `Run._is_eligible_to_fire`, Slice 21C) -- by annotating it
+    `Session._is_eligible_to_fire`, Slice 21C) -- by annotating it
     `Annotated[T, Sampled]` instead of plain `T`.
 
 `Sampled` is detected by annotation shape, the same principle already

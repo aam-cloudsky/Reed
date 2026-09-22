@@ -28,18 +28,18 @@ sink -- see `reed.observability.logging`.
 ## Public API
 
 ```python
-flow.run(observability="progress")     # a semantic preset -- the common case
-flow.run(observability=PresentationPolicy(nodes=True, timings=True))  # escape hatch
-flow.run()                              # default: PresentationPolicy.default() ("nodes")
+flow.session(observability="progress")     # a semantic preset -- the common case
+flow.session(observability=PresentationPolicy(nodes=True, timings=True))  # escape hatch
+flow.session()                              # default: PresentationPolicy.default() ("nodes")
 ```
 
 A preset name is a string that compiles, once, into a `PresentationPolicy` -- a small,
 immutable set of independent dimensions. Presets are documented combinations of those
 dimensions, not a parallel mechanism: nothing a preset can express is inexpressible through
-`PresentationPolicy(...)` directly, and nothing in `Run`/`NodeRuntime` ever branches on a
+`PresentationPolicy(...)` directly, and nothing in `Session`/`NodeSession` ever branches on a
 preset *name* -- only on the compiled `PresentationPolicy`'s dimensions. This is what keeps
 adding a new preset, or a wholly different renderer, from requiring any change to
-`Flow`/`Run` execution semantics (Milestone O7's own constraint, Section 2 of the task that
+`Flow`/`Session` execution semantics (Milestone O7's own constraint, Section 2 of the task that
 opened it: "the terminal is a consumer of observability information... it must never become
 the observability model itself").
 
@@ -115,7 +115,7 @@ class PresentationPolicy:
     @classmethod
     def default(cls) -> "PresentationPolicy":
         """
-        `Flow.run()` with no `observability=` argument -- errors and node
+        `Flow.session()` with no `observability=` argument -- errors and node
         lifecycle, the smallest preset that still gives useful signal
         without dumping graph propagation. Matches the `"nodes"` preset.
         """
@@ -144,7 +144,7 @@ def resolve_presentation_policy(
     observability: "str | PresentationPolicy | None",
 ) -> PresentationPolicy:
     """
-    Compile `Flow.run(observability=...)`'s argument into a
+    Compile `Flow.session(observability=...)`'s argument into a
     `PresentationPolicy`. Accepts a preset name, an already-built
     `PresentationPolicy` (the escape hatch), or `None` (-> `.default()`).
 

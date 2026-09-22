@@ -5,15 +5,15 @@ docs/observability_design.md Section 11.1 splits observability into two levels w
 different persistence contracts:
 
     Level 1 (Execution Trace / propagation): "which Node fired, in response to what,
-    correlated by trace id" -- inherently observational, valuable while a Run executes
+    correlated by trace id" -- inherently observational, valuable while a Session executes
     or immediately after, but not required to be durably persisted. An in-memory ring
-    buffer per Run, optionally mirrored to a plain debug log -- never a required,
+    buffer per Session, optionally mirrored to a plain debug log -- never a required,
     schema-committed artifact like Level 2 (Recordings/Provenance, Milestones O2-O4).
 
 `TraceEvent` and `ExecutionTrace` are that ring buffer. They are deliberately NOT built
 on top of `RecordingStore`/`ProvenanceStore` (Milestone O3) -- Level 1 has no durability
 contract at all, so it needs no Protocol, no CSV schema, and no `storage_root` opt-in.
-It exists purely in-process and is dropped when the `Run` is garbage-collected, unless
+It exists purely in-process and is dropped when the `Session` is garbage-collected, unless
 something (e.g. the O5b terminal renderer) is actively consuming it.
 """
 
@@ -29,7 +29,7 @@ TraceEventType = Literal["node_started", "node_finished"]
 @dataclass(frozen=True, slots=True)
 class TraceEvent:
     """
-    One entry in a Run's Level 1 Execution Trace.
+    One entry in a Session's Level 1 Execution Trace.
 
     `event_type` is `"node_started"` (emitted immediately before a Node's function is
     called) or `"node_finished"` (emitted after its output has been committed). Both
@@ -53,7 +53,7 @@ class TraceEvent:
 
 class ExecutionTrace:
     """
-    A bounded, in-memory ring buffer of `TraceEvent`s for one `Run` (Slice O5a).
+    A bounded, in-memory ring buffer of `TraceEvent`s for one `Session` (Slice O5a).
 
     Bounded via `collections.deque(maxlen=...)`: once `capacity` events have been
     recorded, appending a new one silently drops the oldest -- by design (Section 11.1:
@@ -61,7 +61,7 @@ class ExecutionTrace:
     kept"; the same reasoning extended here to "old entries may be dropped once no one
     could plausibly still want them", since Level 1 explicitly has no durability
     contract). `capacity` defaults to 1000, generous for interactive debugging/terminal
-    rendering (Slice O5b) without letting a long-running `Run` grow this unboundedly.
+    rendering (Slice O5b) without letting a long-running `Session` grow this unboundedly.
 
     `.events` returns a snapshot `tuple` (not the live deque) so a caller iterating it
     is never affected by concurrent appends.

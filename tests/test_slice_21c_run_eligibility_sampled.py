@@ -1,6 +1,6 @@
 """
 Focused tests for Slice 21C (GitHub issue #21, "Distinguish triggering
-inputs from sampled inputs in node firing rules"): `Run`'s firing
+inputs from sampled inputs in node firing rules"): `Session`'s firing
 eligibility evaluated over TRIGGERING-role consumed types only.
 
 See `.claude/reed-refactor/run-21C-20260919T144759Z/slice_contract.yaml`
@@ -10,11 +10,12 @@ without a value for it) but its arrival never by itself marks it fresh
 or fires the node -- reed-sampled-inputs-proposal.md's acceptance
 criterion 4, "a SAMPLED arrival alone never fires".
 
-These tests publish domain values directly (`run.publish(_B(...))`,
-`run.publish(_C(...))`) with no producer node for them, exactly as
+These tests feed domain values directly (`session.feed(_B(...))`,
+`session.feed(_C(...))`, followed by `session.push()`) with no producer
+node for them, exactly as
 tests/test_slice_2i_joins_and_trigger_policy.py's own join tests already
-do for `_C` -- `Run.publish` only requires a registered consumer, not a
-producer.
+do for `_C` -- `Session.feed`/`Session.push` only require a registered
+consumer, not a producer.
 """
 
 from __future__ import annotations
@@ -53,19 +54,22 @@ def test_sampled_only_publish_never_fires_a_covered_node_all_inputs_changed():
 
     flow = Flow()
     flow.add(join, trigger_policy=TriggerPolicy.ALL_INPUTS_CHANGED)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_B(1))  # SAMPLED arrives; not covered (c missing) -> no fire
+    session.feed(_B(1))
+    session.push()  # SAMPLED arrives; not covered (c missing) -> no fire
     assert fired == []
 
-    run.publish(_C(10))  # TRIGGERING arrives; covered and fresh -> fires
+    session.feed(_C(10))
+    session.push()  # TRIGGERING arrives; covered and fresh -> fires
     assert fired == ["join"]
 
-    run.publish(_B(99))  # SAMPLED-only re-arrival on an already-covered,
+    session.feed(_B(99))
+    session.push()  # SAMPLED-only re-arrival on an already-covered,
     # already-fired node -- freshness only tracks TRIGGERING types, so
     # this must not re-fire.
     assert fired == ["join"]
-    assert run.node_runtime(join).last_output.value == 1 + 10
+    assert session.node_session(join).last_output.value == 1 + 10
 
 
 def test_sampled_only_publish_never_fires_a_covered_node_any_input_changed():
@@ -77,19 +81,22 @@ def test_sampled_only_publish_never_fires_a_covered_node_any_input_changed():
 
     flow = Flow()
     flow.add(join, trigger_policy=TriggerPolicy.ANY_INPUT_CHANGED)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_B(1))  # SAMPLED arrives first; not covered (c missing)
+    session.feed(_B(1))
+    session.push()  # SAMPLED arrives first; not covered (c missing)
     assert fired == []
 
-    run.publish(_C(10))  # TRIGGERING arrival completes coverage -> fires
+    session.feed(_C(10))
+    session.push()  # TRIGGERING arrival completes coverage -> fires
     assert fired == ["join"]
 
-    run.publish(_B(99))  # SAMPLED-only arrival on an already-covered,
+    session.feed(_B(99))
+    session.push()  # SAMPLED-only arrival on an already-covered,
     # already-fired node -- must not fire again even under
     # ANY_INPUT_CHANGED.
     assert fired == ["join"]
-    assert run.node_runtime(join).last_output.value == 1 + 10
+    assert session.node_session(join).last_output.value == 1 + 10
 
 
 def test_triggering_publish_fires_using_latest_sampled_values_published_before_coverage():
@@ -98,12 +105,14 @@ def test_triggering_publish_fires_using_latest_sampled_values_published_before_c
 
     flow = Flow()
     flow.add(join, trigger_policy=TriggerPolicy.ANY_INPUT_CHANGED)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_B(7))  # SAMPLED value published ahead of coverage
-    run.publish(_C(3))  # TRIGGERING arrival completes coverage -> fires
+    session.feed(_B(7))
+    session.push()  # SAMPLED value published ahead of coverage
+    session.feed(_C(3))
+    session.push()  # TRIGGERING arrival completes coverage -> fires
 
-    assert run.node_runtime(join).last_output.value == 10
+    assert session.node_session(join).last_output.value == 10
 
 
 def test_all_inputs_changed_refire_ignores_sampled_freshness_and_only_needs_triggering_types_fresh_again():
@@ -115,18 +124,22 @@ def test_all_inputs_changed_refire_ignores_sampled_freshness_and_only_needs_trig
 
     flow = Flow()
     flow.add(join, trigger_policy=TriggerPolicy.ALL_INPUTS_CHANGED)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_B(1))
-    run.publish(_C(10))  # covered, c fresh -> fires (join #1)
+    session.feed(_B(1))
+    session.push()
+    session.feed(_C(10))
+    session.push()  # covered, c fresh -> fires (join #1)
     assert fired == ["join"]
 
-    run.publish(_B(2))  # only SAMPLED b changes -- must not refire
+    session.feed(_B(2))
+    session.push()  # only SAMPLED b changes -- must not refire
     assert fired == ["join"]
 
-    run.publish(_C(20))  # c fresh again -> refires using latest b (2)
+    session.feed(_C(20))
+    session.push()  # c fresh again -> refires using latest b (2)
     assert fired == ["join", "join"]
-    assert run.node_runtime(join).last_output.value == 2 + 20
+    assert session.node_session(join).last_output.value == 2 + 20
 
 
 def test_any_input_changed_fires_on_triggering_arrival_and_samples_latest_sampled_values():
@@ -135,26 +148,58 @@ def test_any_input_changed_fires_on_triggering_arrival_and_samples_latest_sample
 
     flow = Flow()
     flow.add(join, trigger_policy=TriggerPolicy.ANY_INPUT_CHANGED)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_B(1))
-    run.publish(_C(10))  # fires: b=1, c=10
-    assert run.node_runtime(join).last_output.value == 11
+    session.feed(_B(1))
+    session.push()
+    session.feed(_C(10))
+    session.push()  # fires: b=1, c=10
+    assert session.node_session(join).last_output.value == 11
 
-    run.publish(_B(100))  # SAMPLED-only change -- no fire
-    assert run.node_runtime(join).last_output.value == 11
+    session.feed(_B(100))
+    session.push()  # SAMPLED-only change -- no fire
+    assert session.node_session(join).last_output.value == 11
 
-    run.publish(_C(5))  # TRIGGERING arrival -- fires using latest sampled b=100
-    assert run.node_runtime(join).last_output.value == 105
+    session.feed(_C(5))
+    session.push()  # TRIGGERING arrival -- fires using latest sampled b=100
+    assert session.node_session(join).last_output.value == 105
 
 
-def test_any_input_changed_never_fires_when_the_sampled_arrival_is_what_completes_coverage():
-    # The committed scenarios above all have the TRIGGERING arrival
-    # complete coverage last. This is the sharper reading of acceptance
-    # criterion 4 ("a SAMPLED arrival alone never fires"): even when the
-    # SAMPLED arrival is the one that completes coverage for the first
-    # time, it must not fire the node -- only the next TRIGGERING
-    # arrival may.
+def test_dirty_from_an_earlier_triggering_feed_fires_once_a_later_sampled_feed_completes_coverage():
+    """
+    DELIBERATE, OPENLY-RECORDED TEST REVERSAL (Slice 22H-1; Test
+    Integrity Rule precedent set by Slice 22C). This test used to be
+    named
+    test_any_input_changed_never_fires_when_the_sampled_arrival_is_what_completes_coverage
+    and asserted the OPPOSITE of what it asserts now -- that `join`
+    could never fire once a SAMPLED arrival was the one to complete
+    coverage. That was true under the OLD, synchronous publish() model,
+    where eligibility was checked once per single arrival and only ever
+    considered the type of the value THAT SPECIFIC CALL published: a
+    SAMPLED arrival could therefore never itself trigger an eligibility
+    check, even when it happened to complete coverage.
+
+    Under the batched feed()/push() model (Slice 22F) that framing does
+    not carry over: push() evaluates every currently-dirty node in one
+    pass, regardless of which specific feed() most recently landed or
+    which arrival dirtied it. Below, the FIRST push() leaves `join`
+    dirty-but-not-fired because coverage isn't complete yet (invariant
+    18: dirty state persists, is not silently discarded, across a push()
+    that cannot yet fire it). The SECOND push() then correctly fires
+    `join` -- honestly caused by the EARLIER, already-recorded TRIGGERING
+    (_C) dirtying, with the SAMPLED (_B) feed only supplying the missing
+    value, not itself originating the trigger. This is a correct,
+    deliberate consequence of dirty-persists-across-a-not-yet-covered-
+    push (confirmed independently by 22F's own reviewer), not a bug to
+    route around.
+
+    The stricter invariant this test used to (mis)state -- a SAMPLED
+    arrival with NO accompanying or prior TRIGGERING dirtying must never
+    by itself cause a firing -- is still true, and is covered by
+    tests/test_slice_22f_session_push.py::test_push_respects_sampled_vs_triggering_eligibility_from_issue_21
+    (SAMPLED feed arrives first, before any TRIGGERING feed at all); it
+    is not duplicated here.
+    """
     fired: list[str] = []
 
     def join(c: _C, b: Annotated[_B, Sampled], ctx: NodeContext[_Memory, _D]) -> _D:
@@ -163,17 +208,21 @@ def test_any_input_changed_never_fires_when_the_sampled_arrival_is_what_complete
 
     flow = Flow()
     flow.add(join, trigger_policy=TriggerPolicy.ANY_INPUT_CHANGED)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_C(5))  # TRIGGERING arrives first; not covered (b missing)
+    session.feed(_C(5))
+    session.push()  # TRIGGERING arrives first; not covered (b missing) -- dirty, does not fire
     assert fired == []
 
-    run.publish(_B(100))  # SAMPLED arrival completes coverage -- must not fire
-    assert fired == []
-
-    run.publish(_C(7))  # next TRIGGERING arrival fires, using latest b=100
+    session.feed(_B(100))
+    session.push()  # SAMPLED feed completes coverage -- fires now, using the still-dirty earlier TRIGGERING
     assert fired == ["join"]
-    assert run.node_runtime(join).last_output.value == 7 + 100
+    assert session.node_session(join).last_output.value == 5 + 100
+
+    session.feed(_C(7))
+    session.push()  # next TRIGGERING arrival fires again, using latest b=100
+    assert fired == ["join", "join"]
+    assert session.node_session(join).last_output.value == 7 + 100
 
 
 def test_manual_policy_with_sampled_inputs_is_still_never_auto_fired():
@@ -185,12 +234,16 @@ def test_manual_policy_with_sampled_inputs_is_still_never_auto_fired():
 
     flow = Flow()
     flow.add(join, trigger_policy=TriggerPolicy.MANUAL)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(_B(1))
-    run.publish(_C(10))
-    run.publish(_B(2))
-    run.publish(_C(20))
+    session.feed(_B(1))
+    session.push()
+    session.feed(_C(10))
+    session.push()
+    session.feed(_B(2))
+    session.push()
+    session.feed(_C(20))
+    session.push()
 
     assert fired == []
-    assert run.node_runtime(join).last_output is None
+    assert session.node_session(join).last_output is None

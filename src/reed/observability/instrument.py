@@ -62,10 +62,10 @@ Definition alone -- it is always the **Instrument Binding**: the tuple
 `(flow_id, node_id, Instrument)`, exactly mirroring how the same domain
 Artifact type may only ever have one producer *within one Flow*
 (architectural invariant #24) while still being an ordinary, freely
-reusable Python type across Flows. `NodeRuntime._resolve_instrument(...)`
+reusable Python type across Flows. `NodeSession._resolve_instrument(...)`
 and `Recording.instrument_id` (`f"{flow_id}.{node_id}.{name}"`, unchanged
 schema from O1-O7h) are what materialize this binding -- see
-`node_runtime.py`.
+`node_session.py`.
 
 ## Typing
 
@@ -124,7 +124,7 @@ class Instrument(Generic[T]):
     `kind` and `unit` are required class attributes on every concrete
     subclass (validated at class-definition time by `__init_subclass__`,
     so a malformed Instrument definition fails at import time, not on
-    first use deep inside a Run). `description` is optional and defaults
+    first use deep inside a Session). `description` is optional and defaults
     to `""`, matching the original O2a `Instrument` dataclass's own
     default.
 
@@ -148,7 +148,7 @@ class Instrument(Generic[T]):
         # also see inherited attributes) is checked directly. A concrete
         # leaf class that never sets `kind` anywhere in its MRO still
         # fails, via the `hasattr` check below, when Reed actually tries
-        # to resolve it (`NodeRuntime._resolve_instrument`) -- this
+        # to resolve it (`NodeSession._resolve_instrument`) -- this
         # `__init_subclass__` check exists to fail as early as possible
         # for the common case (a concrete class with a typo'd or missing
         # `kind`/`unit`), not to replace that later check entirely.
@@ -172,7 +172,7 @@ class Instrument(Generic[T]):
         """
         The stable, globally-qualified name this Instrument Definition is
         identified by (`module.QualName`) -- used to build
-        `Recording.name`/`Recording.instrument_id` (`node_runtime.py`).
+        `Recording.name`/`Recording.instrument_id` (`node_session.py`).
         Deliberately derived from the class itself rather than requiring
         a redundant `name=` string, matching the "Instrument type *is*
         the Instrument Definition" principle above -- there is no second

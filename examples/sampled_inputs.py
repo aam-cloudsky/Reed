@@ -1,5 +1,28 @@
 """
-Do not use NewType(), it is an alias and not an real type.
+Demonstrate sampled inputs and the Session execution API.
+
+A sampled input participates in node execution but does not trigger execution
+when it changes. Here, CalibrationOffset is sampled by calibrate,
+while RawReading is the triggering input.
+
+The example also demonstrates the two equivalent Session APIs:
+
+session.feed(value)
+session.push()
+snapshot = session.snapshot()
+
+and the convenience form:
+
+snapshot = session.invoke(value)
+
+Snapshots preserve the artifact state captured at that point and are not
+affected by subsequent Session updates.
+
+Note:
+Artifact types are defined as runtime-distinct subclasses rather than with
+NewType. NewType provides a distinct type to static type checkers,
+but its values retain the underlying runtime type. Reed identifies
+artifacts by their runtime types.
 """
 
 from typing import Annotated
@@ -54,30 +77,34 @@ flow.add(
 
 if __name__ == "__main__":
 
-    run = flow.run()
-
-    print("=" * 72)
-    print("Publishing a CalibrationOffset before any RawReading exists")
-    print("(SAMPLED-only: not yet covered, cannot fire)")
-    print("=" * 72)
-
-    run.publish(CalibrationOffset(0.5))
+    session = flow.session()
+    session.feed(CalibrationOffset(0.5))
+    session.push()
 
     print()
     print("=" * 72)
-    print("Publishing the first RawReading")
-    print("(now covered; the arrival is TRIGGERING, so it fires)")
+    print("Explicit feed → push → snapshot lifecycle")
     print("=" * 72)
 
-    print("Raw Reading:", 10)
-    run.publish(RawReading(10.0))
+    raw = 10
+    session.feed(RawReading(raw))
+    session.push()
+    snap1 = session.snapshot()
 
-    reading_calibrated = run.repository.get(CalibratedReading)
+    reading_calibrated = snap1.get(CalibratedReading)
     if reading_calibrated:
-        print("Reading Calibrated:", reading_calibrated)
+        print("Raw Reading:", raw, "Reading Calibrated:", reading_calibrated)
 
-    print("Raw Reading:", 10)
-    run.publish(RawReading(20.0))
-    reading = run.repository.get(CalibratedReading)
+    print()
+    print("=" * 72)
+    print("Convenience API: invoke() performs feed → push → snapshot")
+    print("=" * 72)
+
+    raw = 20
+    snap2 = session.invoke(RawReading(raw))
+    reading_calibrated = snap2.get(CalibratedReading)
     if reading_calibrated:
-        print("Reading Calibrated:", reading_calibrated)
+        print("Raw Reading:", raw, "Reading Calibrated:", reading_calibrated)
+
+    assert snap1[CalibratedReading] == 5.0
+    assert snap2[CalibratedReading] == 10.0

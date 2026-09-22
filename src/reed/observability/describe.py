@@ -11,7 +11,7 @@ composition-time information. Milestone O7, Slice O7i removed prospective
 declaration entirely: an Instrument (a typed `Instrument` subclass,
 `reed.observability.instrument`) is now discovered dynamically, the first
 time a Node actually calls `ctx.record(SomeInstrument, value)` during a
-real `Run`. `describe_flow(flow)` therefore **cannot** claim any static
+real `Session`. `describe_flow(flow)` therefore **cannot** claim any static
 Instrument knowledge anymore -- there is no `FlowNode.instruments` field
 left to read, and Reed deliberately does not recover this information via
 `AST` inspection of a Node's body (docs/observability_non_goals.md's
@@ -25,7 +25,7 @@ Instrument x Node binding is not "unknown" at composition time -- it
 simply does not exist yet, since no Node has run -- so it has no place in
 this composition-plane report at all. `describe_instruments_manifest(...)`
 remains the execution-derived view where real Instrument bindings, once
-discovered by a past `Run`, actually live.
+discovered by a past `Session`, actually live.
 """
 
 from __future__ import annotations
@@ -56,13 +56,13 @@ LAZY_CAPABLE_LABEL = DISCOVERED_AT_RUNTIME_LABEL
 
 def describe_flow(flow: "Flow") -> Table:
     """
-    Build a Rich `Table` of every `FlowNode` in `flow` -- no `Run`, no
+    Build a Rich `Table` of every `FlowNode` in `flow` -- no `Session`, no
     execution. This is a purely structural, composition-plane report:
     which Nodes exist and how they relate. Since Milestone O7, Slice O7i,
     Instrument bindings are discovered dynamically at execution time, not
     declared as part of composing the Flow, so there is no Instrument
     column here -- see `describe_instruments_manifest(...)` for actually
-    observed Instrument bindings from a past Run.
+    observed Instrument bindings from a past Session.
     """
     table = Table(title=f"Reed Flow -- {flow.flow_id}")
     table.add_column("node_id")
@@ -76,14 +76,14 @@ def describe_flow(flow: "Flow") -> Table:
 def describe_instruments_manifest(path: Path) -> Table:
     """
     Report every Instrument binding actually *discovered* across past
-    Runs of one Flow, read from `<storage_root>/flows/<flow_id>/
+    Sessions of one Flow, read from `<storage_root>/flows/<flow_id>/
     instruments.json` (Milestone O3, Slice O3e; merged dynamically since
     Milestone O7, Slice O7i -- see `storage.merge_discovered_instruments`).
 
     Unlike `describe_flow(...)`, this can genuinely report `kind`/`unit`/
-    `description`, because it reflects Instrument bindings a real `Run`
+    `description`, because it reflects Instrument bindings a real `Session`
     actually observed -- not a static declaration. A Node that has never
-    yet called `ctx.record(...)` in any Run of this Flow simply does not
+    yet called `ctx.record(...)` in any Session of this Flow simply does not
     appear here at all (there is nothing to report for it, and no
     static declaration to fall back on describing).
     """

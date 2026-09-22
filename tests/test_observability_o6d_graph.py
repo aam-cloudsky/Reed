@@ -41,11 +41,12 @@ def test_build_provenance_graph_groups_by_artifact_version(tmp_path):
 
     flow, stage_one, consumer_b = _make_fan_out_flow()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
+    session = flow.session(storage_root=str(root))
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     graph = build_provenance_graph(run_dir)
 
     estimate_keys = [key for key in graph if key[0].endswith("Estimate")]
@@ -60,12 +61,14 @@ def test_used_edge_appears_once_producer_and_consumer_both_fire(tmp_path):
 
     flow, stage_one, consumer_b = _make_fan_out_flow()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
+    session = flow.session(storage_root=str(root))
 
-    run.publish(Measurement(1))
-    run.publish(Estimate(5))
+    session.feed(Measurement(1))
+    session.push()
+    session.feed(Estimate(5))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     graph = build_provenance_graph(run_dir)
 
     estimate_keys = [key for key in graph if key[0].endswith("Estimate")]
@@ -78,10 +81,11 @@ def test_render_provenance_tree_contains_artifact_and_producer(tmp_path):
 
     flow, stage_one, consumer_b = _make_fan_out_flow()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
-    run.publish(Measurement(1))
+    session = flow.session(storage_root=str(root))
+    session.feed(Measurement(1))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     tree = render_provenance_tree(run_dir)
 
     from rich.console import Console
@@ -99,10 +103,11 @@ def test_render_provenance_dot_produces_valid_digraph_text(tmp_path):
 
     flow, stage_one, consumer_b = _make_fan_out_flow()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
-    run.publish(Measurement(1))
+    session = flow.session(storage_root=str(root))
+    session.feed(Measurement(1))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     dot = render_provenance_dot(run_dir)
 
     assert dot.startswith("digraph reed_provenance {")

@@ -71,7 +71,7 @@ def _make_flow_with_multi_record_node():
 def test_multiple_recordings_in_one_firing_fsync_once(tmp_path, monkeypatch):
     flow, produce = _make_flow_with_multi_record_node()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
+    session = flow.session(storage_root=str(root))
 
     fsync_calls = {"n": 0}
     real_fsync = os.fsync
@@ -82,20 +82,28 @@ def test_multiple_recordings_in_one_firing_fsync_once(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "fsync", counting_fsync)
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
     # Three ctx.record(...) calls in one firing must flush as one batch at
-    # the NodeExecution durability boundary -- not once per call. The
-    # remaining fsync is the "generated" provenance event this firing's
-    # own committed output triggers (out of this slice's scope -- O7c is
-    # about ctx.record()'s hot path specifically, not Provenance, which
-    # is one event per firing already, not a repeated hot-path call).
-    assert fsync_calls["n"] == 2
+    # the NodeExecution durability boundary -- not once per call: that is
+    # 1 fsync. The remaining 3 are Provenance events (out of this slice's
+    # scope -- O7c is about ctx.record()'s hot path specifically, not
+    # Provenance, which is one fsync per event already, not a repeated
+    # hot-path call): feed()'s own "generated" event for the externally
+    # fed Measurement, the "used" event produce's firing now emits for
+    # that already-committed Measurement, and the "generated" event for
+    # produce's own committed Estimate output (Slice 22E;
+    # session_snapshot_decision.md section 1, point 2 -- a fed root
+    # value now becomes a provenance-tracked record like any other,
+    # where the old publish() never committed or emitted anything for
+    # the root value itself).
+    assert fsync_calls["n"] == 4
 
     # All three rows must still have been written.
     from reed.observability.replay import load_recordings
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     rows = load_recordings(run_dir)
     assert len(rows) == 3
     assert {row["name"] for row in rows} == {
@@ -110,11 +118,12 @@ def test_recordings_are_durable_after_a_successful_firing(tmp_path):
 
     flow, produce = _make_flow_with_multi_record_node()
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
+    session = flow.session(storage_root=str(root))
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     rows = load_recordings(run_dir)
     assert len(rows) == 3
 
@@ -141,14 +150,15 @@ def test_recordings_flush_even_when_the_node_raises(tmp_path):
     flow = Flow()
     flow.add(failing_node)
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
+    session = flow.session(storage_root=str(root))
 
     try:
-        run.publish(Measurement(1))
+        session.feed(Measurement(1))
+        session.push()
     except RuntimeError:
         pass
 
-    run_dir = root / "runs" / run.execution_id
+    run_dir = root / "runs" / session.execution_id
     rows = load_recordings(run_dir)
     assert len(rows) == 1
     assert rows[0]["name"] == Flag.instrument_name()
@@ -163,7 +173,7 @@ def test_no_fsync_when_no_recordings_are_made_in_a_firing(tmp_path, monkeypatch)
     flow = Flow()
     flow.add(produce)
     root = tmp_path / ".reed"
-    run = flow.run(storage_root=str(root))
+    session = flow.session(storage_root=str(root))
 
     fsync_calls = {"n": 0}
     real_fsync = os.fsync
@@ -174,9 +184,13 @@ def test_no_fsync_when_no_recordings_are_made_in_a_firing(tmp_path, monkeypatch)
 
     monkeypatch.setattr(os, "fsync", counting_fsync)
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
     # No ctx.record(...) calls were made, so no Recording batch is
-    # flushed -- the one remaining fsync is this firing's own "generated"
-    # provenance event (out of this slice's scope, see above).
-    assert fsync_calls["n"] == 1
+    # flushed -- the remaining fsyncs are Provenance events (out of this
+    # slice's scope, see above): feed()'s own "generated" event for the
+    # externally fed Measurement, the "used" event produce's firing now
+    # emits for that already-committed Measurement, and the "generated"
+    # event for produce's own committed Estimate output (Slice 22E).
+    assert fsync_calls["n"] == 3

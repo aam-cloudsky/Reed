@@ -11,22 +11,22 @@ harness.md's O1 table; docs/observability_implementation_plan.md Section
        same order) -- the cross-process stability property, exercised
        here as cross-instance stability within one process (the
        deterministic derivation makes the two equivalent: a fresh `Flow`
-       instance is exactly what a second process run also builds).
+       instance is exactly what a second process session also builds).
     2. `Flow.flow_id` changes when the composition changes (a node added,
        removed, or reordered).
     3. `FlowNode.node_id` is deterministic (module + qualname), distinct
        from `FlowNode.node_name` (the function's `__name__`, cosmetic
        only, allowed to collide).
-    4. `Run.execution_id` is a fresh, distinct value per `Run` instance.
-    5. `Run.flow_id` passes through to `self.flow.flow_id`.
+    4. `Session.execution_id` is a fresh, distinct value per `Session` instance.
+    5. `Session.flow_id` passes through to `self.flow.flow_id`.
     6. Firing a stateful Node attaches a `NodeExecutionIdentity` to the
        injected `NodeContext`, with a fresh `node_execution_id` and an
-       incrementing `execution_seq` on every firing, scoped to one Run.
-    7. A `NodeContext` built without `identity=` (e.g. `NodeRuntime.context`,
+       incrementing `execution_seq` on every firing, scoped to one Session.
+    7. A `NodeContext` built without `identity=` (e.g. `NodeSession.context`,
        or direct construction) still works exactly as before -- `identity`
        defaults to `None`; no existing behavior changed.
-    8. The identity bundle carries no back-reference to `Run`, `Flow`, or
-       `NodeRuntime` -- only plain values.
+    8. The identity bundle carries no back-reference to `Session`, `Flow`, or
+       `NodeSession` -- only plain values.
 """
 
 from __future__ import annotations
@@ -150,32 +150,33 @@ def test_node_name_is_display_only_and_allowed_to_collide():
     assert node_a.node_id != node_b.node_id
 
 
-def test_execution_id_is_distinct_per_run():
+def test_execution_id_is_distinct_per_session():
     flow, _track = _make_flow_with_tracker()
 
-    first_run = flow.run()
-    second_run = flow.run()
+    first_session = flow.session()
+    second_session = flow.session()
 
-    assert first_run.execution_id != second_run.execution_id
-    assert isinstance(first_run.execution_id, str)
+    assert first_session.execution_id != second_session.execution_id
+    assert isinstance(first_session.execution_id, str)
 
 
-def test_run_flow_id_passes_through_to_flow():
+def test_session_flow_id_passes_through_to_flow():
     flow, _track = _make_flow_with_tracker()
-    run = flow.run()
+    session = flow.session()
 
-    assert run.flow_id == flow.flow_id
+    assert session.flow_id == flow.flow_id
 
 
 def test_firing_attaches_identity_bundle_to_injected_context():
     from reed.observability.identity import NodeExecutionIdentity
 
     flow, track = _make_flow_with_tracker()
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(1))
+    session.feed(Measurement(1))
+    session.push()
 
-    ctx = run.node_runtime(track).context
+    ctx = session.node_session(track).context
     # `.context` itself still defaults to identity=None (unchanged
     # behavior) -- the identity actually attached during firing is only
     # observable from inside the node body. Assert that indirectly via a
@@ -198,10 +199,12 @@ def test_firing_attaches_identity_bundle_observed_from_inside_node():
 
     flow = Flow()
     flow.add(track)
-    run = flow.run()
+    session = flow.session()
 
-    run.publish(Measurement(1))
-    run.publish(Measurement(2))
+    session.feed(Measurement(1))
+    session.push()
+    session.feed(Measurement(2))
+    session.push()
 
     assert len(observed) == 2
     first, second = observed
@@ -209,12 +212,18 @@ def test_firing_attaches_identity_bundle_observed_from_inside_node():
     assert isinstance(first, NodeExecutionIdentity)
     assert isinstance(second, NodeExecutionIdentity)
 
-    assert first.execution_id == second.execution_id == run.execution_id
-    assert first.flow_id == second.flow_id == run.flow_id
+    assert first.execution_id == second.execution_id == session.execution_id
+    assert first.flow_id == second.flow_id == session.flow_id
     assert first.node_id == second.node_id == flow.flow_nodes[0].node_id
 
     assert first.node_execution_id != second.node_execution_id
-    assert second.execution_seq == first.execution_seq + 1
+    # Each feed()+push() cycle now consumes two execution_seq values --
+    # one for feed()'s own identity-bundle commit of the fed Measurement,
+    # one for track's firing (Slice 22E) -- rather than one, as a bare
+    # publish() call used to. The two firings' own execution_seq values
+    # are still strictly increasing and two apart.
+    assert second.execution_seq == first.execution_seq + 2
+    assert second.execution_seq > first.execution_seq
 
 
 def test_node_context_without_identity_defaults_to_none():
@@ -242,4 +251,4 @@ def test_identity_bundle_has_no_back_reference_to_execution_infrastructure():
     assert isinstance(identity.execution_seq, int)
 
     with pytest.raises(AttributeError):
-        identity.run  # type: ignore[attr-defined]
+        identity.session  # type: ignore[attr-defined]

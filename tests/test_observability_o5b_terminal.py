@@ -33,24 +33,31 @@ def test_render_trace_table_has_one_row_per_firing():
     from reed.observability.terminal import render_trace_table
 
     flow, produce = _make_flow()
-    run = flow.run()
-    run.publish(Measurement(1))
-    run.publish(Measurement(2))
+    session = flow.session()
+    session.feed(Measurement(1))
+    session.push()
+    session.feed(Measurement(2))
+    session.push()
 
-    table = render_trace_table(run.trace)
+    table = render_trace_table(session.trace)
 
-    assert table.row_count == 2
+    # Each feed()+push() cycle now contributes two firing rows -- one
+    # for feed()'s own identity-bundle commit of the fed Measurement,
+    # one for produce's actual firing (Slice 22E) -- rather than one, as
+    # a bare publish() call used to.
+    assert table.row_count == 4
 
 
 def test_print_trace_renders_node_id_and_finished_status():
     from reed.observability.terminal import print_trace
 
     flow, produce = _make_flow()
-    run = flow.run()
-    run.publish(Measurement(1))
+    session = flow.session()
+    session.feed(Measurement(1))
+    session.push()
 
     console = Console(record=True, width=200)
-    print_trace(run.trace, console=console)
+    print_trace(session.trace, console=console)
     output = console.export_text()
 
     assert "produce" in output

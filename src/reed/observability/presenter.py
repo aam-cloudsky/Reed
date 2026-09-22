@@ -3,10 +3,10 @@ Terminal presenter (Milestone O7, Slice O7d/O7e; extended Milestone O8, Slice O8
 artifact-publication rendering and structured-logging fan-out).
 
 The consumer side of `reed.observability.presentation.PresentationPolicy`: turns a
-compiled policy into a live renderer, invoked by `Run` at the same hook points that
+compiled policy into a live renderer, invoked by `Session` at the same hook points that
 already exist for Provenance/Execution Trace emission (`_fire`, `publish`) -- never a
 new observability collection mechanism of its own. A `Presenter` reads identity/timing
-data `Run` already has and prints; it never decides what Reed observes, persists, or
+data `Session` already has and prints; it never decides what Reed observes, persists, or
 exports.
 
     Reed Runtime
@@ -19,7 +19,7 @@ exports.
                       v
                Presenter (this module)     <-- Rich is an implementation detail here only
 
-Rich is used internally for rendering, but nothing in `Run`/`NodeContext`/`Flow`'s public
+Rich is used internally for rendering, but nothing in `Session`/`NodeContext`/`Flow`'s public
 surface exposes Rich, tqdm, or any other backend-specific vocabulary -- `PresentationPolicy`
 and the `"silent"`/`"errors"`/`"progress"`/`"instruments"`/`"nodes"`/`"verbose"` preset names
 are Reed's own words for what the user is choosing to see.
@@ -44,7 +44,7 @@ there would be.
 ## Artifact-publication rendering (Milestone O8, Slice O8b)
 
 `on_artifact_generated`/`on_artifact_consumed` are new hooks (docs/logging_design.md
-Section 3): `Run._fire` already knows, at the exact moment it emits a `"generated"`/
+Section 3): `Session._fire` already knows, at the exact moment it emits a `"generated"`/
 `"used"` `ProvenanceEvent`, everything needed to render "Node X published Artifact@vN to
 the Repository" -- this only exposes that same moment to the `Presenter`, it does not add
 any new observation. Rendered only when `PresentationPolicy.propagation` is set (the
@@ -68,7 +68,7 @@ if TYPE_CHECKING:
 
 class Presenter:
     """
-    Base presenter: every hook is a no-op. `Run` always holds a
+    Base presenter: every hook is a no-op. `Session` always holds a
     `Presenter` (never `None`), so every call site can call a hook
     unconditionally -- `NullPresenter` (the `"silent"` preset) is simply
     this base class used directly, with nothing to override.
@@ -240,17 +240,17 @@ class TerminalPresenter(Presenter):
 
 class CompositePresenter(Presenter):
     """
-    Fans one `Run`'s `Presenter` calls out to several concrete `Presenter`s
+    Fans one `Session`'s `Presenter` calls out to several concrete `Presenter`s
     (Milestone O8, Slice O8b) -- e.g. a `TerminalPresenter` for humans and a
     `StructuredLogPresenter` (`reed.observability.logging`) for a JSON sink,
-    built from the same underlying facts. `Run` still only ever holds and
+    built from the same underlying facts. `Session` still only ever holds and
     calls one `Presenter`; this class is the only place that knows there is
     more than one.
 
     Each sub-presenter's hook call is isolated individually so that one
     broken sub-presenter cannot prevent another from receiving the same
     call (docs/observability_invariants.md #31) -- on top of, not instead
-    of, `Run._safe_presenter_call`'s own isolation of the composite call
+    of, `Session._safe_presenter_call`'s own isolation of the composite call
     itself.
     """
 

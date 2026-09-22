@@ -28,7 +28,7 @@ keeps working unchanged because the field defaults to
 `references/ingested/reed-refactor-protocol-recovered-reference.md` and
 `reed-sampled-inputs-proposal.md` for the full motivation; Slice 21B
 wires detection of `Annotated[T, Sampled]` into this field, and Slice
-21C changes how `Run` reads it for firing eligibility.
+21C changes how `Session` reads it for firing eligibility.
 """
 
 from __future__ import annotations
@@ -56,11 +56,11 @@ class InputRole(Enum):
     TRIGGERING is the only role that existed before this issue and
     remains the default: an arriving value of a TRIGGERING type can make
     its `FlowNode` eligible to fire (subject to `TriggerPolicy`,
-    `Run._is_eligible_to_fire`). SAMPLED marks a consumed parameter,
+    `Session._is_eligible_to_fire`). SAMPLED marks a consumed parameter,
     declared via `Annotated[T, Sampled]` (Slice 21B,
     `reed.composition.node.sampled.Sampled`), whose latest committed
     value the node still needs to be called -- it still counts toward
-    `Run._is_fully_covered` -- but whose own arrival must never by
+    `Session._is_fully_covered` -- but whose own arrival must never by
     itself make the node eligible to fire (Slice 21C).
 
     Meaningless for a PRODUCED descriptor: `DomainNodeDescriptionBuilder`
