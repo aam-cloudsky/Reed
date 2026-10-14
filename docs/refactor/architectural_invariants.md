@@ -33,7 +33,12 @@ became `Session` in issue #22; the invariant numbers did not change).
 
 12. `NodeContext != InputPort`
 13. `NodeContext` exposes only `memory` and `last_output`.
-14. `NodeMemory` belongs to `Session × NodeSession`.
+14. `NodeMemory` belongs to `Session × NodeSession × InstanceKey` (updated at
+    Slice MI-F, docs/refactor/multi_instance_execution_plan.md, R4 decision --
+    per-instance is the resolved scope; the pre-multi-instance meaning, `Session
+    × NodeSession` alone, is preserved exactly under `InstanceKey.singleton()`,
+    so this is a wording update, not a behavior change, for every existing
+    single-instance flow).
 15. `NodeMemory != last_output`.
 16. Different Sessions must not share NodeMemory.
 17. Stateful NodeSession firings are serialized.

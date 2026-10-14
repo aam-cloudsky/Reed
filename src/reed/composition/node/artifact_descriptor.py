@@ -29,6 +29,16 @@ keeps working unchanged because the field defaults to
 `reed-sampled-inputs-proposal.md` for the full motivation; Slice 21B
 wires detection of `Annotated[T, Sampled]` into this field, and Slice
 21C changes how `Session` reads it for firing eligibility.
+
+Slice MI-H (docs/refactor/multi_instance_execution_plan.md, Collective
+dependencies) adds a second defaulted, keyword-compatible field,
+`is_collective`, following the exact same additive pattern: every
+existing construction site keeps working and comparing/hashing
+unchanged because it defaults to `False`. A `Collective`-marked consumed
+parameter (`reed.composition.node.collective.Collective`, detected in
+`domain_signature.py` exactly like `Sampled`) gets `is_collective=True`
+and `input_role=InputRole.SAMPLED` -- see `collective.py`'s own
+docstring for why.
 """
 
 from __future__ import annotations
@@ -101,3 +111,4 @@ class ArtifactDescriptor:
     role: ArtifactRole
     name: str
     input_role: InputRole = InputRole.TRIGGERING
+    is_collective: bool = False

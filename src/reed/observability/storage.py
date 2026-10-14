@@ -63,13 +63,21 @@ PROVENANCE_FIELDS: tuple[str, ...] = (
     "event_type",
     "artifact_id",
     "artifact_version",
+    "instance_id",
     "node_execution_id",
     "node_id",
     "timestamp",
     "execution_seq",
 )
 
-SCHEMA_VERSION = 1
+# Bumped 1 -> 2 at Slice MI-J (docs/refactor/multi_instance_execution_plan.md,
+# Risk R5): PROVENANCE_FIELDS gained "instance_id", a genuine,
+# non-backward-compatible durable schema change. Each Execution owns its
+# own fresh CSV files under its own execution_id (this module's own
+# docstring above), so there is no cross-version file-reuse concern
+# within one Execution's lifetime -- only a new Execution's manifest ever
+# records this new value.
+SCHEMA_VERSION = 2
 
 
 class RecordingStore(Protocol):
@@ -175,6 +183,7 @@ class CSVProvenanceStore:
                 event.event_type,
                 event.artifact_id,
                 event.artifact_version,
+                event.instance_id,
                 event.node_execution_id,
                 event.node_id,
                 event.timestamp,

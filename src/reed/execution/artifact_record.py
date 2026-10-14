@@ -109,6 +109,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Generic, Optional, TypeVar
 
 if TYPE_CHECKING:
+    from reed.execution.instance_key import InstanceKey
     from reed.execution.node_session import NodeSession
 
 DomainType = TypeVar("DomainType")
@@ -197,6 +198,22 @@ class ArtifactProvenance:
     version: ArtifactVersion = field(default_factory=ArtifactVersion.pending)
     dependencies: dict[type, ArtifactVersion] = field(default_factory=dict)
     origin: Optional["ArtifactOrigin"] = None
+    dependency_instances: dict[type, "InstanceKey"] = field(default_factory=dict)
+    """
+    Slice MI-C (docs/refactor/multi_instance_execution_plan.md, Section 5):
+    which instance of each dependency type this provenance revision was
+    aligned against, keyed the same way `dependencies` itself is keyed
+    (by domain type). Additive alongside `dependencies`, not a replacement
+    for it: `dependencies` records a dependency's version, this field
+    records which instance of that dependency type the version belongs
+    to. Empty by default, exactly like `dependencies` -- neither field is
+    populated by any real node firing yet (Session._commit calls
+    `.advance(...)` with neither keyword); both stay unit-level bookkeeping
+    until a later slice (MI-E, per-instance firing and eligibility) wires
+    them into a real firing's argument resolution, since alignment only
+    has real content once a firing can consume more than one instance of
+    a dependency.
+    """
 
     def advance(
         self,
@@ -204,6 +221,7 @@ class ArtifactProvenance:
         origin: "ArtifactOrigin",
         producer: Optional["NodeSession"] = None,
         dependencies: Optional[dict[type, ArtifactVersion]] = None,
+        dependency_instances: Optional[dict[type, "InstanceKey"]] = None,
     ) -> None:
         """
         Publish a new provenance revision in place.
@@ -233,12 +251,16 @@ class ArtifactProvenance:
         if dependencies is not None:
             self.dependencies = dict(dependencies)
 
+        if dependency_instances is not None:
+            self.dependency_instances = dict(dependency_instances)
+
     def copy(self) -> ArtifactProvenance:
         return type(self)(
             producer=self.producer,
             version=self.version,
             dependencies=dict(self.dependencies),
             origin=self.origin,
+            dependency_instances=dict(self.dependency_instances),
         )
 
 

@@ -123,13 +123,24 @@ def test_snapshot_never_exposes_artifact_record():
     assert not isinstance(got_item, ArtifactRecord)
 
     # No public attribute or method on Snapshot returns/holds an
-    # ArtifactRecord directly. Only .get and __getitem__ (and the
-    # from_repository constructor, which is itself a constructor, not an
-    # accessor of an existing Snapshot's state) are public.
+    # ArtifactRecord directly. Only .get, __getitem__, .instances (added
+    # post-MI-J, see snapshot.py's own module docstring -- the
+    # multi-instance-aware complement to .get/__getitem__, unwrapping to
+    # plain domain values exactly like they do) and the from_repository
+    # constructor (itself a constructor, not an accessor of an existing
+    # Snapshot's state) are public. The pin is updated to match rather
+    # than left to fail, the same precedent this codebase has already
+    # established for this exact kind of additive-surface change (see
+    # tests/test_slice_1b_domain_node_description.py's own comment for
+    # the original instance of this precedent, Slice 21A's addition of
+    # ArtifactDescriptor.input_role).
     public_members = [
         name for name in dir(snapshot) if not name.startswith("_")
     ]
-    assert set(public_members) <= {"get", "from_repository"}
+    assert set(public_members) <= {"get", "from_repository", "instances"}
+
+    instances_view = snapshot.instances(RawReading)
+    assert not any(isinstance(value, ArtifactRecord) for value in instances_view.values())
 
     # Nothing reachable off the Snapshot instance itself (its __dict__,
     # the only internal state it holds) is an ArtifactRecord.

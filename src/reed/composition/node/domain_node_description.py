@@ -136,12 +136,25 @@ class DomainNodeDescriptionBuilder:
                 name=parameter_name,
                 # Slice 21B: a parameter annotated Annotated[T, Sampled]
                 # (detected by DomainNodeSignatureParser, Slice 21B) gets
-                # InputRole.SAMPLED; every other consumed parameter keeps
-                # today's only behavior, InputRole.TRIGGERING.
+                # InputRole.SAMPLED. Slice MI-H: a parameter annotated
+                # Annotated[T, Collective] also gets InputRole.SAMPLED --
+                # a collective dependency's own arrival must never by
+                # itself make its node eligible to fire (see
+                # reed.composition.node.collective.Collective's own
+                # docstring) -- in addition to is_collective=True below.
+                # Every other consumed parameter keeps today's only
+                # behavior, InputRole.TRIGGERING.
                 input_role=(
                     InputRole.SAMPLED
-                    if parameter_name in parsed_signature.sampled_parameter_names
+                    if (
+                        parameter_name in parsed_signature.sampled_parameter_names
+                        or parameter_name
+                        in parsed_signature.collective_parameter_names
+                    )
                     else InputRole.TRIGGERING
+                ),
+                is_collective=(
+                    parameter_name in parsed_signature.collective_parameter_names
                 ),
             )
             for parameter_name, parameter_type in parsed_signature.consumed_parameters

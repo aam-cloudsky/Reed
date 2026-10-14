@@ -97,13 +97,24 @@ def test_feed_marks_triggering_consumers_fresh_but_not_sampled_consumers():
     flow_node = flow.add(calibrate)
     session = flow.session()
 
+    from reed.execution.instance_key import InstanceKey
+
     session.feed(CalibrationOffset(0.5))
-    fresh = session._fresh_since_last_firing.get(flow_node, set())
+    fresh = session._fresh_since_last_firing.get(flow_node, {}).get(
+        InstanceKey.singleton(), set()
+    )
     assert CalibrationOffset not in fresh
-    assert session._last_known_values[flow_node][CalibrationOffset].value == 0.5
+    assert (
+        session._last_known_values[flow_node][InstanceKey.singleton()][
+            CalibrationOffset
+        ].value
+        == 0.5
+    )
 
     session.feed(RawReading(10.0))
-    fresh = session._fresh_since_last_firing.get(flow_node, set())
+    fresh = session._fresh_since_last_firing.get(flow_node, {}).get(
+        InstanceKey.singleton(), set()
+    )
     assert RawReading in fresh
     assert CalibrationOffset not in fresh
 
