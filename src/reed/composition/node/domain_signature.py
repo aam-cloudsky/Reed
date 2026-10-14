@@ -95,6 +95,7 @@ from typing import (
     get_type_hints,
 )
 
+from reed.composition.node.collective import Collective
 from reed.composition.node.node_context import NodeContext
 from reed.composition.node.sampled import Sampled
 
@@ -130,6 +131,15 @@ class DomainNodeSignature:
     context_output_type: type | None
     produced_type: type
     sampled_parameter_names: frozenset[str] = frozenset()
+    # Slice MI-H (docs/refactor/multi_instance_execution_plan.md Section
+    # 5 item 8 -- Collective dependencies): the subset of
+    # `consumed_parameters`' names whose annotation was
+    # `Annotated[T, Collective]` (`reed.composition.node.collective.
+    # Collective`). Detected exactly like `sampled_parameter_names`
+    # (Slice 21B), independently -- a parameter may in principle carry
+    # both markers' metadata at once, though no current use case combines
+    # them.
+    collective_parameter_names: frozenset[str] = frozenset()
 
 
 class DomainNodeSignatureParser:
@@ -181,11 +191,12 @@ class DomainNodeSignatureParser:
         # return annotation is silently discarded, matching this
         # parser's pre-21B behavior for every currently passing test
         # (none annotates a return type with Annotated).
-        produced_type, _ = self._unwrap_annotated(self._type_hints["return"])
+        produced_type, _, _ = self._unwrap_annotated(self._type_hints["return"])
 
         (
             consumed_parameters,
             sampled_parameter_names,
+            collective_parameter_names,
             context_parameter_name,
             context_memory_type,
             context_output_type,
@@ -202,6 +213,7 @@ class DomainNodeSignatureParser:
             context_output_type=context_output_type,
             produced_type=produced_type,
             sampled_parameter_names=frozenset(sampled_parameter_names),
+            collective_parameter_names=frozenset(collective_parameter_names),
         )
 
     def _iter_declared_parameters(self) -> list[Parameter]:
@@ -215,12 +227,14 @@ class DomainNodeSignatureParser:
     ) -> tuple[
         list[DomainConsumedParameter],
         set[str],
+        set[str],
         str | None,
         type | None,
         type | None,
     ]:
         consumed_parameters: list[DomainConsumedParameter] = []
         sampled_parameter_names: set[str] = set()
+        collective_parameter_names: set[str] = set()
         context_parameter_name: str | None = None
         context_memory_type: type | None = None
         context_output_type: type | None = None
@@ -244,7 +258,9 @@ class DomainNodeSignatureParser:
                     "a type annotation."
                 )
 
-            annotation, is_sampled = self._unwrap_annotated(raw_annotation)
+            annotation, is_sampled, is_collective = self._unwrap_annotated(
+                raw_annotation
+            )
 
             if get_origin(annotation) is NodeContext:
                 if is_sampled:
@@ -253,6 +269,14 @@ class DomainNodeSignatureParser:
                         "cannot declare its NodeContext parameter as "
                         "Sampled -- Sampled applies only to dataflow "
                         "domain artifact parameters."
+                    )
+
+                if is_collective:
+                    raise TypeError(
+                        f"Node function '{self._function.__name__}' "
+                        "cannot declare its NodeContext parameter as "
+                        "Collective -- Collective applies only to "
+                        "dataflow domain artifact parameters."
                     )
 
                 if context_parameter_name is not None:
@@ -270,25 +294,31 @@ class DomainNodeSignatureParser:
             consumed_parameters.append((parameter.name, annotation))
             if is_sampled:
                 sampled_parameter_names.add(parameter.name)
+            if is_collective:
+                collective_parameter_names.add(parameter.name)
 
         return (
             consumed_parameters,
             sampled_parameter_names,
+            collective_parameter_names,
             context_parameter_name,
             context_memory_type,
             context_output_type,
         )
 
     @staticmethod
-    def _unwrap_annotated(annotation: object) -> tuple[type, bool]:
+    def _unwrap_annotated(annotation: object) -> tuple[type, bool, bool]:
         """
         Unwrap `Annotated[T, ...]` down to `T` (Slice 21B), reporting
-        whether `Sampled` (`reed.composition.node.sampled.Sampled`) was
-        present among its metadata. Returns `(annotation, False)`
-        unchanged for any non-`Annotated` annotation -- in particular,
-        for `NodeContext[MemoryType, OutputType]`, which is a plain
-        generic subscript, never wrapped in `Annotated`, so this is a
-        no-op for it and NodeContext detection is provably unaffected.
+        whether `Sampled` (`reed.composition.node.sampled.Sampled`) and,
+        since Slice MI-H, whether `Collective`
+        (`reed.composition.node.collective.Collective`) were present
+        among its metadata, independently of each other. Returns
+        `(annotation, False, False)` unchanged for any non-`Annotated`
+        annotation -- in particular, for `NodeContext[MemoryType,
+        OutputType]`, which is a plain generic subscript, never wrapped
+        in `Annotated`, so this is a no-op for it and NodeContext
+        detection is provably unaffected.
 
         Declared to return `type`, not `object`: every annotation that
         reaches this method is already one of resolved-type,
@@ -303,9 +333,13 @@ class DomainNodeSignatureParser:
         """
         if get_origin(annotation) is Annotated:
             underlying_type, *metadata = get_args(annotation)
-            return underlying_type, any(marker is Sampled for marker in metadata)
+            return (
+                underlying_type,
+                any(marker is Sampled for marker in metadata),
+                any(marker is Collective for marker in metadata),
+            )
 
-        return cast(type, annotation), False
+        return cast(type, annotation), False, False
 
     def _parse_context_arguments(self, annotation: object) -> tuple[type, type]:
         arguments = get_args(annotation)

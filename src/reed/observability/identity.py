@@ -23,10 +23,27 @@ Section 16.3, Section 17.1's resolution in Section 18):
                            causality claim (docs/observability_design.md
                            Section 13.1; docs/observability_invariants.md
                            #7-9).
+    instance_id         -- Slice MI-J (docs/refactor/
+                           multi_instance_execution_plan.md, Risk R5):
+                           the resolved `InstanceKey` of the artifact
+                           instance this firing (or this "used"
+                           dependency) is scoped to, as a plain string
+                           (`Session._instance_identifier`). Defaults to
+                           `"<InstanceKey.singleton>"` -- deliberately the
+                           exact `repr()` of `InstanceKey.singleton()`'s
+                           own private sentinel object
+                           (`reed.execution.instance_key.
+                           _InstanceKeySingletonSentinel.__repr__`),
+                           confirmed by reading that module, without this
+                           deliberately minimal-import module importing
+                           `InstanceKey` itself. Every pre-multi-instance
+                           firing resolves to this same default, so
+                           existing single-instance flows' observability
+                           output is unaffected by this field's addition.
 
 This bundle deliberately holds no reference back to `Session`, `Flow`,
 `NodeSession`, or anything else internal to Reed's execution
-infrastructure -- only these five plain values (architectural_invariants.md
+infrastructure -- only these six plain values (architectural_invariants.md
 #26; docs/observability_non_goals.md's "NodeContext Scope" constraint,
 carried over from `docs/node_context_decision.md`).
 """
@@ -45,3 +62,4 @@ class NodeExecutionIdentity:
     node_id: str
     node_execution_id: str
     execution_seq: int
+    instance_id: str = "<InstanceKey.singleton>"

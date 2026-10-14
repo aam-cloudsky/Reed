@@ -148,6 +148,8 @@ from reed.observability.identity import NodeExecutionIdentity
 from reed.observability.instrument import Instrument, InstrumentKind
 from reed.observability.recording import Recording, ScalarValue
 
+from reed.execution.instance_key import InstanceKey
+
 if TYPE_CHECKING:
     from reed.composition.flow.flow_node import FlowNode
     from reed.execution.session import Session
@@ -175,8 +177,23 @@ class NodeSession:
     def __init__(self, session: Session, flow_node: FlowNode) -> None:
         self._session = session
         self._flow_node = flow_node
-        self._memory: object | None = None
-        self._last_output: object | None = None
+        # Slice MI-F: NodeMemory and last_output are keyed by InstanceKey
+        # (R4 decision, docs/refactor/multi_instance_execution_plan.md --
+        # per-instance is the resolved scope, consistent with the same
+        # generalization already applied to repository storage (MI-B),
+        # provenance alignment (MI-C), external feeding (MI-D), and
+        # eligibility/firing (MI-E)). The zero-argument `.memory` /
+        # `.last_output` / `.context` properties below read through
+        # InstanceKey.singleton() so every pre-multi-instance call site
+        # is completely unaffected.
+        self._memory: dict["InstanceKey", object] = {}
+        self._last_output: dict["InstanceKey", object] = {}
+        # firing_lock deliberately stays scoped to (Session, NodeSession)
+        # only, not split per instance -- concurrent execution of
+        # instance-level firings is out of scope for this whole issue
+        # (plan document Section 4; roadmap #9 / issue #23), so there is
+        # nothing today for a per-instance lock to protect beyond what
+        # this single lock already protects.
         self._firing_lock: threading.Lock | None = None
         # Milestone O2, Slice O2c/O2d: in-memory Recording buffer (Level 2
         # precursor -- Milestone O3 gives it a durable store) plus the
@@ -233,7 +250,12 @@ class NodeSession:
         """
         return record.value
 
-    def wrap(self, domain_value: object) -> "ArtifactRecord":
+    def wrap(
+        self,
+        domain_value: object,
+        *,
+        instance: "InstanceKey | None" = None,
+    ) -> "ArtifactRecord":
         """
         Wrap `domain_value` -- a node function's returned domain value --
         into a committed `ArtifactRecord` (Slice 2E; version mechanics
@@ -268,9 +290,16 @@ class NodeSession:
         change what `.commit(...)` is responsible for (updating
         `self._last_output`).
         """
-        return self._session._commit(domain_value, origin=ArtifactOrigin.NODE, producer=self)
+        return self._session._commit(
+            domain_value, origin=ArtifactOrigin.NODE, producer=self, instance=instance
+        )
 
-    def commit(self, record: "ArtifactRecord") -> None:
+    def commit(
+        self,
+        record: "ArtifactRecord",
+        *,
+        instance: "InstanceKey | None" = None,
+    ) -> None:
         """
         Commit `record` -- the successful-commit path only (Slice 2E).
 
@@ -291,17 +320,21 @@ class NodeSession:
         explicitly out of scope (see module docstring and the
         SliceContract's stop_conditions).
         """
-        self._session.repository.set_artifact_record(record)
-        self._last_output = record.value
+        self._session.repository.set_artifact_record(record, instance=instance)
+        key = instance if instance is not None else InstanceKey.singleton()
+        self._last_output[key] = record.value
 
-    @property
-    def memory(self) -> object:
+    def _memory_for(self, instance: "InstanceKey") -> object:
         """
-        This `NodeSession`'s private memory instance (Slice 2D), lazily
-        instantiated from its `FlowNode`'s declared `MemoryType` and
-        memoized: the same object is returned -- and can be mutated in
-        place -- on every subsequent access for as long as this
-        `NodeSession` (one per (`Session`, `FlowNode`) pair, Slice 2B) lives.
+        This `NodeSession`'s private memory instance for `instance`
+        (Slice 2D; keyed per `InstanceKey` at Slice MI-F, R4 decision),
+        lazily instantiated from its `FlowNode`'s declared `MemoryType`
+        and memoized per instance: the same object is returned -- and
+        can be mutated in place -- on every subsequent access to the
+        same instance, for as long as this `NodeSession` (one per
+        (`Session`, `FlowNode`) pair, Slice 2B) lives. A different
+        `instance` gets its own independently constructed, independently
+        mutated memory object.
 
         Raises `AttributeError` if this `NodeSession`'s node function
         does not declare a `NodeContext` parameter -- there is no
@@ -313,21 +346,36 @@ class NodeSession:
                 "declare a NodeContext parameter; it has no memory."
             )
 
-        if self._memory is None:
-            self._memory = self._flow_node.context.memory_type()
+        if instance not in self._memory:
+            self._memory[instance] = self._flow_node.context.memory_type()
 
-        return self._memory
+        return self._memory[instance]
 
     @property
-    def last_output(self) -> object | None:
+    def memory(self) -> object:
         """
-        The latest successfully committed domain output for this
-        `NodeSession` (Slice 2D representation; wired to a real
-        committed value by `.commit(...)`, Slice 2E). `None` until this
-        `NodeSession` has completed its first successful commit.
+        This `NodeSession`'s private memory instance for the singleton
+        instance (Slice 2D; per-instance generalization added at Slice
+        MI-F -- see `._memory_for(...)`). Kept as a zero-argument
+        property, reading through `InstanceKey.singleton()`, so every
+        pre-multi-instance call site is completely unaffected.
+
+        Raises `AttributeError` if this `NodeSession`'s node function
+        does not declare a `NodeContext` parameter -- there is no
+        `MemoryType` to construct from.
+        """
+        return self._memory_for(InstanceKey.singleton())
+
+    def _last_output_for(self, instance: "InstanceKey") -> object | None:
+        """
+        The latest successfully committed domain output for `instance`
+        on this `NodeSession` (Slice 2D representation; wired to a real
+        committed value by `.commit(...)`, Slice 2E; keyed per
+        `InstanceKey` at Slice MI-F). `None` until this `NodeSession` has
+        completed its first successful commit for `instance`.
 
         Raises `AttributeError` for the same reason and under the same
-        condition as `.memory` -- see its docstring.
+        condition as `._memory_for(...)` -- see its docstring.
         """
         if self._flow_node.context is None:
             raise AttributeError(
@@ -335,7 +383,22 @@ class NodeSession:
                 "declare a NodeContext parameter; it has no last_output."
             )
 
-        return self._last_output
+        return self._last_output.get(instance)
+
+    @property
+    def last_output(self) -> object | None:
+        """
+        The latest successfully committed domain output for the
+        singleton instance (Slice 2D; per-instance generalization added
+        at Slice MI-F -- see `._last_output_for(...)`). Kept as a
+        zero-argument property, reading through
+        `InstanceKey.singleton()`, so every pre-multi-instance call site
+        is completely unaffected.
+
+        Raises `AttributeError` for the same reason and under the same
+        condition as `.memory` -- see its docstring.
+        """
+        return self._last_output_for(InstanceKey.singleton())
 
     @property
     def firing_lock(self) -> "threading.Lock | None":
@@ -546,28 +609,34 @@ class NodeSession:
         self,
         identity: NodeExecutionIdentity,
         recorder: "object | None" = None,
+        *,
+        instance: "InstanceKey | None" = None,
     ) -> NodeContext:
         """
         A fresh `NodeContext` snapshot carrying an observability identity
-        bundle (Milestone O1, Slice O1f).
+        bundle (Milestone O1, Slice O1f) and, since Slice MI-F, reading
+        memory/last_output for `instance` specifically (defaulting to
+        `InstanceKey.singleton()`, same as every other `instance`
+        keyword-only parameter added since Slice MI-E).
 
-        Identical to `.context` except for the added `identity=...`
-        argument -- used exclusively by `Session._build_call_kwargs(...)` to
-        build the `NodeContext` that is actually injected into a real
-        firing, once `Session._begin_node_execution(...)` has minted that
-        firing's identity. Kept as a separate method rather than an
-        optional parameter on `.context` because `.context` is a
-        property (called without parentheses throughout the existing,
-        regression-protected call sites) and properties cannot take
-        arguments.
+        Identical to `.context` except for the added `identity=...` and
+        `instance=...` arguments -- used exclusively by
+        `Session._build_call_kwargs(...)` to build the `NodeContext` that
+        is actually injected into a real firing, once
+        `Session._begin_node_execution(...)` has minted that firing's
+        identity. Kept as a separate method rather than optional
+        parameters on `.context` because `.context` is a property (called
+        without parentheses throughout the existing, regression-protected
+        call sites) and properties cannot take arguments.
 
-        Raises `AttributeError` (via `.memory`) if this `NodeSession`'s
-        node function does not declare a `NodeContext` parameter --
-        same as `.context`.
+        Raises `AttributeError` (via `._memory_for(...)`) if this
+        `NodeSession`'s node function does not declare a `NodeContext`
+        parameter -- same as `.context`.
         """
+        key = instance if instance is not None else InstanceKey.singleton()
         return NodeContext(
-            memory=self.memory,
-            last_output=self.last_output,
+            memory=self._memory_for(key),
+            last_output=self._last_output_for(key),
             identity=identity,
             recorder=recorder,
         )

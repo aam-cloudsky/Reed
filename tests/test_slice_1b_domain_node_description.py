@@ -150,8 +150,19 @@ def test_artifact_descriptor_does_not_expose_artifact_record_concepts():
     # "name"}. Slice 21A (GitHub issue #21) intentionally adds a fourth,
     # defaulted field, input_role -- an identity-adjacent concept (which
     # role a consumed artifact plays in firing eligibility), not an
-    # ArtifactRecord concept (value/version/provenance). The pin is
-    # updated to match rather than left to fail; the assertion still
-    # proves no value/version/provenance field ever gets added.
+    # ArtifactRecord concept (value/version/provenance). Slice MI-H
+    # (docs/refactor/multi_instance_execution_plan.md, Collective
+    # dependencies) adds a fifth, defaulted field, is_collective -- same
+    # identity-adjacent category (which cardinality a consumed artifact
+    # resolves to at firing time), not an ArtifactRecord concept either.
+    # The pin is updated to match rather than left to fail, exactly as
+    # Slice 21A's own addition was; the assertion still proves no
+    # value/version/provenance field ever gets added.
     field_names = {field for field in ArtifactDescriptor.__dataclass_fields__}
-    assert field_names == {"domain_type", "role", "name", "input_role"}
+    assert field_names == {
+        "domain_type",
+        "role",
+        "name",
+        "input_role",
+        "is_collective",
+    }

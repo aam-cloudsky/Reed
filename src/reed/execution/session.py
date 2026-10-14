@@ -220,12 +220,15 @@ from reed.observability.storage import (
     write_manifest,
 )
 from reed.execution.artifact_record import ArtifactOrigin, ArtifactRecord
+from collections.abc import Mapping
+from reed.execution.instance_key import InstanceKey
 from reed.synchronization.artifact_repository import ArtifactRepository
 from reed.transportation.bus import Bus
 
 if TYPE_CHECKING:
     from reed.composition.flow.flow_composition import Flow
     from reed.composition.flow.flow_node import FlowNode
+    from reed.composition.node.artifact_descriptor import ArtifactDescriptor
 
 
 class Session:
@@ -299,8 +302,8 @@ class Session:
         # since that FlowNode's last firing (used only to evaluate
         # ALL_INPUTS_CHANGED's "every input is fresh" condition, and reset
         # after each firing).
-        self._last_known_values: dict[FlowNode, dict[type, object]] = {}
-        self._fresh_since_last_firing: dict[FlowNode, set[type]] = {}
+        self._last_known_values: dict[FlowNode, dict[InstanceKey, dict[type, object]]] = {}
+        self._fresh_since_last_firing: dict[FlowNode, dict[InstanceKey, set[type]]] = {}
 
         # Milestone O5, Slice O5a: Level 1 Execution Trace -- an
         # in-memory ring buffer, not required to be durable (design
@@ -441,6 +444,7 @@ class Session:
         *,
         origin: "ArtifactOrigin",
         producer: "NodeSession | None" = None,
+        instance: "InstanceKey | None" = None,
     ) -> "ArtifactRecord":
         """
         The one shared commit operation (Slice 22D,
@@ -472,14 +476,14 @@ class Session:
         `producer`, same empty `dependencies`. Stores the new record via
         `self.repository.set_artifact_record(...)` and returns it.
         """
-        existing = self._repository.get_artifact_record(type(value))
+        existing = self._repository.get_artifact_record(type(value), instance=instance)
         if existing is not None:
             existing.advance(value, origin=origin, producer=producer)
             return existing
 
         record = ArtifactRecord(value=value)
         record.provenance.advance(origin=origin, producer=producer)
-        self._repository.set_artifact_record(record)
+        self._repository.set_artifact_record(record, instance=instance)
         return record
 
     def feed(self, value: object) -> None:
@@ -570,6 +574,83 @@ class Session:
         if producer_node is not None:
             self._dispatch_on_output(producer_node, record.value)
 
+    def feed_instances(self, values: "Mapping[InstanceKey, object]") -> None:
+        """
+        Record and commit several instances of the same domain type in one
+        call (Slice MI-D, docs/refactor/multi_instance_execution_plan.md,
+        Section 5; issue "Support multiple artifact instances and
+        per-instance node execution").
+
+        `values` maps each `InstanceKey` to the domain value committed for
+        it; every value must share the same domain type (raises
+        `TypeError` otherwise -- `feed()`/`feed_instances` each commit
+        exactly one domain type per call, the same boundary `feed()`
+        already has). An empty mapping is a no-op.
+
+        For each `(instance, value)` pair, this performs exactly the
+        bookkeeping and commit steps `feed()` performs for a single value
+        (see `feed()`'s own docstring for the full rationale), generalized
+        along the instance dimension via `Session._commit`'s `instance=`
+        parameter (Slice MI-D) and `ArtifactRepository`'s own (domain
+        type, `InstanceKey`)-keyed storage (Slice MI-B): `_record_input`
+        for every consuming `FlowNode`, a shared-path commit tagged
+        `origin=ArtifactOrigin.EXTERNAL`, and the same trace/provenance
+        events and `on_output` dispatch `feed()` fires, each with its own
+        freshly minted `NodeExecutionIdentity`.
+
+        `feed()` itself is completely unchanged by this slice: it always
+        commits under `InstanceKey.singleton()` (via `_commit`'s own
+        default), so a caller who never uses `feed_instances` observes
+        identical behavior to before this slice existed.
+
+        Disclosed limitation, not fixed by this slice (see this slice's
+        own `SliceContract`): `_record_input` still updates
+        `Session._last_known_values`/`_fresh_since_last_firing`, which
+        remain keyed by `(FlowNode, domain type)` only, with no instance
+        dimension until Slice MI-E. Feeding several instances of the same
+        type in one `feed_instances` call therefore leaves only the
+        most-recently-fed instance's value visible to today's eligibility
+        bookkeeping and to `push()`'s cascade -- the same "last write
+        wins" characteristic repeated calls to today's `feed()` already
+        have for one type, not a new gap this slice introduces. Correct
+        per-instance firing is Slice MI-E's own scope.
+        """
+        if not values:
+            return
+
+        domain_types = {type(value) for value in values.values()}
+        if len(domain_types) > 1:
+            raise TypeError(
+                "feed_instances() commits exactly one domain type per "
+                f"call, got {sorted(t.__name__ for t in domain_types)}. "
+                "Call feed_instances() once per domain type instead."
+            )
+        domain_type = next(iter(domain_types))
+
+        for instance, value in values.items():
+            for flow_node in self._flow.dependency_graph.consumers_of(domain_type):
+                self._record_input(flow_node, domain_type, value, instance=instance)
+
+            record = self._commit(
+                value, origin=ArtifactOrigin.EXTERNAL, producer=None, instance=instance
+            )
+
+            self._execution_seq_counter += 1
+            identity = NodeExecutionIdentity(
+                execution_id=self._execution_id,
+                flow_id=self.flow_id,
+                node_id=self._artifact_id(domain_type),
+                node_execution_id=str(uuid.uuid4()),
+                execution_seq=self._execution_seq_counter,
+                instance_id=self._instance_identifier(instance),
+            )
+
+            self._record_trace_event("node_finished", identity)
+            self._emit_generated_provenance_event(record, identity, instance=instance)
+
+            producer_node = self._flow.dependency_graph.producer_of(domain_type)
+            if producer_node is not None:
+                self._dispatch_on_output(producer_node, record.value)
 
     def push(self) -> None:
         """
@@ -640,58 +721,120 @@ class Session:
         (Slice 22G, not yet implemented) is the separate call for
         reading resulting state.
         """
-        seeded_flow_nodes = [
-            flow_node
-            for flow_node, fresh in self._fresh_since_last_firing.items()
+        seeded = [
+            (flow_node, instance)
+            for flow_node, by_instance in self._fresh_since_last_firing.items()
+            for instance, fresh in by_instance.items()
             if fresh
         ]
 
-        pending: list[tuple[object, int]] = []
+        pending: list[tuple[object, int, "InstanceKey"]] = []
 
-        for flow_node in seeded_flow_nodes:
-            if not self._is_fully_covered(flow_node):
-                # Not every consumed type has a value yet -- discovered
-                # via feed(), but not callable, regardless of
-                # TriggerPolicy. Its freshness is left untouched so a
-                # later feed() completing coverage can still find it.
+        # Post-refactor correctness fix (identified during independent
+        # review after Slice MI-J, in the interaction between Slice MI-E's
+        # per-instance freshness clearing and Slice MI-G's Broadcasting):
+        # a singleton-scoped (broadcast) type's own freshness entry
+        # (`_fresh_since_last_firing[flow_node][InstanceKey.singleton()]`)
+        # is never touched by a per-instance firing's own clear (which
+        # only clears `[flow_node][instance]`), so under
+        # `TriggerPolicy.ALL_INPUTS_CHANGED` (the default trigger_policy)
+        # a broadcast dependency's freshness would otherwise never
+        # expire once set -- spuriously re-satisfying ALL_INPUTS_CHANGED
+        # for every later per-instance arrival even when the broadcast
+        # type itself was never fed again. Tracked here and cleared once,
+        # after this entire push() call's seed pass and cascade both
+        # finish (not per-firing -- see the clearing block after the
+        # `while pending` loop below for why timing matters), so that
+        # every instance genuinely covered THIS push() still gets one
+        # fair look at a broadcast type's freshness before it is spent.
+        fired_all_inputs_changed_nodes: set["FlowNode"] = set()
+
+        for flow_node, instance in seeded:
+            if not self._is_fully_covered(flow_node, instance=instance):
+                # Not every consumed type has a value yet for this
+                # instance -- discovered via feed()/feed_instances(), but
+                # not callable, regardless of TriggerPolicy. Its
+                # freshness is left untouched so a later feed() completing
+                # coverage can still find it.
                 continue
 
             arrived_domain_type = next(
-                iter(self._fresh_since_last_firing[flow_node])
+                iter(self._fresh_since_last_firing[flow_node][instance])
             )
-            if not self._is_eligible_to_fire(flow_node, arrived_domain_type):
+            if not self._is_eligible_to_fire(
+                flow_node, arrived_domain_type, instance=instance
+            ):
                 # Covered but TriggerPolicy says wait. Freshness is left
                 # untouched (e.g. ALL_INPUTS_CHANGED still needs another
                 # TRIGGERING type fed before every consumed TRIGGERING
-                # type is fresh at once).
+                # type is fresh at once, for this instance).
                 continue
 
-            identity = self._begin_node_execution(flow_node)
-            call_kwargs = self._build_call_kwargs(flow_node, identity)
-            result = self._fire(flow_node, call_kwargs, identity, depth=0)
-            self._fresh_since_last_firing[flow_node] = set()
-            pending.append((result, 1))
+            identity = self._begin_node_execution(flow_node, instance=instance)
+            call_kwargs = self._build_call_kwargs(flow_node, identity, instance=instance)
+            result = self._fire(
+                flow_node, call_kwargs, identity, depth=0, instance=instance
+            )
+            self._fresh_since_last_firing[flow_node][instance] = set()
+            if flow_node.trigger_policy is TriggerPolicy.ALL_INPUTS_CHANGED:
+                fired_all_inputs_changed_nodes.add(flow_node)
+            pending.append((result, 1, instance))
 
         while pending:
-            current_value, depth = pending.pop(0)
+            current_value, depth, instance = pending.pop(0)
             domain_type = type(current_value)
 
             consumers = self._flow.dependency_graph.consumers_of(domain_type)
 
             for flow_node in consumers:
-                self._record_input(flow_node, domain_type, current_value)
+                # Same-instance alignment (Slice MI-E, docs/refactor/
+                # multi_instance_execution_plan.md): a firing's own output
+                # for `instance` is recorded, and evaluated for its
+                # consumers' eligibility, under that same `instance` --
+                # the simplest well-supported alignment rule with no
+                # accepted ADR determining a richer one yet. A consumer
+                # whose other consumed types were never fed under this
+                # same instance key will not be fully covered for it
+                # (broadcasting a singleton-scoped dependency into a
+                # per-instance firing is Slice MI-G's job, not this one's).
+                self._record_input(
+                    flow_node, domain_type, current_value, instance=instance
+                )
 
-                if not self._is_fully_covered(flow_node):
+                if not self._is_fully_covered(flow_node, instance=instance):
                     continue
 
-                if not self._is_eligible_to_fire(flow_node, domain_type):
+                if not self._is_eligible_to_fire(
+                    flow_node, domain_type, instance=instance
+                ):
                     continue
 
-                identity = self._begin_node_execution(flow_node)
-                call_kwargs = self._build_call_kwargs(flow_node, identity)
-                result = self._fire(flow_node, call_kwargs, identity, depth=depth)
-                self._fresh_since_last_firing[flow_node] = set()
-                pending.append((result, depth + 1))
+                identity = self._begin_node_execution(flow_node, instance=instance)
+                call_kwargs = self._build_call_kwargs(
+                    flow_node, identity, instance=instance
+                )
+                result = self._fire(
+                    flow_node, call_kwargs, identity, depth=depth, instance=instance
+                )
+                self._fresh_since_last_firing[flow_node][instance] = set()
+                if flow_node.trigger_policy is TriggerPolicy.ALL_INPUTS_CHANGED:
+                    fired_all_inputs_changed_nodes.add(flow_node)
+                pending.append((result, depth + 1, instance))
+
+        # Spend this push() call's broadcast freshness now that every
+        # instance covered this round has already had its own eligibility
+        # evaluated above -- clearing any earlier (e.g. mid-seed-loop)
+        # would have denied a not-yet-processed sibling instance the same
+        # fair look this push() call owes it (see the note above `seeded`
+        # for the full rationale). A flow_node whose own firing was
+        # itself at singleton scope already had this same entry cleared
+        # above; re-clearing it to the same empty set here is a harmless
+        # no-op for that case.
+        singleton_key = InstanceKey.singleton()
+        for flow_node in fired_all_inputs_changed_nodes:
+            by_instance = self._fresh_since_last_firing.get(flow_node)
+            if by_instance is not None and singleton_key in by_instance:
+                by_instance[singleton_key] = set()
 
         return None
 
@@ -732,6 +875,54 @@ class Session:
         self.push()
         return self.snapshot()
 
+    def remove_instance(self, domain_type: type, instance: "InstanceKey") -> bool:
+        """
+        Remove one (`domain_type`, `instance`) pair's committed artifact
+        from this `Session` (Slice MI-I, Lifecycle -- docs/refactor/
+        multi_instance_execution_plan.md, Section 5 item 9).
+
+        Deletes the repository's committed record for this pair
+        (`ArtifactRepository.remove_artifact_record`) and clears this
+        pair's entries from `_last_known_values` /
+        `_fresh_since_last_firing` for every `FlowNode` on this
+        `Session`'s `Flow` -- so a removed instance neither lingers as a
+        stale last-known value for a future firing of that instance nor
+        appears in a later `get_all_artifact_records` read (a Collective
+        dependency, MI-H, correctly shrinks once this returns).
+
+        Scoped to exactly this one (`domain_type`, `instance`) pair, not
+        a cross-type "entity removal" -- if the caller uses the same
+        `instance` value across several domain types to represent one
+        real-world thing (e.g. `AircraftState<A>` and `Pilot<A>` both
+        keyed by the same `InstanceKey`), removing one of those types'
+        instances does not remove the others; Reed's own instance model
+        (Slice MI-A) has no built-in concept binding them together, the
+        same scoping decision Alignment (Slice MI-C) already accepted.
+
+        Returns whether anything was actually removed from the
+        repository (tolerant of "already unknown" -- see
+        `ArtifactRepository.remove_artifact_record`'s own docstring).
+        Session-side bookkeeping is cleared unconditionally either way
+        (there is nothing to clear if the repository already had
+        nothing, so this is never observably different from a no-op in
+        that case).
+        """
+        removed = self._repository.remove_artifact_record(
+            domain_type, instance=instance
+        )
+
+        for by_instance in self._last_known_values.values():
+            known_for_instance = by_instance.get(instance)
+            if known_for_instance is not None:
+                known_for_instance.pop(domain_type, None)
+
+        for by_instance in self._fresh_since_last_firing.values():
+            fresh_for_instance = by_instance.get(instance)
+            if fresh_for_instance is not None:
+                fresh_for_instance.discard(domain_type)
+
+        return removed
+
     def node_session(self, node: Callable) -> NodeSession:
         """
         This `Session`'s `NodeSession` for the `FlowNode` wrapping `node`
@@ -759,6 +950,24 @@ class Session:
             descriptor.domain_type for descriptor in flow_node.consumed_artifacts
         }
 
+    def _non_collective_consumed_types(self, flow_node: "FlowNode") -> set[type]:
+        """
+        The subset of `flow_node`'s consumed types whose
+        `ArtifactDescriptor.is_collective` is `False` (Slice MI-H,
+        Collective dependencies) -- the set `_is_fully_covered` actually
+        requires a known value for. A `Collective`-marked consumed type
+        (`reed.composition.node.collective.Collective`) resolves to the
+        currently known collection of instances at firing time
+        (`_build_call_kwargs`), which is always a valid value, including
+        an empty one -- it never blocks coverage the way an ordinary
+        consumed type's absence does.
+        """
+        return {
+            descriptor.domain_type
+            for descriptor in flow_node.consumed_artifacts
+            if not descriptor.is_collective
+        }
+
     def _triggering_types(self, flow_node: "FlowNode") -> set[type]:
         """
         The subset of `flow_node`'s consumed types whose
@@ -777,7 +986,12 @@ class Session:
         }
 
     def _record_input(
-        self, flow_node: "FlowNode", domain_type: type, value: object
+        self,
+        flow_node: "FlowNode",
+        domain_type: type,
+        value: object,
+        *,
+        instance: "InstanceKey | None" = None,
     ) -> None:
         """
         Record `value` as the last-known committed value for
@@ -795,22 +1009,97 @@ class Session:
         Populated as commits are observed by the cascade's existing
         find-consumers loop -- no new traversal, no new index.
         """
-        self._last_known_values.setdefault(flow_node, {})[domain_type] = value
+        key = instance if instance is not None else InstanceKey.singleton()
+        self._last_known_values.setdefault(flow_node, {}).setdefault(key, {})[
+            domain_type
+        ] = value
 
         if domain_type in self._triggering_types(flow_node):
-            self._fresh_since_last_firing.setdefault(flow_node, set()).add(domain_type)
+            self._fresh_since_last_firing.setdefault(flow_node, {}).setdefault(
+                key, set()
+            ).add(domain_type)
 
-    def _is_fully_covered(self, flow_node: "FlowNode") -> bool:
+    def _effective_known_values(
+        self, flow_node: "FlowNode", *, instance: "InstanceKey | None" = None
+    ) -> dict[type, object]:
         """
-        Whether every one of `flow_node`'s consumed types has at least
-        one last-known value -- required before it can ever be called,
-        regardless of TriggerPolicy (Slice 2I).
+        `instance`'s last-known values, with the singleton scope's
+        last-known values merged in underneath (Slice MI-G, Broadcasting
+        -- docs/refactor/multi_instance_execution_plan.md Section 5 item
+        7): a type never fed or committed for `instance` specifically,
+        but available at `InstanceKey.singleton()` (a singleton artifact
+        with no instance dimension of its own, such as a shared `DeltaT`
+        fed once via plain `feed()`), is still visible to `instance`'s own
+        coverage/call-argument resolution. A type known under BOTH scopes
+        prefers `instance`'s own value (instance-specific overrides the
+        broadcast default for the same type).
+
+        For `instance == InstanceKey.singleton()` itself this returns
+        exactly the singleton scope's own dict, unchanged from before
+        this slice -- there is nothing to merge underneath the singleton
+        scope itself.
         """
-        known = self._last_known_values.get(flow_node, {})
-        return self._consumed_types(flow_node) <= known.keys()
+        key = instance if instance is not None else InstanceKey.singleton()
+        singleton_key = InstanceKey.singleton()
+        per_flow_node = self._last_known_values.get(flow_node, {})
+
+        if key == singleton_key:
+            return per_flow_node.get(singleton_key, {})
+
+        merged = dict(per_flow_node.get(singleton_key, {}))
+        merged.update(per_flow_node.get(key, {}))
+        return merged
+
+    def _effective_fresh_types(
+        self, flow_node: "FlowNode", *, instance: "InstanceKey | None" = None
+    ) -> set[type]:
+        """
+        `instance`'s own fresh-since-last-firing types, unioned with the
+        singleton scope's fresh-since-last-firing types (Slice MI-G,
+        Broadcasting -- same rationale as `_effective_known_values`): a
+        broadcast type that just arrived at singleton scope counts as
+        fresh for `ALL_INPUTS_CHANGED` purposes on every other instance
+        too, since that instance's own effective coverage now includes
+        it.
+
+        For `instance == InstanceKey.singleton()` itself this returns
+        exactly the singleton scope's own fresh set, unchanged from
+        before this slice.
+        """
+        key = instance if instance is not None else InstanceKey.singleton()
+        singleton_key = InstanceKey.singleton()
+        per_flow_node = self._fresh_since_last_firing.get(flow_node, {})
+
+        if key == singleton_key:
+            return per_flow_node.get(singleton_key, set())
+
+        return per_flow_node.get(singleton_key, set()) | per_flow_node.get(key, set())
+
+    def _is_fully_covered(
+        self, flow_node: "FlowNode", *, instance: "InstanceKey | None" = None
+    ) -> bool:
+        """
+        Whether every one of `flow_node`'s non-collective consumed types
+        has at least one last-known value for `instance` -- required
+        before it can ever be called, regardless of TriggerPolicy (Slice
+        2I; instance dimension added Slice MI-E; broadcasting a
+        singleton-scoped dependency into this coverage check added Slice
+        MI-G, via `_effective_known_values`; a `Collective`-marked
+        consumed type excluded from this requirement entirely at Slice
+        MI-H, via `_non_collective_consumed_types` -- it always resolves
+        to a valid value, including an empty collection). `instance`
+        defaults to `InstanceKey.singleton()`, matching every other
+        instance-aware method in this class.
+        """
+        known = self._effective_known_values(flow_node, instance=instance)
+        return self._non_collective_consumed_types(flow_node) <= known.keys()
 
     def _is_eligible_to_fire(
-        self, flow_node: "FlowNode", arrived_domain_type: type
+        self,
+        flow_node: "FlowNode",
+        arrived_domain_type: type,
+        *,
+        instance: "InstanceKey | None" = None,
     ) -> bool:
         """
         TriggerPolicy eligibility check, given `flow_node` is already
@@ -848,26 +1137,57 @@ class Session:
             return False
 
         if policy is TriggerPolicy.ALL_INPUTS_CHANGED:
-            fresh = self._fresh_since_last_firing.get(flow_node, set())
+            # Slice MI-G, Broadcasting: a singleton-scoped dependency's
+            # freshness counts toward `instance`'s own coverage too, via
+            # `_effective_fresh_types` -- see its docstring.
+            fresh = self._effective_fresh_types(flow_node, instance=instance)
             return self._triggering_types(flow_node) <= fresh
 
         # TriggerPolicy.ANY_INPUT_CHANGED
         return arrived_domain_type in self._triggering_types(flow_node)
 
     def _build_call_kwargs(
-        self, flow_node: "FlowNode", identity: NodeExecutionIdentity
+        self,
+        flow_node: "FlowNode",
+        identity: NodeExecutionIdentity,
+        *,
+        instance: "InstanceKey | None" = None,
     ) -> dict[str, object]:
         """
         Build `flow_node`'s full call-argument set from its last-known
         values (Slice 2I) -- one value per consumed parameter, using
         each type's most recently observed value (substituting the
         just-arrived value for its own type, since `_record_input` is
-        always called before this).
+        always called before this). Since Slice MI-H, a `Collective`-
+        marked consumed parameter (`descriptor.is_collective`) is
+        resolved differently: not from the last-known-value slot at all,
+        but as a fresh `tuple` of every currently known instance's value
+        for that domain type, straight from the repository.
         """
-        known = self._last_known_values[flow_node]
+        # Slice MI-G, Broadcasting: reads through `_effective_known_values`
+        # so a singleton-scoped dependency fed once via plain `feed()` is
+        # visible to every instance's own call-argument resolution.
+        known = self._effective_known_values(flow_node, instance=instance)
+
+        def _resolve(descriptor: "ArtifactDescriptor") -> object:
+            if descriptor.is_collective:
+                # Slice MI-H, Collective dependencies: the currently
+                # known collection of instances of this domain type,
+                # across every InstanceKey ever committed for it
+                # (ArtifactRepository.get_all_artifact_records, Slice
+                # MI-B) -- not scoped to `instance` at all, since a
+                # collective dependency has no single instance of its
+                # own to align with (same-instance alignment, Slice
+                # MI-E, applies only to scalar consumed types).
+                records = self._repository.get_all_artifact_records(
+                    descriptor.domain_type
+                )
+                return tuple(record.value for record in records.values())
+
+            return known[descriptor.domain_type]
 
         call_kwargs: dict[str, object] = {
-            descriptor.name: known[descriptor.domain_type]
+            descriptor.name: _resolve(descriptor)
             for descriptor in flow_node.consumed_artifacts
         }
 
@@ -875,12 +1195,14 @@ class Session:
             node_session = self.node_session(flow_node.definition.function)
             recorder = functools.partial(node_session.accept_recording, identity)
             call_kwargs[flow_node.context.parameter_name] = (
-                node_session.build_context(identity, recorder)
+                node_session.build_context(identity, recorder, instance=instance)
             )
 
         return call_kwargs
 
-    def _begin_node_execution(self, flow_node: "FlowNode") -> NodeExecutionIdentity:
+    def _begin_node_execution(
+        self, flow_node: "FlowNode", *, instance: "InstanceKey | None" = None
+    ) -> NodeExecutionIdentity:
         """
         Mint the observability identity for one Node firing (Milestone
         O1, Slice O1d/O1e/O1f).
@@ -898,6 +1220,13 @@ class Session:
         observation order scoped to this `execution_id`, never a
         causality claim (Section 13.1; docs/observability_invariants.md
         #7-9).
+
+        Slice MI-J: `instance` (defaulting to `InstanceKey.singleton()`,
+        exactly like every other per-instance parameter across this
+        issue) becomes the minted identity's own `instance_id`
+        (`._instance_identifier(instance)`), so a "generated" provenance
+        event emitted for this firing already carries the firing's own
+        instance correctly.
         """
         self._execution_seq_counter += 1
         return NodeExecutionIdentity(
@@ -906,6 +1235,7 @@ class Session:
             node_id=flow_node.node_id,
             node_execution_id=str(uuid.uuid4()),
             execution_seq=self._execution_seq_counter,
+            instance_id=self._instance_identifier(instance),
         )
 
     def _fire(
@@ -915,6 +1245,7 @@ class Session:
         identity: NodeExecutionIdentity,
         *,
         depth: int = 0,
+        instance: "InstanceKey | None" = None,
     ) -> object:
         """
         Fire one `FlowNode` with `call_kwargs` as its full call
@@ -956,7 +1287,7 @@ class Session:
         """
         node_session = self.node_session(flow_node.definition.function)
 
-        self._emit_used_provenance_events(flow_node, identity)
+        self._emit_used_provenance_events(flow_node, identity, instance=instance)
         self._record_trace_event("node_started", identity)
         self._safe_presenter_call(self._presenter.on_node_started, identity, depth=depth)
 
@@ -969,8 +1300,8 @@ class Session:
             try:
                 result = flow_node.definition.function(**call_kwargs)
 
-                record = node_session.wrap(result)
-                node_session.commit(record)
+                record = node_session.wrap(result, instance=instance)
+                node_session.commit(record, instance=instance)
             except BaseException as exc:
                 # Milestone O7, Slice O7d: report the failure to the
                 # terminal presenter -- a pure observer, never a handler
@@ -997,10 +1328,11 @@ class Session:
         self._record_trace_event("node_finished", identity)
         self._safe_presenter_call(self._presenter.on_node_finished, identity, depth=depth, duration=duration)
 
-        self._emit_generated_provenance_event(record, identity)
+        self._emit_generated_provenance_event(record, identity, instance=instance)
 
         if flow_node.trigger_policy is TriggerPolicy.ALL_INPUTS_CHANGED:
-            self._fresh_since_last_firing[flow_node] = set()
+            key = instance if instance is not None else InstanceKey.singleton()
+            self._fresh_since_last_firing.setdefault(flow_node, {})[key] = set()
 
         self._dispatch_on_output(flow_node, record.value)
 
@@ -1013,11 +1345,42 @@ class Session:
         deliberately the same `module.qualname` derivation
         `FlowNode.node_id` uses (Section 18), for the same reason: stable
         across process runs, no user-supplied identifier required.
+
+        Slice MI-J: deliberately NOT extended to include an instance
+        dimension, despite the plan document's own literal phrasing
+        ("extending `_artifact_id` to include an instance key"). This
+        stays a pure type identifier; the instance dimension is carried
+        as a new, separate, additive `instance_id` field on
+        `NodeExecutionIdentity`/`ProvenanceEvent` instead
+        (`._instance_identifier`) -- the same "orthogonal, additive"
+        pattern this whole issue has used consistently since Slice MI-A.
         """
         return f"{domain_type.__module__}.{domain_type.__qualname__}"
 
+    @staticmethod
+    def _instance_identifier(instance: "InstanceKey | None") -> str:
+        """
+        Slice MI-J: a stable string identifying `instance` for
+        observability purposes (`NodeExecutionIdentity.instance_id`,
+        `ProvenanceEvent.instance_id`) -- `repr(key.key)` for the
+        resolved `InstanceKey` (`instance`, or `InstanceKey.singleton()`
+        when `instance` is `None`), uniform for the singleton and for a
+        real instance alike: `InstanceKey.singleton()`'s own private
+        sentinel already `repr()`s to exactly the reserved default string
+        `NodeExecutionIdentity`/`ProvenanceEvent` give `instance_id`
+        (`reed.execution.instance_key._InstanceKeySingletonSentinel.
+        __repr__`), so no special-casing is needed here for the
+        singleton case.
+        """
+        key = instance if instance is not None else InstanceKey.singleton()
+        return repr(key.key)
+
     def _emit_used_provenance_events(
-        self, flow_node: "FlowNode", identity: NodeExecutionIdentity
+        self,
+        flow_node: "FlowNode",
+        identity: NodeExecutionIdentity,
+        *,
+        instance: "InstanceKey | None" = None,
     ) -> None:
         """
         Emits a durable `"used"` `ProvenanceEvent` per consumed Artifact type
@@ -1028,12 +1391,44 @@ class Session:
         storage is configured. Presentation must never depend on the durable
         storage opt-in (docs/observability_invariants.md #35): a `Session` with no
         `storage_root` still renders `propagation` terminal output.
+
+        Slice MI-J (fixing a genuine pre-existing bug, this slice's own
+        SliceContract): looks up each consumed type's committed record
+        under `instance` first (the firing's own instance), falling back
+        to the singleton-scoped record if none exists there -- broadcast
+        dependency precedence, mirroring `_effective_known_values`'s own
+        precedence (Slice MI-G) exactly. The emitted event's own
+        `instance_id` is the DEPENDENCY's resolved instance (whichever
+        record was actually found), not necessarily `instance` itself, so
+        it correctly matches that dependency's own "generated" event's
+        group-by key even across a broadcast dependency. A
+        `Collective`-marked consumed descriptor (Slice MI-H) is skipped
+        entirely: it resolves to potentially many records across many
+        instances at once, not a single (artifact, version, instance)
+        triple a "used" event can cleanly attribute (disclosed scope
+        decision, this slice's own SliceContract).
         """
+        key = instance if instance is not None else InstanceKey.singleton()
+        singleton_key = InstanceKey.singleton()
+
         for descriptor in flow_node.consumed_artifacts:
-            existing = self._repository.get_artifact_record(descriptor.domain_type)
+            if descriptor.is_collective:
+                continue
+
+            existing = self._repository.get_artifact_record(
+                descriptor.domain_type, instance=key
+            )
+            resolved_instance = key
+            if existing is None and key != singleton_key:
+                existing = self._repository.get_artifact_record(
+                    descriptor.domain_type, instance=singleton_key
+                )
+                resolved_instance = singleton_key
+
             if existing is None:
-                # Nothing produced this type yet -- no "used" event to
-                # emit (there is no artifact_version to report).
+                # Nothing produced this type yet, for this instance or
+                # for the singleton fallback -- no "used" event to emit
+                # (there is no artifact_version to report).
                 continue
 
             if self._provenance_store is not None:
@@ -1045,6 +1440,7 @@ class Session:
                         node_execution_id=identity.node_execution_id,
                         node_id=identity.node_id,
                         execution_seq=identity.execution_seq,
+                        instance_id=self._instance_identifier(resolved_instance),
                     )
                 )
 
@@ -1056,7 +1452,11 @@ class Session:
             )
 
     def _emit_generated_provenance_event(
-        self, record: "ArtifactRecord", identity: NodeExecutionIdentity
+        self,
+        record: "ArtifactRecord",
+        identity: NodeExecutionIdentity,
+        *,
+        instance: "InstanceKey | None" = None,
     ) -> None:
         """
         Emits a durable `"generated"` `ProvenanceEvent` (only when
@@ -1064,6 +1464,13 @@ class Session:
         Milestone O8, Slice O8b -- reports the same fact to the terminal
         `Presenter` via `on_artifact_generated`, regardless of durable
         storage configuration (see `_emit_used_provenance_events` docstring).
+
+        Slice MI-J: the emitted event's own `instance_id` is the firing's
+        own `instance` (`._instance_identifier(instance)`) -- a produced
+        artifact is never `Collective`-marked (Slice MI-H's marker
+        applies only to consumed parameters), so this is always exactly
+        correct, unlike `_emit_used_provenance_events` there is no
+        dependency-resolution ambiguity here.
         """
         if self._provenance_store is not None:
             self._provenance_store.append(
@@ -1074,6 +1481,7 @@ class Session:
                     node_execution_id=identity.node_execution_id,
                     node_id=identity.node_id,
                     execution_seq=identity.execution_seq,
+                    instance_id=self._instance_identifier(instance),
                 )
             )
 

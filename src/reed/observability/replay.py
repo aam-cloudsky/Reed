@@ -23,6 +23,13 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+# Slice MI-J (docs/refactor/multi_instance_execution_plan.md, Risk R5):
+# the same reserved singleton-instance string
+# `NodeExecutionIdentity`/`ProvenanceEvent` default `instance_id` to.
+# Hardcoded here rather than imported from `reed.execution.instance_key`,
+# matching `graph.py`'s own precedent for this same slice.
+_SINGLETON_INSTANCE_ID = "<InstanceKey.singleton>"
+
 
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     if not path.exists():
@@ -56,6 +63,20 @@ def load_provenance(run_dir: Path) -> list[dict[str, str]]:
 # does not actually guarantee. This is a fixed display convention, not a
 # claim that "used" causally precedes "recording" precedes "generated".
 _EVENT_TYPE_DISPLAY_PRIORITY = {"used": 0, "recording": 1, "generated": 2}
+
+
+def _provenance_detail(row: dict[str, str]) -> str:
+    """
+    Slice MI-J: a provenance row's "detail" display string, including
+    `[instance=<instance_id>]` only when `instance_id` is not the
+    singleton default -- a single-instance-only flow's replay table
+    output is therefore byte-for-byte unaffected by this slice.
+    `row.get("instance_id", ...)` tolerates a `provenance.csv` written
+    before Slice MI-J's schema bump, the same tolerance `graph.py` uses.
+    """
+    instance_id = row.get("instance_id") or _SINGLETON_INSTANCE_ID
+    suffix = f" [instance={instance_id}]" if instance_id != _SINGLETON_INSTANCE_ID else ""
+    return f"{row['event_type']} {row['artifact_id']} v{row['artifact_version']}{suffix}"
 
 
 def render_replay_table(run_dir: Path) -> Table:
@@ -99,7 +120,7 @@ def render_replay_table(run_dir: Path) -> Table:
                 row["node_execution_id"],
                 row["node_id"],
                 "provenance",
-                f"{row['event_type']} {row['artifact_id']} v{row['artifact_version']}",
+                _provenance_detail(row),
             )
         )
     rows.sort(key=lambda r: (r[0], r[1]))
