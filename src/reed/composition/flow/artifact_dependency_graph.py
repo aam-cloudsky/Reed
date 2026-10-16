@@ -110,7 +110,7 @@ class SelfFlowError(RuntimeError):
             f"Node:\n    {flow_node.definition.name}\n\n"
             f"Artifact type:\n    {domain_type.__name__}\n\n"
             "A Node cannot consume and produce the same domain artifact "
-            "type."
+            "type, except through a Sampled input (unit delay)."
         )
 
 
@@ -181,7 +181,7 @@ class ArtifactDependencyGraph:
         Raises:
             SelfFlowError:
                 If `flow_node` consumes the same domain artifact type it
-                produces.
+                produces through a non-`Sampled` input (issue #29).
             DuplicateArtifactProducerError:
                 If a different `FlowNode` already produces the same
                 domain artifact type.
@@ -192,7 +192,14 @@ class ArtifactDependencyGraph:
             artifact.domain_type for artifact in flow_node.consumed_artifacts
         }
 
-        if produced_type in consumed_types:
+        # Issue #29: a self-input is allowed only as SAMPLED (an explicit
+        # unit delay); a triggering self-input would make the node its own
+        # trigger.
+        if any(
+            artifact.domain_type is produced_type
+            and artifact.input_role is not InputRole.SAMPLED
+            for artifact in flow_node.consumed_artifacts
+        ):
             raise SelfFlowError(flow_node=flow_node, domain_type=produced_type)
 
         if (

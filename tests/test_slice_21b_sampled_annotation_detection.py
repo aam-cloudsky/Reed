@@ -76,11 +76,25 @@ def test_plain_annotation_without_sampled_still_defaults_to_triggering():
     assert description.consumed_artifacts[0].input_role is InputRole.TRIGGERING
 
 
-def test_self_flow_rejection_still_works_when_consumed_type_is_annotated_sampled():
+def test_self_flow_compares_the_unwrapped_type_and_accepts_only_a_sampled_self_input():
     # Self-flow correctness is the sharpest risk in this slice: domain-type
     # comparisons must happen on the unwrapped type everywhere, not just
-    # in the new Sampled-detection path.
-    def invalid(measurement: Annotated[Measurement, Sampled]) -> Measurement:
+    # in the new Sampled-detection path. Issue #29 changed the rule itself:
+    # a Sampled self-input (an explicit unit delay) is now accepted, so
+    # this test pins both sides of the unwrapped comparison.
+    def accumulate(
+        measurement: Baseline, previous: Annotated[Measurement, Sampled]
+    ) -> Measurement:
+        return previous
+
+    description = build(accumulate)
+    by_name = {a.name: a for a in description.consumed_artifacts}
+    assert by_name["previous"].domain_type is Measurement
+    assert by_name["previous"].input_role is InputRole.SAMPLED
+
+    def invalid(
+        baseline: Annotated[Baseline, Sampled], measurement: Measurement
+    ) -> Measurement:
         return measurement
 
     with pytest.raises(TypeError, match="self-flow"):

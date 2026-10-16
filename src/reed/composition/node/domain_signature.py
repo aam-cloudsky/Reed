@@ -15,7 +15,8 @@ docs/node_context_decision.md):
        node_context_decision.md, Strong Typing Rule);
     5. reject self-flow signatures: a node must not consume and produce
        the same domain artifact type (architectural_invariants.md #11,
-       parcel_boundary_decision.md, "No Self-Flow").
+       parcel_boundary_decision.md, "No Self-Flow"), unless the
+       self-input is `Sampled` (issue #29: an explicit unit delay).
 
 Explicitly out of scope for this slice (see docs/refactor_priority_order.md,
 Milestones And Slices, Slice 1B and later):
@@ -203,7 +204,9 @@ class DomainNodeSignatureParser:
         ) = self._resolve_parameters()
 
         self._validate_context_output_type(context_output_type, produced_type)
-        self._validate_self_flow(consumed_parameters, produced_type)
+        self._validate_self_flow(
+            consumed_parameters, sampled_parameter_names, produced_type
+        )
 
         return DomainNodeSignature(
             function=self._function,
@@ -290,6 +293,19 @@ class DomainNodeSignatureParser:
                     self._parse_context_arguments(annotation)
                 )
                 continue
+
+            # Inputs are resolved by domain type, so two parameters of the
+            # same type (e.g. one instance and the Collective of it) cannot
+            # be told apart and the node would never fire. Reject it here
+            # instead of failing silently.
+            for other_name, other_type in consumed_parameters:
+                if other_type is annotation:
+                    raise TypeError(
+                        f"Node function '{self._function.__name__}' consumes "
+                        f"'{annotation!r}' twice ('{other_name}' and "
+                        f"'{parameter.name}'): a node may consume each "
+                        "domain artifact type at most once."
+                    )
 
             consumed_parameters.append((parameter.name, annotation))
             if is_sampled:
@@ -406,13 +422,25 @@ class DomainNodeSignatureParser:
     def _validate_self_flow(
         self,
         consumed_parameters: list[DomainConsumedParameter],
+        sampled_parameter_names: set[str],
         produced_type: type,
     ) -> None:
-        consumed_types = {parameter_type for _, parameter_type in consumed_parameters}
-
-        if produced_type in consumed_types:
-            raise TypeError(
-                f"Node function '{self._function.__name__}' cannot "
-                "consume and produce the same domain artifact type "
-                f"(self-flow): '{produced_type!r}'."
-            )
+        """
+        Issue #29: a node may consume its own produced type only through a
+        `Sampled` input -- an explicit unit delay (z^-1, Lustre's `pre`):
+        it reads the value committed before this firing and never triggers
+        the node. A triggering self-input is still rejected; the system
+        never converts the role implicitly.
+        """
+        for parameter_name, parameter_type in consumed_parameters:
+            if (
+                parameter_type is produced_type
+                and parameter_name not in sampled_parameter_names
+            ):
+                raise TypeError(
+                    f"Node function '{self._function.__name__}' cannot "
+                    "consume and produce the same domain artifact type "
+                    f"(self-flow): '{produced_type!r}'. Declare the "
+                    f"self-input '{parameter_name}' as "
+                    "`Annotated[T, Sampled]` to read the previous value."
+                )
