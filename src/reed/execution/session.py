@@ -886,11 +886,17 @@ class Session:
         }
 
     def _collective_types(self, flow_node: "FlowNode") -> set[type]:
-        """Types `flow_node` consumes as `Collective[T]`."""
+        """
+        Types `flow_node` consumes as a triggering `Collective[T]`. A
+        `Sampled` collective (`Annotated[Collective[T], Sampled]`) is left
+        out: like any Sampled input it never enters the freshness map
+        (issue #29).
+        """
         return {
             descriptor.domain_type
             for descriptor in flow_node.consumed_artifacts
             if descriptor.is_collective
+            and descriptor.input_role is InputRole.TRIGGERING
         }
 
     def _triggering_types(self, flow_node: "FlowNode") -> set[type]:

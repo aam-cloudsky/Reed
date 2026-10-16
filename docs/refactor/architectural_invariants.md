@@ -27,7 +27,11 @@ became `Session` in issue #22; the invariant numbers did not change).
 10. One artifact type has one *declared* producer per Flow (`DuplicateArtifactProducerError`).
     This governs `Flow.add(...)`-registered `FlowNode`s only — see invariant 30 for
     `Session.feed()`'s deliberate exemption.
-11. A Node cannot consume and produce the same artifact type.
+11. A Node cannot consume and produce the same artifact type, except through a
+    `Sampled` input (`Annotated[T, Sampled]`, issue #29). That input is a unit
+    delay: it reads the value committed before the firing (the node's previous
+    output, or a later `feed()`) and never triggers the node. A triggering
+    self-input is rejected at `Flow.add(...)`.
 
 ## Context and State
 
