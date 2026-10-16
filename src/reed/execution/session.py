@@ -192,9 +192,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
 import functools
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -202,6 +204,7 @@ from pathlib import Path
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.composition.node.artifact_descriptor import InputRole
 from reed.execution.node_session import NodeSession
+from reed.execution.propagation import PropagationPlan
 from reed.execution.snapshot import Snapshot
 from reed.observability.identity import NodeExecutionIdentity
 from reed.observability.provenance import ProvenanceEvent
@@ -229,6 +232,17 @@ if TYPE_CHECKING:
     from reed.composition.flow.flow_composition import Flow
     from reed.composition.flow.flow_node import FlowNode
     from reed.composition.node.artifact_descriptor import ArtifactDescriptor
+
+
+@dataclass(frozen=True)
+class _StagedFiring:
+    """One worker's result, held until the superstep barrier (issue #31)."""
+
+    flow_node: "FlowNode"
+    instance: InstanceKey
+    identity: NodeExecutionIdentity
+    value: object
+    used_events: "tuple[ProvenanceEvent, ...]"
 
 
 class Session:
@@ -313,6 +327,12 @@ class Session:
         # to, so there is no existing-caller behavior to protect by
         # defaulting it off.
         self._trace = ExecutionTrace()
+        # push() (issue #31): calls from different threads are serialized by
+        # `_push_lock`; a call from the thread already inside push() (for
+        # example from an on_output callback) is rejected, since it would
+        # interleave two propagation plans.
+        self._push_lock = threading.Lock()
+        self._push_owner: int | None = None
 
         # Milestone O7, Slice O7d: the terminal presentation layer is a
         # pure *consumer* of the identity/trace/recording data above --
@@ -518,7 +538,7 @@ class Session:
            `dependencies`, so the resulting record's `dependencies` is always
            `{}` -- a fed value depends on nothing.
         3. Fires the same observability hooks a node firing does, via the
-           exact methods `Session._fire(...)` calls around a node's own
+           exact methods the superstep barrier (`Session._commit_superstep`) calls around a node's own
            commit (reused here, not duplicated): a `"node_finished"`
            `TraceEvent` (`._record_trace_event`) and a `"generated"`
            `ProvenanceEvent` (`._emit_generated_provenance_event`), both
@@ -548,12 +568,11 @@ class Session:
            this for a root-published value -- not suppressed here.
 
         Does **not** evaluate firing eligibility and does **not** fire any
-        node itself (invariant 31) -- that is `Session.push()`'s job
-        (Slice 22F, not yet implemented).
+        node itself (invariant 31) -- that is `Session.push()`'s job.
         """
         domain_type = type(value)
 
-        for flow_node in self._flow.dependency_graph.consumers_of(domain_type):
+        for flow_node in self._flow.dependency_graph.ordered_consumers_of(domain_type):
             self._record_input(flow_node, domain_type, value)
 
         record = self._commit(value, origin=ArtifactOrigin.EXTERNAL, producer=None)
@@ -628,7 +647,7 @@ class Session:
         domain_type = next(iter(domain_types))
 
         for instance, value in values.items():
-            for flow_node in self._flow.dependency_graph.consumers_of(domain_type):
+            for flow_node in self._flow.dependency_graph.ordered_consumers_of(domain_type):
                 self._record_input(flow_node, domain_type, value, instance=instance)
 
             record = self._commit(
@@ -654,189 +673,78 @@ class Session:
 
     def push(self) -> None:
         """
-        Fire every `FlowNode` made eligible by a `feed()` since the last
-        `push()`, cascading to quiescence (Slice 22F;
-        docs/refactor/session_snapshot_decision.md section 5 "`push()` and
-        `snapshot()`"; architectural_invariants.md #18, #19, #31, #32).
+        Drive every pending change to quiescence in supersteps (issue #31;
+        architectural_invariants.md #18, #19, #31, #32, #34-#38).
 
-        Adapts `publish()`'s existing eligibility -> fire ->
-        cascade-to-quiescence loop (unchanged there -- see
-        `Session.publish`'s own docstring; this method has its own,
-        separate copy of that loop so `publish()` remains byte-for-byte
-        untouched until it is removed in Slice 22H) so that it is seeded
-        by every `FlowNode` that has received a `feed()`-driven
-        TRIGGERING-role arrival since the last `push()`, instead of by
-        one directly-published value's consumers.
+        1. Every `FlowNode` with pending freshness seeds a `PropagationPlan`
+           (`reed.execution.propagation`), which also marks as *affected*
+           every node downstream of a seed.
+        2. Each superstep runs the nodes the plan reports as ready: affected,
+           not yet settled, and with every affected producer of their inputs
+           already settled (#35). For each such node, every instance with
+           pending freshness that is covered and eligible runs as a worker.
+           Workers read the state committed before the superstep.
+        3. At the barrier that closes the superstep, the workers' outputs are
+           committed together, in registration order and then fan-out order
+           (#36, #37); only then are provenance events emitted, downstream
+           arrivals recorded and `on_output` callbacks run. If any worker
+           raises, nothing from that superstep is committed and the exception
+           propagates.
+        4. A node runs at most once per `push()` (#34): an arrival at a node
+           that already ran this `push()` is recorded and takes effect in the
+           next `push()`. Along a feedback loop this is an implicit unit
+           delay.
+        5. Calls from different threads are serialized; a call from inside a
+           running `push()` on the same thread raises `RuntimeError` (#38).
 
-        Seed set: every `FlowNode` with a non-empty
-        `_fresh_since_last_firing` entry -- the exact "since last
-        firing" freshness bookkeeping `_record_input` already maintains
-        for `publish()`'s own `ALL_INPUTS_CHANGED` gate, and that
-        `feed()` (Slice 22E) already populates for TRIGGERING-role
-        consumed types only (issue #21's SAMPLED/TRIGGERING split,
-        unchanged and reused here -- a `feed()` of a SAMPLED-role value
-        alone never adds anything to this set, so it can never seed a
-        node). A `FlowNode` in this set may hold values for more than
-        one recently-fed TRIGGERING type at once; any one of them is a
-        valid stand-in for "arrived_domain_type" in
-        `_is_eligible_to_fire`, since `ALL_INPUTS_CHANGED` ignores that
-        argument entirely and `ANY_INPUT_CHANGED` only checks that it is
-        TRIGGERING-role -- true by construction for every member of this
-        set.
-
-        Each seeded node is checked for full coverage
-        (`_is_fully_covered`) and `TriggerPolicy` eligibility
-        (`_is_eligible_to_fire`) exactly as `publish()`'s loop checks a
-        newly-arrived value's consumers, then fired (`_fire`) if both
-        hold; its committed output seeds the same FIFO
-        cascade-to-quiescence loop `publish()` runs, so downstream
-        nodes fire in turn using the identical mechanism, all the way
-        to quiescence (multi-hop cascades behave exactly as they do
-        under `publish()`).
-
-        Resetting "since last push": every `FlowNode` this call actually
-        fires (from the seed pass or from the cascade) has its
-        `_fresh_since_last_firing` entry cleared to the empty set
-        immediately after it fires -- regardless of `TriggerPolicy`
-        (`_fire()` itself only clears this for `ALL_INPUTS_CHANGED`,
-        since that is all `publish()` ever needed; `push()` additionally
-        clears it here for `ANY_INPUT_CHANGED` firings too, since an
-        `ANY_INPUT_CHANGED` node's freshness would otherwise never be
-        spent and would wrongly re-seed the next `push()` call with no
-        intervening `feed()`). A seeded node that is *not* fired this
-        call (not fully covered yet, or `TriggerPolicy` says wait) keeps
-        its freshness untouched, exactly like `publish()` today -- so
-        that partial progress toward `ALL_INPUTS_CHANGED` coverage made
-        by one `feed()` is not silently discarded by an intervening
-        `push()` that could not yet fire it. Together, this makes a
-        second `push()` with no intervening `feed()` a genuine no-op:
-        every node that fired last time now has an empty freshness set
-        (so it is not reseeded), and every node that did not fire is
-        re-evaluated against unchanged state and again does not fire --
-        quiescent immediately, nothing fires (invariant #18: dirty state
-        does not imply immediate execution).
-
-        Returns `None`, strictly (invariant #32) -- unlike `publish()`,
-        there is no "direct result" to report; `Session.snapshot()`
-        (Slice 22G, not yet implemented) is the separate call for
-        reading resulting state.
+        Returns `None`, strictly (invariant #32); `snapshot()` reads the
+        resulting state.
         """
-        seeded = [
-            (flow_node, instance)
-            for flow_node, by_instance in self._fresh_since_last_firing.items()
-            for instance, fresh in by_instance.items()
-            if fresh
-        ]
-
-        pending: list[tuple[object, int, "InstanceKey"]] = []
-
-        # Post-refactor correctness fix (identified during independent
-        # review after Slice MI-J, in the interaction between Slice MI-E's
-        # per-instance freshness clearing and Slice MI-G's Broadcasting):
-        # a singleton-scoped (broadcast) type's own freshness entry
-        # (`_fresh_since_last_firing[flow_node][InstanceKey.singleton()]`)
-        # is never touched by a per-instance firing's own clear (which
-        # only clears `[flow_node][instance]`), so under
-        # `TriggerPolicy.ALL_INPUTS_CHANGED` (the default trigger_policy)
-        # a broadcast dependency's freshness would otherwise never
-        # expire once set -- spuriously re-satisfying ALL_INPUTS_CHANGED
-        # for every later per-instance arrival even when the broadcast
-        # type itself was never fed again. Tracked here and cleared once,
-        # after this entire push() call's seed pass and cascade both
-        # finish (not per-firing -- see the clearing block after the
-        # `while pending` loop below for why timing matters), so that
-        # every instance genuinely covered THIS push() still gets one
-        # fair look at a broadcast type's freshness before it is spent.
-        fired_all_inputs_changed_nodes: set["FlowNode"] = set()
-
-        for flow_node, instance in seeded:
-            if not self._is_fully_covered(flow_node, instance=instance):
-                # Not every consumed type has a value yet for this
-                # instance -- discovered via feed()/feed_instances(), but
-                # not callable, regardless of TriggerPolicy. Its
-                # freshness is left untouched so a later feed() completing
-                # coverage can still find it.
-                continue
-
-            arrived_domain_type = next(
-                iter(self._fresh_since_last_firing[flow_node][instance])
+        if self._push_owner == threading.get_ident():
+            raise RuntimeError(
+                "Session.push() was called while another push() of the same "
+                "Session is in progress (for example, from an on_output "
+                "callback). Feed the value instead; the next push() "
+                "propagates it."
             )
-            if not self._is_eligible_to_fire(
-                flow_node, arrived_domain_type, instance=instance
-            ):
-                # Covered but TriggerPolicy says wait. Freshness is left
-                # untouched (e.g. ALL_INPUTS_CHANGED still needs another
-                # TRIGGERING type fed before every consumed TRIGGERING
-                # type is fresh at once, for this instance).
-                continue
-
-            identity = self._begin_node_execution(flow_node, instance=instance)
-            call_kwargs = self._build_call_kwargs(flow_node, identity, instance=instance)
-            result = self._fire(
-                flow_node, call_kwargs, identity, depth=0, instance=instance
-            )
-            self._fresh_since_last_firing[flow_node][instance] = set()
-            if flow_node.trigger_policy is TriggerPolicy.ALL_INPUTS_CHANGED:
-                fired_all_inputs_changed_nodes.add(flow_node)
-            pending.append((result, 1, instance))
-
-        while pending:
-            current_value, depth, instance = pending.pop(0)
-            domain_type = type(current_value)
-
-            consumers = self._flow.dependency_graph.consumers_of(domain_type)
-
-            for flow_node in consumers:
-                # Same-instance alignment (Slice MI-E, docs/refactor/
-                # multi_instance_execution_plan.md): a firing's own output
-                # for `instance` is recorded, and evaluated for its
-                # consumers' eligibility, under that same `instance` --
-                # the simplest well-supported alignment rule with no
-                # accepted ADR determining a richer one yet. A consumer
-                # whose other consumed types were never fed under this
-                # same instance key will not be fully covered for it
-                # (broadcasting a singleton-scoped dependency into a
-                # per-instance firing is Slice MI-G's job, not this one's).
-                self._record_input(
-                    flow_node, domain_type, current_value, instance=instance
-                )
-
-                if not self._is_fully_covered(flow_node, instance=instance):
-                    continue
-
-                if not self._is_eligible_to_fire(
-                    flow_node, domain_type, instance=instance
-                ):
-                    continue
-
-                identity = self._begin_node_execution(flow_node, instance=instance)
-                call_kwargs = self._build_call_kwargs(
-                    flow_node, identity, instance=instance
-                )
-                result = self._fire(
-                    flow_node, call_kwargs, identity, depth=depth, instance=instance
-                )
-                self._fresh_since_last_firing[flow_node][instance] = set()
-                if flow_node.trigger_policy is TriggerPolicy.ALL_INPUTS_CHANGED:
-                    fired_all_inputs_changed_nodes.add(flow_node)
-                pending.append((result, depth + 1, instance))
-
-        # Spend this push() call's broadcast freshness now that every
-        # instance covered this round has already had its own eligibility
-        # evaluated above -- clearing any earlier (e.g. mid-seed-loop)
-        # would have denied a not-yet-processed sibling instance the same
-        # fair look this push() call owes it (see the note above `seeded`
-        # for the full rationale). A flow_node whose own firing was
-        # itself at singleton scope already had this same entry cleared
-        # above; re-clearing it to the same empty set here is a harmless
-        # no-op for that case.
-        singleton_key = InstanceKey.singleton()
-        for flow_node in fired_all_inputs_changed_nodes:
-            by_instance = self._fresh_since_last_firing.get(flow_node)
-            if by_instance is not None and singleton_key in by_instance:
-                by_instance[singleton_key] = set()
-
+        with self._push_lock:
+            self._push_owner = threading.get_ident()
+            try:
+                self._run_plan(self._propagation_plan())
+            finally:
+                self._push_owner = None
         return None
+
+    def _propagation_plan(self) -> "PropagationPlan[FlowNode]":
+        """Seed a plan with every node that has pending freshness."""
+        graph = self._flow.dependency_graph
+        flow_nodes = self._flow.flow_nodes
+        seeds = [
+            flow_node
+            for flow_node in flow_nodes
+            if any(self._fresh_since_last_firing.get(flow_node, {}).values())
+        ]
+        return PropagationPlan(
+            flow_nodes,
+            seeds,
+            downstream_of=lambda node: graph.ordered_consumers_of(
+                node.produced_artifact.domain_type
+            ),
+            upstream_of=self._input_producers,
+            delay_upstream_of=self._delay_input_producers,
+        )
+
+    def _run_plan(self, plan: "PropagationPlan[FlowNode]") -> None:
+        """Run supersteps until the plan reaches quiescence."""
+        depth = 0
+        while True:
+            nodes = plan.next_superstep()
+            if not nodes:
+                return
+            staged = self._run_superstep(nodes, depth=depth)
+            self._commit_superstep(staged)
+            plan.settle(nodes)
+            depth += 1
 
     def snapshot(self) -> Snapshot:
         """
@@ -921,6 +829,15 @@ class Session:
             if fresh_for_instance is not None:
                 fresh_for_instance.discard(domain_type)
 
+        # The set of instances of `domain_type` changed: a Collective consumer
+        # sees that as one arrival (issue #31).
+        if removed:
+            for flow_node in self._flow.dependency_graph.ordered_consumers_of(domain_type):
+                if domain_type in self._collective_types(flow_node):
+                    self._fresh_since_last_firing.setdefault(flow_node, {}).setdefault(
+                        InstanceKey.singleton(), set()
+                    ).add(domain_type)
+
         return removed
 
     def node_session(self, node: Callable) -> NodeSession:
@@ -968,6 +885,14 @@ class Session:
             if not descriptor.is_collective
         }
 
+    def _collective_types(self, flow_node: "FlowNode") -> set[type]:
+        """Types `flow_node` consumes as `Collective[T]`."""
+        return {
+            descriptor.domain_type
+            for descriptor in flow_node.consumed_artifacts
+            if descriptor.is_collective
+        }
+
     def _triggering_types(self, flow_node: "FlowNode") -> set[type]:
         """
         The subset of `flow_node`'s consumed types whose
@@ -1009,6 +934,17 @@ class Session:
         Populated as commits are observed by the cascade's existing
         find-consumers loop -- no new traversal, no new index.
         """
+        if domain_type in self._collective_types(flow_node):
+            # Issue #31: a Collective input receives the whole set of
+            # instances at once. Every instance committed at one barrier
+            # (or in one feed_instances() call) marks the same single,
+            # instance-independent arrival; the value itself is read from
+            # the repository when the node fires (`_build_call_kwargs`).
+            self._fresh_since_last_firing.setdefault(flow_node, {}).setdefault(
+                InstanceKey.singleton(), set()
+            ).add(domain_type)
+            return
+
         key = instance if instance is not None else InstanceKey.singleton()
         self._last_known_values.setdefault(flow_node, {}).setdefault(key, {})[
             domain_type
@@ -1207,7 +1143,7 @@ class Session:
         Mint the observability identity for one Node firing (Milestone
         O1, Slice O1d/O1e/O1f).
 
-        Called once per firing, from the `publish(...)` cascade loop,
+        Called once per firing, from `Session._run_superstep(...)`,
         before `._build_call_kwargs(...)` -- every firing gets an
         identity, whether or not its Node declares a `NodeContext`
         parameter, so Milestone O4's provenance events have a
@@ -1238,78 +1174,111 @@ class Session:
             instance_id=self._instance_identifier(instance),
         )
 
-    def _fire(
+    def _input_producers(self, flow_node: "FlowNode") -> tuple["FlowNode", ...]:
+        """Declared producers of `flow_node`'s consumed types, deduplicated."""
+        graph = self._flow.dependency_graph
+        candidates = (
+            graph.producer_of(descriptor.domain_type)
+            for descriptor in flow_node.consumed_artifacts
+        )
+        return tuple(dict.fromkeys(p for p in candidates if p is not None))
+
+    def _delay_input_producers(self, flow_node: "FlowNode") -> tuple["FlowNode", ...]:
+        """
+        Producers connected to `flow_node` only through `Sampled` (non-
+        Collective) inputs: the delay edges where a feedback loop is broken
+        first (`PropagationPlan`).
+        """
+        graph = self._flow.dependency_graph
+        delay: dict[FlowNode, bool] = {}
+        for descriptor in flow_node.consumed_artifacts:
+            producer = graph.producer_of(descriptor.domain_type)
+            if producer is None:
+                continue
+            is_delay = (
+                descriptor.input_role is InputRole.SAMPLED and not descriptor.is_collective
+            )
+            delay[producer] = delay.get(producer, True) and is_delay
+        return tuple(producer for producer, only_delay in delay.items() if only_delay)
+
+    def _candidate_instances(self, flow_node: "FlowNode") -> tuple[InstanceKey, ...]:
+        """Instances of `flow_node` with pending freshness, in fan-out order."""
+        return tuple(
+            instance
+            for instance, fresh in self._fresh_since_last_firing.get(flow_node, {}).items()
+            if fresh
+        )
+
+    def _is_ready_worker(self, flow_node: "FlowNode", instance: InstanceKey) -> bool:
+        """Coverage and `TriggerPolicy` eligibility for one (node, instance)."""
+        if not self._is_fully_covered(flow_node, instance=instance):
+            return False
+        # Freshness only ever holds TRIGGERING-role types (`_record_input`),
+        # so any fresh type is a valid "arrived" type for the policy check.
+        fresh = self._effective_fresh_types(flow_node, instance=instance)
+        arrived = next(
+            (d.domain_type for d in flow_node.consumed_artifacts if d.domain_type in fresh),
+            None,
+        )
+        if arrived is None:
+            return False
+        return self._is_eligible_to_fire(flow_node, arrived, instance=instance)
+
+    def _run_superstep(
+        self, flow_nodes: "tuple[FlowNode, ...]", *, depth: int
+    ) -> "list[_StagedFiring]":
+        """
+        Run every ready worker of `flow_nodes` against the state committed
+        before this superstep. Nothing is committed here; if a worker raises,
+        the exception propagates and the staged results are dropped.
+        """
+        staged: list[_StagedFiring] = []
+        for flow_node in flow_nodes:
+            for instance in self._candidate_instances(flow_node):
+                if not self._is_ready_worker(flow_node, instance):
+                    continue
+                identity = self._begin_node_execution(flow_node, instance=instance)
+                call_kwargs = self._build_call_kwargs(flow_node, identity, instance=instance)
+                staged.append(
+                    self._run_worker(
+                        flow_node, call_kwargs, identity, depth=depth, instance=instance
+                    )
+                )
+        return staged
+
+    def _run_worker(
         self,
         flow_node: "FlowNode",
         call_kwargs: dict[str, object],
         identity: NodeExecutionIdentity,
         *,
-        depth: int = 0,
-        instance: "InstanceKey | None" = None,
-    ) -> object:
+        depth: int,
+        instance: InstanceKey,
+    ) -> "_StagedFiring":
         """
-        Fire one `FlowNode` with `call_kwargs` as its full call
-        arguments (Slice 2E; generalized to multi-input joins by Slice
-        2I -- `call_kwargs` now covers every consumed parameter plus an
-        optional `NodeContext` snapshot, built by
-        `._build_call_kwargs(...)`, instead of always being a single
-        domain value).
+        Call the node function for one (node, instance). The result is staged,
+        not committed: it becomes visible only at the superstep barrier
+        (`_commit_superstep`).
 
-        Calls the node function, wraps the returned domain value into
-        an `ArtifactRecord`, commits it into `self.repository`, updates
-        the firing `NodeSession`'s `.last_output`, dispatches
-        `on_output`, and -- for `TriggerPolicy.ALL_INPUTS_CHANGED` --
-        clears `flow_node`'s freshness set so a later partial update
-        round does not immediately re-trigger it. Returns the produced
-        domain value (`record.value`).
-
-        Milestone O4 (Slices O4b/O4c): emits a `"used"` provenance event
-        for each of `flow_node`'s consumed artifact types that already
-        has a committed `ArtifactRecord` (nothing to report the first
-        time a type is consumed with no prior producer), before calling
-        the node function, and a `"generated"` event for the artifact
-        this firing itself commits, after `.commit(...)` succeeds. Both
-        are no-ops when this `Session` has no `provenance_store` configured
-        (`storage_root` was not passed to `Flow.session(...)`).
-
-        Milestone O5 (Slice O5a): records a `"node_started"` `TraceEvent`
-        into `self.trace` before calling the node function, and a
-        `"node_finished"` `TraceEvent` after it commits -- unconditional,
-        unlike Provenance/Recordings, since Level 1 has no opt-in
-        (design record Section 11.1; `self._trace` is always constructed).
-
-        Milestone O7 (Slice O7c): flushes this firing's buffered
-        `Recording`s (`node_session.flush_recordings(...)`) in a `finally`
-        block covering the node function call -- the NodeExecution
-        durability boundary applies whether the firing succeeds or
-        raises (docs/observability_goals.md Section 5), not only on the
-        success path.
+        Trace events (`node_started`, `node_finished`), presenter calls and
+        instrument recordings are emitted when the worker exits, normally or
+        not: they describe the attempt itself (the recording durability
+        boundary is the NodeExecution exit, docs/refactor/observability_goals.md
+        Section 5). Provenance describes committed artifacts, so its events
+        wait for the barrier.
         """
         node_session = self.node_session(flow_node.definition.function)
-
-        self._emit_used_provenance_events(flow_node, identity, instance=instance)
+        used_events = self._used_provenance_events(flow_node, identity, instance=instance)
         self._record_trace_event("node_started", identity)
         self._safe_presenter_call(self._presenter.on_node_started, identity, depth=depth)
-
         firing_lock = node_session.firing_lock
-
         start_time = time.monotonic()
         if firing_lock is not None:
             firing_lock.acquire()
         try:
             try:
                 result = flow_node.definition.function(**call_kwargs)
-
-                record = node_session.wrap(result, instance=instance)
-                node_session.commit(record, instance=instance)
             except BaseException as exc:
-                # Milestone O7, Slice O7d: report the failure to the
-                # terminal presenter -- a pure observer, never a handler
-                # (the exception always propagates unchanged; invariant
-                # #25, "observability failures must never change
-                # application semantics," read here in its stronger form:
-                # observability *reporting* must not change application
-                # semantics either).
                 self._safe_presenter_call(
                     self._presenter.on_node_error,
                     identity,
@@ -1322,21 +1291,51 @@ class Session:
         finally:
             if firing_lock is not None:
                 firing_lock.release()
-
         duration = time.monotonic() - start_time
-
         self._record_trace_event("node_finished", identity)
-        self._safe_presenter_call(self._presenter.on_node_finished, identity, depth=depth, duration=duration)
+        self._safe_presenter_call(
+            self._presenter.on_node_finished, identity, depth=depth, duration=duration
+        )
+        return _StagedFiring(
+            flow_node=flow_node,
+            instance=instance,
+            identity=identity,
+            value=result,
+            used_events=tuple(used_events),
+        )
 
-        self._emit_generated_provenance_event(record, identity, instance=instance)
+    def _commit_superstep(self, staged: "list[_StagedFiring]") -> None:
+        """
+        The barrier: commit every staged output, spend the freshness the
+        workers consumed, then notify observers and record the new values at
+        their consumers (issue #31; invariants #21, #36, #37).
+        """
+        committed: list[tuple[_StagedFiring, ArtifactRecord]] = []
+        for firing in staged:
+            node_session = self.node_session(firing.flow_node.definition.function)
+            record = node_session.wrap(firing.value, instance=firing.instance)
+            node_session.commit(record, instance=firing.instance)
+            committed.append((firing, record))
 
-        if flow_node.trigger_policy is TriggerPolicy.ALL_INPUTS_CHANGED:
-            key = instance if instance is not None else InstanceKey.singleton()
-            self._fresh_since_last_firing.setdefault(flow_node, {})[key] = set()
+        singleton_key = InstanceKey.singleton()
+        for firing in staged:
+            # A staged firing always comes from a candidate instance, which by
+            # definition has an entry here (`_candidate_instances`).
+            by_instance = self._fresh_since_last_firing[firing.flow_node]
+            by_instance[firing.instance] = set()
+            if singleton_key in by_instance:
+                by_instance[singleton_key] = set()
 
-        self._dispatch_on_output(flow_node, record.value)
-
-        return record.value
+        graph = self._flow.dependency_graph
+        for firing, record in committed:
+            if self._provenance_store is not None:
+                for event in firing.used_events:
+                    self._provenance_store.append(event)
+            self._emit_generated_provenance_event(record, firing.identity, instance=firing.instance)
+            domain_type = type(record.value)
+            for consumer in graph.ordered_consumers_of(domain_type):
+                self._record_input(consumer, domain_type, record.value, instance=firing.instance)
+            self._dispatch_on_output(firing.flow_node, record.value)
 
     @staticmethod
     def _artifact_id(domain_type: type) -> str:
@@ -1375,13 +1374,13 @@ class Session:
         key = instance if instance is not None else InstanceKey.singleton()
         return repr(key.key)
 
-    def _emit_used_provenance_events(
+    def _used_provenance_events(
         self,
         flow_node: "FlowNode",
         identity: NodeExecutionIdentity,
         *,
         instance: "InstanceKey | None" = None,
-    ) -> None:
+    ) -> "list[ProvenanceEvent]":
         """
         Emits a durable `"used"` `ProvenanceEvent` per consumed Artifact type
         with a prior producer (only when `self._provenance_store` is
@@ -1410,6 +1409,7 @@ class Session:
         """
         key = instance if instance is not None else InstanceKey.singleton()
         singleton_key = InstanceKey.singleton()
+        events: list[ProvenanceEvent] = []
 
         for descriptor in flow_node.consumed_artifacts:
             if descriptor.is_collective:
@@ -1431,18 +1431,17 @@ class Session:
                 # (there is no artifact_version to report).
                 continue
 
-            if self._provenance_store is not None:
-                self._provenance_store.append(
-                    ProvenanceEvent(
-                        event_type="used",
-                        artifact_id=self._artifact_id(descriptor.domain_type),
-                        artifact_version=existing.version.number,
-                        node_execution_id=identity.node_execution_id,
-                        node_id=identity.node_id,
-                        execution_seq=identity.execution_seq,
-                        instance_id=self._instance_identifier(resolved_instance),
-                    )
+            events.append(
+                ProvenanceEvent(
+                    event_type="used",
+                    artifact_id=self._artifact_id(descriptor.domain_type),
+                    artifact_version=existing.version.number,
+                    node_execution_id=identity.node_execution_id,
+                    node_id=identity.node_id,
+                    execution_seq=identity.execution_seq,
+                    instance_id=self._instance_identifier(resolved_instance),
                 )
+            )
 
             self._safe_presenter_call(
                 self._presenter.on_artifact_consumed,
@@ -1450,6 +1449,8 @@ class Session:
                 artifact_type=descriptor.domain_type.__name__,
                 artifact_version=existing.version.number,
             )
+
+        return events
 
     def _emit_generated_provenance_event(
         self,
@@ -1463,13 +1464,13 @@ class Session:
         `self._provenance_store` is configured), and -- independently,
         Milestone O8, Slice O8b -- reports the same fact to the terminal
         `Presenter` via `on_artifact_generated`, regardless of durable
-        storage configuration (see `_emit_used_provenance_events` docstring).
+        storage configuration (see `_used_provenance_events` docstring).
 
         Slice MI-J: the emitted event's own `instance_id` is the firing's
         own `instance` (`._instance_identifier(instance)`) -- a produced
         artifact is never `Collective`-marked (Slice MI-H's marker
         applies only to consumed parameters), so this is always exactly
-        correct, unlike `_emit_used_provenance_events` there is no
+        correct, unlike `_used_provenance_events` there is no
         dependency-resolution ambiguity here.
         """
         if self._provenance_store is not None:

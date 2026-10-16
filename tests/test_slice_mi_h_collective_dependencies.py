@@ -1,25 +1,20 @@
 """
 Slice MI-H: Collective dependencies -- a node parameter declared
-`Annotated[T, Collective]` resolves the currently known collection of
+`Collective[T]` resolves the currently known collection of
 instances of T (docs/refactor/multi_instance_execution_plan.md, Section
 5, item 8).
 
 Genuine fork disclosed in this slice's own SliceContract: detection uses
-`Annotated[T, Collective]` (mirroring the existing `Sampled` precedent),
-not a bare `Collection[T]` generic origin. A `Collective`-marked
-parameter always gets `InputRole.SAMPLED` -- its own arrival never
-triggers firing by itself (see collective.py's own docstring) -- so a
-collective-consuming node needs at least one ordinary TRIGGERING partner
-input (or `TriggerPolicy.MANUAL`) to ever fire automatically; this
-composes naturally with Slice MI-G's Broadcasting (a shared, broadcast
-tick is exactly that kind of TRIGGERING partner).
+`Collective[T]` (mirroring the existing `Sampled` precedent),
+not a bare `Collection[T]` generic origin.
 
-Explicit non-goal exercised as an assertion, not an xfail: this slice
-adds no new eligibility-scheduling path for a collective dependency by
-itself (quiescence -- "has every instance that will exist this
-propagation already arrived" -- is jointly MI-H/MI-I's concern, not
-decided here). The collective value resolved at firing time is a
-straightforward, static read of repository state at that moment.
+Issue #31 changed the input role: a `Collective` parameter was originally
+`InputRole.SAMPLED`, because without a superstep barrier every instance
+committed on its own and a triggering collective input would have fired
+the node once per instance, on a partial set. With the barrier, every
+instance committed at one barrier (or in one `feed_instances()` call)
+arrives as a single change, so a `Collective` parameter is now TRIGGERING
+and a fan-in fires once, after every worker.
 """
 
 from __future__ import annotations
@@ -27,15 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated
 
-import pytest
-
-from reed import Flow, TriggerPolicy
-from reed.composition.flow.artifact_dependency_graph import (
-    ZeroTriggeringInputsError,
-)
-from reed.composition.node.collective import Collective
-from reed.composition.node.sampled import Sampled
-from reed.execution.instance_key import InstanceKey
+from reed import Collective, Flow, InstanceKey, Sampled, TriggerPolicy
 
 INSTANCE_A = InstanceKey(key="A")
 INSTANCE_B = InstanceKey(key="B")
@@ -62,7 +49,7 @@ def test_collective_parameter_resolves_the_currently_known_instances():
 
     def fleet_summary(
         tick: DeltaT,
-        states: Annotated[AircraftState, Collective],
+        states: Collective[AircraftState],
     ) -> FleetSummary:
         altitudes = tuple(s.altitude for s in states)
         seen.append(altitudes)
@@ -90,12 +77,17 @@ def test_collective_parameter_resolves_the_currently_known_instances():
 def test_collective_parameter_is_an_empty_tuple_before_any_instance_commits():
     def fleet_summary(
         tick: DeltaT,
-        states: Annotated[AircraftState, Collective],
+        states: Collective[AircraftState],
     ) -> FleetSummary:
-        return FleetSummary(total_altitude=sum(s.altitude for s in states), count=len(states))
+        return FleetSummary(
+            total_altitude=sum(s.altitude for s in states), count=len(states)
+        )
 
     flow = Flow()
-    flow.add(fleet_summary)
+    # ANY_INPUT_CHANGED: the tick alone fires the node (issue #31 made the
+    # Collective input triggering; under ALL_INPUTS_CHANGED the node would
+    # also wait for a first batch of instances).
+    flow.add(fleet_summary, trigger_policy=TriggerPolicy.ANY_INPUT_CHANGED)
     session = flow.session()
 
     # No AircraftState has ever been fed -- the collective dependency
@@ -108,29 +100,41 @@ def test_collective_parameter_is_an_empty_tuple_before_any_instance_commits():
     assert summary.total_altitude == 0.0
 
 
-def test_collective_only_input_requires_manual_or_another_triggering_partner():
-    def fleet_summary(states: Annotated[AircraftState, Collective]) -> FleetSummary:
-        return FleetSummary(total_altitude=sum(s.altitude for s in states), count=len(states))
+def test_collective_only_input_fires_once_per_batch_of_instances():
+    # Issue #31 (reverses the Slice MI-H rule): a Collective input is
+    # TRIGGERING. A node whose only input is Collective registers without
+    # ZeroTriggeringInputsError and fires once per batch of instances.
+    calls: list[int] = []
+
+    def fleet_summary(states: Collective[AircraftState]) -> FleetSummary:
+        calls.append(len(states))
+        return FleetSummary(
+            total_altitude=sum(s.altitude for s in states), count=len(states)
+        )
 
     flow = Flow()
+    flow.add(fleet_summary)
+    session = flow.session()
 
-    # A node whose ONLY consumed parameter is Collective has zero
-    # TRIGGERING inputs -- rejected at registration, exactly like any
-    # other all-SAMPLED node (Slice 21D's existing, unmodified guard).
-    with pytest.raises(ZeroTriggeringInputsError):
-        flow.add(fleet_summary)
+    session.feed_instances(
+        {
+            INSTANCE_A: AircraftState(altitude=1.0),
+            INSTANCE_B: AircraftState(altitude=2.0),
+        }
+    )
+    session.push()
+    assert calls == [2]
 
-    # Declaring it MANUAL is the existing, unmodified escape hatch.
-    flow_manual = Flow()
-    flow_manual.add(fleet_summary, trigger_policy=TriggerPolicy.MANUAL)  # does not raise
+    session.push()
+    assert calls == [2], "no new instances: no new firing"
 
 
-def test_collective_dependency_never_triggers_firing_by_itself():
-    calls = []
+def test_collective_batch_counts_as_one_arrival_under_all_inputs_changed():
+    calls: list[int] = []
 
     def fleet_summary(
         tick: DeltaT,
-        states: Annotated[AircraftState, Collective],
+        states: Collective[AircraftState],
     ) -> FleetSummary:
         calls.append(len(states))
         return FleetSummary(total_altitude=0.0, count=len(states))
@@ -139,24 +143,32 @@ def test_collective_dependency_never_triggers_firing_by_itself():
     flow.add(fleet_summary, trigger_policy=TriggerPolicy.ALL_INPUTS_CHANGED)
     session = flow.session()
 
+    # The tick alone is not enough: ALL_INPUTS_CHANGED also waits for the
+    # Collective input, which has not changed yet.
     session.feed(DeltaT(seconds=1.0))
     session.push()
-    assert len(calls) == 1
+    assert calls == []
 
-    # A new AircraftState instance committing must NOT, by itself,
-    # re-trigger fleet_summary -- its collective parameter is SAMPLED,
-    # never TRIGGERING.
-    session.feed_instances({INSTANCE_A: AircraftState(altitude=50.0)})
+    # One feed_instances() call is one arrival, however many instances it
+    # carries: the node fires once, seeing both.
+    session.feed_instances(
+        {
+            INSTANCE_A: AircraftState(altitude=50.0),
+            INSTANCE_B: AircraftState(altitude=60.0),
+        }
+    )
     session.push()
-    assert len(calls) == 1
+    assert calls == [2]
 
 
 def test_collective_dependency_composes_with_broadcasting_as_its_triggering_partner():
     def fleet_summary(
         tick: DeltaT,
-        states: Annotated[AircraftState, Collective],
+        states: Collective[AircraftState],
     ) -> FleetSummary:
-        return FleetSummary(total_altitude=sum(s.altitude for s in states), count=len(states))
+        return FleetSummary(
+            total_altitude=sum(s.altitude for s in states), count=len(states)
+        )
 
     flow = Flow()
     flow.add(fleet_summary)

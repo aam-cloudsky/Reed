@@ -95,7 +95,7 @@ from typing import (
     get_type_hints,
 )
 
-from reed.composition.node.collective import Collective
+from reed.composition.node.collective import Collective, CollectiveMarker
 from reed.composition.node.node_context import NodeContext
 from reed.composition.node.sampled import Sampled
 
@@ -134,8 +134,8 @@ class DomainNodeSignature:
     # Slice MI-H (docs/refactor/multi_instance_execution_plan.md Section
     # 5 item 8 -- Collective dependencies): the subset of
     # `consumed_parameters`' names whose annotation was
-    # `Annotated[T, Collective]` (`reed.composition.node.collective.
-    # Collective`). Detected exactly like `sampled_parameter_names`
+    # `Collective[T]` (`reed.composition.node.collective.Collective`,
+    # i.e. `Annotated[tuple[T, ...], CollectiveMarker]`). Detected exactly like `sampled_parameter_names`
     # (Slice 21B), independently -- a parameter may in principle carry
     # both markers' metadata at once, though no current use case combines
     # them.
@@ -333,13 +333,47 @@ class DomainNodeSignatureParser:
         """
         if get_origin(annotation) is Annotated:
             underlying_type, *metadata = get_args(annotation)
+
+            if any(marker is Collective for marker in metadata):
+                raise TypeError(
+                    "`Annotated[T, Collective]` is no longer supported; "
+                    "declare the parameter as `Collective[T]` (issue #31)."
+                )
+
+            is_collective = any(marker is CollectiveMarker for marker in metadata)
+
+            if is_collective:
+                underlying_type = DomainNodeSignatureParser._collective_item_type(
+                    underlying_type
+                )
+
             return (
                 underlying_type,
                 any(marker is Sampled for marker in metadata),
-                any(marker is Collective for marker in metadata),
+                is_collective,
             )
 
         return cast(type, annotation), False, False
+
+    @staticmethod
+    def _collective_item_type(annotation: object) -> type:
+        """
+        `Collective[T]` expands to `Annotated[tuple[T, ...],
+        CollectiveMarker]`; the artifact the parameter consumes is `T`,
+        the item type, so return it.
+        """
+        arguments = get_args(annotation)
+
+        if (
+            get_origin(annotation) is not tuple
+            or len(arguments) != 2
+            or arguments[1] is not Ellipsis
+        ):
+            raise TypeError(
+                f"`Collective[T]` expands to `tuple[T, ...]`; got {annotation!r}."
+            )
+
+        return cast(type, arguments[0])
 
     def _parse_context_arguments(self, annotation: object) -> tuple[type, type]:
         arguments = get_args(annotation)

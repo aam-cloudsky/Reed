@@ -381,7 +381,7 @@ This single mechanism accounts for everything the reactive model needs to suppor
 - **Branching / fan-out**: one committed artifact can make more than one downstream node eligible at once; each is considered independently.
 - **Multi-input joins**: a node with several declared inputs is only ever fired once every one of them has a known value, and, depending on its policy, only once the relevant *triggering* inputs have changed since its last firing.
 - **Repeated updates**: a node's participation can fire many times across a Session's life, once per qualifying new arrival within any of the session's propagations. Nothing about the mechanism assumes a single firing per node, or a single propagation per session.
-- **Quiescence**: a propagation is driven by a queue of pending commits that is processed until empty, so a cascade always terminates once nothing further becomes eligible. This gives the session a well-defined settled state after each `push()`.
+- **Quiescence**: a propagation runs in supersteps until every node that may still fire has fired or has been found not eligible (see "Superstep Execution" below). Each node runs at most once per `push()`, so a propagation always terminates, feedback loops included. This gives the session a well-defined settled state after each `push()`.
 
 ### Triggering and Sampled Inputs
 
@@ -418,6 +418,25 @@ flowchart LR
     D -- no --> W[Remains pending]
 ```
 
+### Superstep Execution
+
+A `push()` proceeds in discrete **supersteps**, in the sense of the Bulk Synchronous Parallel model (Valiant, "A bridging model for parallel computation", CACM 33(8), 1990, doi:10.1145/79173.79181). Every node in a superstep reads the state committed before it; the outputs it produces are held in a staging buffer and become visible only at the **barrier** that closes the superstep. Pregel uses the same model (Malewicz et al., SIGMOD 2010, doi:10.1145/1807167.1807184), and LangGraph names it "super-steps" (LangGraph docs, "Graph API overview").
+
+Four rules govern which nodes run in each superstep (architectural invariants #34-#37):
+
+1. **At most one firing per node and instance per `push()`.** A later arrival is recorded and takes effect in the next `push()`.
+2. **A node waits for its pending producers.** A node runs only after every producer of its inputs that may still fire in the current `push()` has fired or has been found not eligible. In a diamond `S0 → B`, `S0 → C`, `(B, C) → D`, nodes `B` and `C` share the first superstep and `D` runs once, in the second, with both inputs from the same version of `S0`. This holds under `ANY_INPUT_CHANGED` and `ALL_INPUTS_CHANGED` alike, so no node ever runs on inputs derived from different versions of the same source (a *glitch*; Cooper & Krishnamurthi, ESOP 2006, doi:10.1007/11693024_20).
+3. **Feedback loops carry an implicit unit delay.** When no node is ready, some nodes wait on each other. Only a loop that waits on nothing outside itself is released (a sink strongly connected component of the wait-for graph; Tarjan, SIAM J. Comput. 1(2), 1972, doi:10.1137/0201010). Inside it, the released node is chosen in this order: a node that waits on the loop only through `Sampled` inputs (the loop's declared delay), then the node reached first by the change front, then registration order. Along the loop the released node reads the values committed before this `push()`, which is the semantics of Lustre's `pre` operator (Halbwachs et al., Proc. IEEE 79(9), 1991, doi:10.1109/5.97300). A closed-loop controller and its plant therefore advance one step per `push()`.
+4. **All or nothing at the barrier.** If any worker of a superstep raises, nothing from that superstep is committed: values, versions, `last_output` and provenance stay as they were, and the exception propagates. Earlier supersteps of the same `push()` remain committed.
+
+**Fan-out and fan-in.** A node consuming one instance of a multi-instance type runs as one worker per instance (fan-out). A node consuming `Collective[T]` (a parameter typed `tuple[T, ...]`) runs after every worker of `T`'s producer, and receives the complete set of instances of one epoch (fan-in). The `Collective` input is a triggering input whose arrival is the set as a whole: all instances committed at one barrier (or in one `feed_instances()` call) count as one change, so the fan-in fires once and needs no other trigger. Inside a feedback loop this holds when the loop's delay is a `Sampled` edge (for example, workers sampling the previous aggregate); a loop made only of triggering and collective edges is broken by rule 3, and the node released there reads the previous epoch. This is the Scatter-Gather pattern (Hohpe & Woolf, *Enterprise Integration Patterns*, 2003) and the map/reduce split of Dean & Ghemawat (CACM 51(1), 2008, doi:10.1145/1327452.1327492).
+
+**Jacobi, not Gauss–Seidel.** Because workers of one superstep read only the state committed before it, the update is synchronous: every worker computes from the previous epoch (a Jacobi update). A sequential update, where each worker reads values already produced by the workers before it in the same round (a Gauss–Seidel update), makes the result depend on evaluation order (Saad, *Iterative Methods for Sparse Linear Systems*, 2nd ed., SIAM, 2003, ch. 4). The staging buffer is the double-buffer technique (Nystrom, *Game Programming Patterns*, "Double Buffer").
+
+**What is not rolled back.** Execution trace events (`node_started`, `node_finished`), presenter output and instrument recordings describe the attempt itself and are emitted when each worker exits, whether or not its superstep commits. A worker's mutation of its own `ctx.memory` is node-local and is not undone when its superstep fails.
+
+**One `push()` at a time.** Calls to `push()` on the same `Session` from different threads are serialized. A call from inside a running `push()` on the same thread, for example from an `on_output` callback, raises `RuntimeError`; the callback can `feed()` instead, and the next `push()` propagates the value.
+
 ### Commit, Then Observation
 
 A firing computes a plain domain result; Reed commits the corresponding artifact version to authoritative state; only after that commit succeeds does any external observer, such as a callback, a downstream log, or a UI, get to see the value. Observation never precedes or substitutes for commitment, and a failure in an observer cannot retroactively undo a commit that already happened: computation, commitment, and observation are three distinct, ordered stages, and a fault in the last never contaminates the first two.
@@ -442,7 +461,10 @@ sequenceDiagram
 - a strict separation between change detection, execution eligibility, and observation;
 - a further separation, within eligibility itself, between a triggering input's arrival and a sampled input's arrival. Only the former is ever examined by a trigger policy;
 - a well-defined, reachable quiescent state after every `push()`, whether the change that seeded it arrived from a node's own firing or from `feed()`;
-- observation strictly follows successful commitment, and never the reverse.
+- observation strictly follows successful commitment, and never the reverse;
+- every node and instance runs at most once per `push()`, after every pending producer of its inputs, so propagation is glitch-free and terminates, feedback loops included;
+- a superstep commits all of its outputs or none of them;
+- identical inputs produce an identical firing sequence and an identical resulting state.
 
 ---
 

@@ -223,7 +223,7 @@ class NodeSession:
         # keyed by node_execution_id -- accumulated in memory during a
         # firing and flushed as one batch (one fsync) at that firing's
         # own durability boundary (`.flush_recordings(...)`, called from
-        # `Session._fire`'s `finally` block), not written through to the
+        # `Session._run_worker`'s `finally` block), not written through to the
         # store on every individual `ctx.record()` call.
         self._pending_recordings: dict[str, list[Recording]] = {}
 
@@ -526,7 +526,7 @@ class NodeSession:
         `node_execution_id` as one batch (Milestone O7, Slice O7c) --
         the NodeExecution durability boundary (docs/observability_goals.md
         Section 5; architectural invariants #20/#21). Called from
-        `Session._fire`'s `finally` block, so it runs whether the firing
+        `Session._run_worker`'s `finally` block, so it runs whether the firing
         succeeded or raised. A no-op if this firing made no
         `ctx.record(...)` calls (nothing buffered) or if no
         `recording_store` is configured (`storage_root` was not passed

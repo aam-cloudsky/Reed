@@ -25,13 +25,10 @@ docs/refactor/multi_instance_state.md:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated
 
 import pytest
 
-from reed import Flow
-from reed.composition.node.collective import Collective
-from reed.execution.instance_key import InstanceKey
+from reed import Collective, Flow, InstanceKey
 
 INSTANCE_A = InstanceKey(key="A")
 INSTANCE_B = InstanceKey(key="B")
@@ -92,7 +89,7 @@ def test_removed_instance_disappears_from_the_repository():
 def test_removed_instance_disappears_from_a_collective_dependencys_view():
     def fleet_summary(
         tick: DeltaT,
-        states: Annotated[AircraftState, Collective],
+        states: Collective[AircraftState],
     ) -> FleetSummary:
         return FleetSummary(count=len(states))
 
@@ -191,7 +188,7 @@ def test_a_firing_failure_for_one_instance_aborts_the_whole_propagation():
 def test_quiescence_is_caller_controlled_via_feed_instances_then_push():
     def fleet_summary(
         tick: DeltaT,
-        states: Annotated[AircraftState, Collective],
+        states: Collective[AircraftState],
     ) -> FleetSummary:
         return FleetSummary(count=len(states))
 

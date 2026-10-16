@@ -82,3 +82,26 @@ became `Session` in issue #22; the invariant numbers did not change).
 33. `Session.snapshot()` returns the full current repository state as plain domain
     values only (never `ArtifactRecord`), reflecting the moment it is called; it
     retains no history of earlier snapshots or pushes.
+
+## Superstep Execution (issue #31)
+
+34. A `(FlowNode, instance)` pair fires at most once per `Session.push()`. An arrival at
+    a node that already ran in the current `push()` is recorded and takes effect in the
+    next `push()`. Along a feedback loop, this is an implicit unit delay.
+35. A `FlowNode` runs only after every producer of its inputs (triggering, sampled or
+    collective) that may still fire in the current `push()` has fired or has been found
+    not eligible. When no node is ready, a loop that waits on nothing outside itself is
+    released at one node, chosen by: waiting on the loop only through `Sampled` inputs,
+    then first reached by the change front, then registration order.
+36. Workers of one superstep read the state committed before the superstep. Their
+    outputs are committed together at the barrier that closes it. If any worker raises,
+    nothing from that superstep is committed (values, versions, `last_output`,
+    provenance), and the exception propagates.
+37. Iteration order during a `push()` is a function of the `Flow`'s composition and the
+    inputs: registration order for nodes, fan-out order for instances. It never depends
+    on `id()`-based hashing.
+38. `Session.push()` calls on one `Session` are serialized across threads; a call from
+    inside a running `push()` on the same thread raises `RuntimeError`.
+39. A `Collective[T]` input is triggering. Its arrival is the set of
+    instances of `T` as a whole: everything committed at one barrier, in one
+    `feed_instances()` call, or removed by `remove_instance()` counts as one change.
