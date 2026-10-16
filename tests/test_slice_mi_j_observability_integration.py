@@ -29,13 +29,10 @@ byte-for-byte unaffected by this slice's additive `instance_id` field.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated
 
 from rich.console import Console
 
-from reed import Flow
-from reed.composition.node.collective import Collective
-from reed.execution.instance_key import InstanceKey
+from reed import Collective, Flow, InstanceKey
 from reed.observability.graph import build_provenance_graph, render_provenance_tree
 from reed.observability.replay import load_provenance
 
@@ -238,7 +235,7 @@ def test_singleton_only_flow_provenance_and_graph_output_is_completely_unaffecte
 def test_collective_dependency_is_skipped_by_used_event_emission(tmp_path):
     def fleet_summary(
         tick: DeltaT,
-        states: Annotated[AircraftState, Collective],
+        states: Collective[AircraftState],
     ) -> FleetSummary:
         altitudes = tuple(s.altitude for s in states)
         return FleetSummary(total_altitude=sum(altitudes), count=len(altitudes))

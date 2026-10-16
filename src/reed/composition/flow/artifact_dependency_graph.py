@@ -163,8 +163,11 @@ class ArtifactDependencyGraph:
         # domain artifact type -> the one FlowNode that produces it
         self._producer_by_type: dict[type, FlowNode] = {}
 
-        # domain artifact type -> FlowNodes that consume it
-        self._consumers_by_type: dict[type, set[FlowNode]] = defaultdict(set)
+        # domain artifact type -> FlowNodes that consume it, in registration
+        # order (a dict used as an ordered set). Iteration order must never
+        # depend on `id()`-based hashing: issue #31 requires identical inputs
+        # to produce an identical firing sequence.
+        self._consumers_by_type: dict[type, dict[FlowNode, None]] = defaultdict(dict)
 
     # ------------------------------------------------------------------
     # Registration
@@ -214,7 +217,7 @@ class ArtifactDependencyGraph:
         self._producer_by_type[produced_type] = flow_node
 
         for consumed_type in consumed_types:
-            self._consumers_by_type[consumed_type].add(flow_node)
+            self._consumers_by_type[consumed_type][flow_node] = None
 
     def unregister(self, flow_node: FlowNode) -> None:
         produced_type = flow_node.produced_artifact.domain_type
@@ -228,7 +231,7 @@ class ArtifactDependencyGraph:
             if consumers is None:
                 continue
 
-            consumers.discard(flow_node)
+            consumers.pop(flow_node, None)
 
             if not consumers:
                 del self._consumers_by_type[artifact.domain_type]
@@ -241,7 +244,17 @@ class ArtifactDependencyGraph:
         return self._producer_by_type.get(domain_type)
 
     def consumers_of(self, domain_type: type) -> frozenset[FlowNode]:
-        return frozenset(self._consumers_by_type.get(domain_type, set()))
+        return frozenset(self._consumers_by_type.get(domain_type, {}))
+
+    def ordered_consumers_of(self, domain_type: type) -> tuple[FlowNode, ...]:
+        """
+        `FlowNode`s consuming `domain_type`, in registration order.
+
+        The execution path uses this method, never `consumers_of`, so that the
+        order in which consumers are visited is a function of the `Flow`'s
+        composition alone (issue #31, determinism).
+        """
+        return tuple(self._consumers_by_type.get(domain_type, {}))
 
     # ------------------------------------------------------------------
     # DAG Edges (FlowNode -> FlowNode)

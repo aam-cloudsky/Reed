@@ -23,7 +23,7 @@ at once.
       (Slice MI-G).
     - Collective dependency: `fleet_summary` reads the currently known
       set of every aircraft's latest `Observation` at once, via
-      `Annotated[Observation, Collective]` (Slice MI-H) -- fed by its
+      `Collective[Observation]` (Slice MI-H) -- fed by its
       own, separate `FleetTick`, kept deliberately apart from `DeltaT`
       so the Collective read is never torn mid-cascade (Slice MI-I's
       own documented Quiescence resolution: "feed the complete batch,
@@ -48,13 +48,10 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
 
 from rich.console import Console
 
-from reed import Flow, NodeContext
-from reed.composition.node.collective import Collective
-from reed.execution.instance_key import InstanceKey
+from reed import Collective, Flow, InstanceKey, NodeContext
 from reed.observability.graph import render_provenance_tree
 from reed.observability.replay import load_provenance
 
@@ -143,7 +140,7 @@ def perception(
 
 def fleet_summary(
     tick: FleetTick,
-    observations: Annotated[Observation, Collective],
+    observations: Collective[Observation],
 ) -> FleetSummary:
     """
     Fires once, at singleton scope, whenever FleetTick is fed.

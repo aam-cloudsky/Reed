@@ -35,13 +35,30 @@ artifacts. Both are new public types, the same category as
 for the precedent this follows: a new public type a node signature is
 meant to reference directly belongs here; an internal execution or
 repository class does not) -- not internal execution classes.
+
+Issue #31 additionally exports `Collective` and `InstanceKey`, by the
+same rule: a node signature references `Collective[T]` directly (a
+generic alias of `Annotated[tuple[T, ...], CollectiveMarker]`, so the
+parameter is typed as the tuple it receives), and callers build
+`InstanceKey`s to feed instances (`session.feed_instances({...})`).
 """
 
 from reed.composition.flow.flow_composition import Flow
 from reed.composition.flow.trigger_policy import TriggerPolicy
 from reed.composition.node.artifact_descriptor import InputRole
+from reed.composition.node.collective import Collective
 from reed.composition.node.node_context import NodeContext
 from reed.composition.node.sampled import Sampled
+from reed.execution.instance_key import InstanceKey
 from reed.execution.session import Session
 
-__all__ = ["Flow", "TriggerPolicy", "NodeContext", "Session", "InputRole", "Sampled"]
+__all__ = [
+    "Flow",
+    "TriggerPolicy",
+    "NodeContext",
+    "Session",
+    "InputRole",
+    "Sampled",
+    "Collective",
+    "InstanceKey",
+]

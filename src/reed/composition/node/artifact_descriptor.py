@@ -37,8 +37,8 @@ existing construction site keeps working and comparing/hashing
 unchanged because it defaults to `False`. A `Collective`-marked consumed
 parameter (`reed.composition.node.collective.Collective`, detected in
 `domain_signature.py` exactly like `Sampled`) gets `is_collective=True`
-and `input_role=InputRole.SAMPLED` -- see `collective.py`'s own
-docstring for why.
+and keeps `input_role=InputRole.TRIGGERING` (issue #31) -- see
+`collective.py`'s own docstring for why.
 """
 
 from __future__ import annotations

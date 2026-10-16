@@ -4,7 +4,7 @@ artifact-publication rendering and structured-logging fan-out).
 
 The consumer side of `reed.observability.presentation.PresentationPolicy`: turns a
 compiled policy into a live renderer, invoked by `Session` at the same hook points that
-already exist for Provenance/Execution Trace emission (`_fire`, `publish`) -- never a
+already exist for Provenance/Execution Trace emission (`_run_worker`, `_commit_superstep`) -- never a
 new observability collection mechanism of its own. A `Presenter` reads identity/timing
 data `Session` already has and prints; it never decides what Reed observes, persists, or
 exports.
@@ -44,7 +44,7 @@ there would be.
 ## Artifact-publication rendering (Milestone O8, Slice O8b)
 
 `on_artifact_generated`/`on_artifact_consumed` are new hooks (docs/logging_design.md
-Section 3): `Session._fire` already knows, at the exact moment it emits a `"generated"`/
+Section 3): `Session` already knows, at the exact moment it emits a `"generated"`/
 `"used"` `ProvenanceEvent`, everything needed to render "Node X published Artifact@vN to
 the Repository" -- this only exposes that same moment to the `Presenter`, it does not add
 any new observation. Rendered only when `PresentationPolicy.propagation` is set (the

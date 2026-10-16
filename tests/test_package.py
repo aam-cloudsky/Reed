@@ -22,7 +22,9 @@ def test_public_api_exports_exactly_the_current_architecture_symbols():
     # TriggerPolicy/NodeContext, not a retired or internal symbol (see
     # .claude/reed-refactor/run-3G-20260912T205200Z/no_change_rationale.md
     # for the precedent this follows). The pin is updated to match
-    # rather than left to fail.
+    # rather than left to fail. Issue #31 likewise adds Collective (a
+    # node signature references `Collective[T]` directly) and InstanceKey
+    # (callers build it to feed instances).
     import reed
 
     assert set(reed.__all__) == {
@@ -32,6 +34,8 @@ def test_public_api_exports_exactly_the_current_architecture_symbols():
         "Session",
         "InputRole",
         "Sampled",
+        "Collective",
+        "InstanceKey",
     }
 
 
