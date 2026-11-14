@@ -1,5 +1,11 @@
 # Reed Observability — Implementation State
 
+> Note (issue #34): written when the entry point was `Flow.run()` / `Run` and values entered
+> through `run.publish(...)`. Today the entry point is `Flow.session()` / `Session`, with
+> `feed()` / `push()` / `snapshot()`; the `observability=` and `storage_root=` arguments
+> moved to `Flow.session()` unchanged.
+
+
 Status: live operational checkpoint for the observability build (Issue #7), analogous to
 `refactor_state.md` from Reed's prior architectural refactor. This document starts nearly
 empty on purpose — no implementation slice has begun yet. It exists so the next agent (or

@@ -1,5 +1,11 @@
 # Reed Observability: Design Decision (Issue #7)
 
+> Note (issue #34): written when the entry point was `Flow.run()` / `Run` and values entered
+> through `run.publish(...)`. Today the entry point is `Flow.session()` / `Session`, with
+> `feed()` / `push()` / `snapshot()`; the `observability=` and `storage_root=` arguments
+> moved to `Flow.session()` unchanged.
+
+
 Status: **DRAFT — architectural decision and implementation plan, not yet implemented.**
 Author: drafted by Claude (Sonnet 5), for review by Davi / Instituto Curvelo.
 Scope: tracing, provenance, structured recording, and local/offline persistence of Reed
