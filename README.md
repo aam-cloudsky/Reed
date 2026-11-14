@@ -82,15 +82,15 @@ terminal output.
 
 The `examples/` directory contains runnable scripts:
 
-- `text_analysis_pipeline.py` -- fan-out, a multi-input join gated by a
+- `text_analysis_pipeline.py`: fan-out, a multi-input join gated by a
   `TriggerPolicy`, and multi-hop propagation through a full graph.
-- `sampled_inputs.py` -- non-triggering (`Sampled`) inputs.
-- `multi_instance_fleet_example.py` -- multiple instances of the same
+- `sampled_inputs.py`: non-triggering (`Sampled`) inputs.
+- `multi_instance_fleet_example.py`: multiple instances of the same
   type (`InstanceKey`) and fan-in through `Collective[T]`.
-- `self_flow/` -- feedback through a `Sampled` self-input (unit delay).
-- `superstep/` -- fan-out/fan-in, diamond joins, feedback loops and
+- `self_flow/`: feedback through a `Sampled` self-input (unit delay).
+- `superstep/`: fan-out/fan-in, diamond joins, feedback loops and
   the barrier commit of each superstep.
-- `observability_example.py` -- tracing, instruments and provenance.
+- `observability_example.py`: tracing, instruments and provenance.
 
 ---
 

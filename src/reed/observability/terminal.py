@@ -2,9 +2,9 @@
 Level 1 terminal renderer (Milestone O5, Slice O5b).
 
 Rebuilds the terminal-rendering experience lost with the legacy Bus/Depot/Outpost tracing
-system (docs/observability_design.md Section 1, Section 8) as **a consumer of Level 1**
+system (docs/refactor/observability_design.md Section 1, Section 8) as **a consumer of Level 1**
 (the `ExecutionTrace` ring buffer, Slice O5a) -- not by reviving any of that legacy
-machinery (`docs/observability_non_goals.md` Section 9 forbids that).
+machinery (`docs/refactor/observability_non_goals.md` Section 9 forbids that).
 
 The legacy `EventRenderer` subscribed live to Bus traffic and printed as messages arrived.
 This renderer is deliberately simpler for V1: it is a pull-based snapshot renderer over

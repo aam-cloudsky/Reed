@@ -27,7 +27,7 @@ are Reed's own words for what the user is choosing to see.
 ## Progress semantics (Slice O7e)
 
 A percentage/fraction progress bar ("5/8 Nodes") requires a stable, known denominator. In a
-reactive graph, the set of Nodes that will actually fire for one `publish(...)` call is not
+reactive graph, the set of Nodes that will actually fire for one `push()` call is not
 knowable in advance: `TriggerPolicy.MANUAL` Nodes never auto-fire, `ALL_INPUTS_CHANGED`
 Nodes wait for every input to go fresh (may not happen this cascade at all), branching and
 joins mean the discovered frontier grows and shrinks as the cascade runs, and a Node can
@@ -43,13 +43,13 @@ there would be.
 
 ## Artifact-publication rendering (Milestone O8, Slice O8b)
 
-`on_artifact_generated`/`on_artifact_consumed` are new hooks (docs/logging_design.md
+`on_artifact_generated`/`on_artifact_consumed` are new hooks (docs/refactor/logging_design.md
 Section 3): `Session` already knows, at the exact moment it emits a `"generated"`/
 `"used"` `ProvenanceEvent`, everything needed to render "Node X published Artifact@vN to
 the Repository" -- this only exposes that same moment to the `Presenter`, it does not add
 any new observation. Rendered only when `PresentationPolicy.propagation` is set (the
 "show data flow" dimension), using the compact/verbose visual grammar
-`docs/logging_design.md` Section 6 defines; see `_render_artifact_generated` below.
+`docs/refactor/logging_design.md` Section 6 defines; see `_render_artifact_generated` below.
 """
 
 from __future__ import annotations
@@ -106,8 +106,8 @@ def _short_id(node_execution_id: str) -> str:
     """
     A 6-hex-char rendering of `node_execution_id` -- enough to visually
     correlate lines from the same firing without the noise of a full UUID
-    (docs/logging_design.md Section 6). Never itself a causality claim
-    (`docs/observability_invariants.md` #9): two lines sharing a short id
+    (docs/refactor/logging_design.md Section 6). Never itself a causality claim
+    (`docs/refactor/observability_invariants.md` #9): two lines sharing a short id
     mean "same firing," nothing about ordering between other lines.
     """
     return node_execution_id[:6]
@@ -249,7 +249,7 @@ class CompositePresenter(Presenter):
 
     Each sub-presenter's hook call is isolated individually so that one
     broken sub-presenter cannot prevent another from receiving the same
-    call (docs/observability_invariants.md #31) -- on top of, not instead
+    call (docs/refactor/observability_invariants.md #31) -- on top of, not instead
     of, `Session._safe_presenter_call`'s own isolation of the composite call
     itself.
     """

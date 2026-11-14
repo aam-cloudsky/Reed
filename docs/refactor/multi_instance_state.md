@@ -1,7 +1,7 @@
 # Multiple Artifact Instances: Implementation State
 
 Durable, human-readable record of this issue's slice-by-slice progress.
-`docs/refactor_state.md` no longer exists as a general mechanism (see
+`docs/history/refactor_state.md` no longer exists as a general mechanism (see
 `docs/refactor/multi_instance_execution_plan.md`, Section 6), so this file
 fills that role scoped to this one issue, alongside
 `.claude/reed-refactor/<run-id>/` (ephemeral, gitignored, per-run audit
@@ -379,7 +379,7 @@ autonomy authorization, disclosed rather than hidden)
 
 - `SKILL.md`'s bootstrap text corrected to name
   `docs/refactor/architectural_invariants.md` explicitly, instead of the
-  stale bare `docs/architectural_invariants.md` path (plan document Risk
+  stale bare `docs/refactor/architectural_invariants.md` path (plan document Risk
   R6).
 
 ## Git checkpoint adaptation

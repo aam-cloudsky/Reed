@@ -2,9 +2,9 @@
 RecordingStore / ProvenanceStore (Milestone O3, Slices O3a-O3e).
 
 Logical interfaces plus a V1 CSV implementation
-(docs/observability_goals.md Section 6): each `Execution` owns its own
+(docs/refactor/observability_goals.md Section 6): each `Execution` owns its own
 physical files under `<storage_root>/runs/<execution_id>/`, never shared
-across Executions (docs/observability_non_goals.md Section 7).
+across Executions (docs/refactor/observability_non_goals.md Section 7).
 `instruments.json` under `<storage_root>/flows/<flow_id>/` is
 write-once-if-absent (Section 17.3's resolved concurrency concern) --
 never rewritten by an ordinary session.
@@ -12,10 +12,10 @@ never rewritten by an ordinary session.
 CSV is the V1 implementation; `RecordingStore`/`ProvenanceStore` are
 `Protocol`s so a future Parquet (or other) backend is a drop-in swap
 behind the same interface, never a change to `ctx.record()` or to what a
-`Recording` means (docs/observability_goals.md Section 6).
+`Recording` means (docs/refactor/observability_goals.md Section 6).
 
-Durability boundary (corrected at Milestone O7, Slice O7c; docs/observability_goals.md
-Section 5; docs/observability_non_goals.md Section 5): `CSVRecordingStore.append_batch(...)`
+Durability boundary (corrected at Milestone O7, Slice O7c; docs/refactor/observability_goals.md
+Section 5; docs/refactor/observability_non_goals.md Section 5): `CSVRecordingStore.append_batch(...)`
 writes every `Recording` in one `NodeExecution`'s batch and flushes+fsyncs **once**, at the
 end of the batch -- not once per `ctx.record()` call. The original O3c implementation
 flushed and fsynced synchronously on every single `append(...)` call and rationalized this
@@ -148,7 +148,7 @@ class CSVRecordingStore:
         Append every `Recording` in `recordings` and flush+fsync **once**,
         after the last row -- the durability boundary is one NodeExecution's
         whole batch, not each individual `ctx.record()` call (Milestone O7,
-        Slice O7c; docs/observability_goals.md Section 5).
+        Slice O7c; docs/refactor/observability_goals.md Section 5).
 
         A no-op for an empty batch: no file write, no fsync, when a
         firing made no `ctx.record(...)` calls at all.
@@ -239,7 +239,7 @@ def merge_discovered_instruments(
     Instrument was already known statically). O7i removed prospective
     declaration entirely: Instruments are now discovered dynamically, the
     first time a Node actually calls `ctx.record(SomeInstrument, value)`
-    (docs/observability_goals.md Section 2.3, superseded by
+    (docs/refactor/observability_goals.md Section 2.3, superseded by
     `reed.observability.instrument`'s module docstring) -- so this
     manifest can only ever be as complete as what has actually been
     observed across every Session of this `flow_id` so far, and must be

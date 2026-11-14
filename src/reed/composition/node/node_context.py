@@ -2,9 +2,9 @@
 NodeContext (Slice 1A -- minimal structural shell; Slice 2D -- real
 `ctx.memory` / `ctx.last_output` runtime behavior).
 
-Scope established here across slices (docs/refactor_priority_order.md,
-Milestone 1 Slice 1A and Milestone 2 Slice 2D; docs/node_context_decision.md;
-docs/architectural_invariants.md #12-17):
+Scope established here across slices (docs/history/refactor_priority_order.md,
+Milestone 1 Slice 1A and Milestone 2 Slice 2D; docs/history/node_context_decision.md;
+docs/refactor/architectural_invariants.md #12-17):
 
     NodeContext[MemoryType, OutputType]
 
@@ -20,10 +20,10 @@ docs/architectural_invariants.md #12-17):
 established in Slice 1A (`domain_signature.py` detects and excludes a
 `NodeContext[...]`-annotated parameter from a node's dataflow input
 parameters); this slice makes the two capabilities `NodeContext` is
-allowed to expose (architectural_invariants.md #13; docs/non-goals.md,
+allowed to expose (architectural_invariants.md #13; docs/history/non-goals.md,
 "NodeContext Scope") real for the first time.
 
-`NodeContext` remains intentionally narrow (docs/non-goals.md, "NodeContext
+`NodeContext` remains intentionally narrow (docs/history/non-goals.md, "NodeContext
 Scope"): it must not become an `InputPort`, a service locator, or a proxy
 to `Session`, `Flow`, `Repository`, `Bus`, `Outpost`, or `NodeSession`. This
 class holds only the two plain values it is constructed with -- the
@@ -44,10 +44,10 @@ within one Session -- see `node_session.py`'s module docstring for exactly
 how) and `.last_output` (always `None` in this slice) on every access.
 This class must still not be instantiated directly by user code -- only
 `NodeSession.context` does, matching "injected by Reed"
-(docs/node_context_decision.md, "Core Thesis").
+(docs/history/node_context_decision.md, "Core Thesis").
 
 Explicitly out of scope for this slice (Milestone 2, later slices; see
-docs/refactor_priority_order.md's Priority 13 traceability split
+docs/history/refactor_priority_order.md's Priority 13 traceability split
 "context/memory wiring -> 2D; firing pipeline -> 2E"):
 
     - No node-function execution, no argument construction/injection
@@ -55,7 +55,7 @@ docs/refactor_priority_order.md's Priority 13 traceability split
       call arguments yet (2E).
     - No transactional commit, no `.publish(...)`, no wiring of
       `ctx.last_output` to any real committed value -- `last_output` is
-      always `None` in this slice. See docs/node_context_decision.md,
+      always `None` in this slice. See docs/history/node_context_decision.md,
       "Transaction Semantics": "failed firing -> no committed memory
       transition and no committed output; successful firing -> memory
       transition and output publication commit together" -- there is no
@@ -133,7 +133,7 @@ class NodeContext(Generic[MemoryType, OutputType]):
     def memory(self) -> MemoryType:
         """
         This `NodeSession`'s private, node-local mutable memory
-        (docs/node_context_decision.md, "Memory";
+        (docs/history/node_context_decision.md, "Memory";
         architectural_invariants.md #14, #16 -- scoped to `Session x
         NodeSession`, never shared across Sessions).
 
@@ -148,7 +148,7 @@ class NodeContext(Generic[MemoryType, OutputType]):
     def last_output(self) -> OutputType | None:
         """
         The latest successfully committed domain output for this
-        `NodeSession` (docs/node_context_decision.md, "Last Output";
+        `NodeSession` (docs/history/node_context_decision.md, "Last Output";
         architectural_invariants.md #15 -- `NodeMemory != last_output`).
 
         Always `None` in this slice: nothing commits a domain output yet
@@ -176,7 +176,7 @@ class NodeContext(Generic[MemoryType, OutputType]):
         (flow_id, node_id, Instrument) binding exists -- see
         `reed.observability.instrument`'s module docstring, "Instrument
         Definition vs. Instrument Binding". `value` is scalar only
-        (docs/observability_non_goals.md Section 3) and should match the
+        (docs/refactor/observability_non_goals.md Section 3) and should match the
         Instrument's declared `T` (a static type checker can verify this
         through this method's own generic signature; see
         `instrument.py`'s "Typing" section for why this is not also
@@ -184,7 +184,7 @@ class NodeContext(Generic[MemoryType, OutputType]):
 
         Returns immediately -- this call is synchronous but the actual
         write to a durable store (Milestone O3) is not this method's
-        concern; see docs/observability_goals.md Section 5/9.
+        concern; see docs/refactor/observability_goals.md Section 5/9.
 
         Raises `RuntimeError` if this `NodeContext` was constructed
         without a recorder (i.e. not built by a real firing --

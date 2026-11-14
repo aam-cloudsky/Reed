@@ -12,10 +12,10 @@ design work actually done this cycle rather than reusing that refactor's content
 
 ## What existed already
 
-Five rounds of design review, captured in full in `docs/observability_design.md`
-(~1,260 lines), plus two documents distilling it: `docs/observability_goals.md` (target
-public API and mechanics) and `docs/observability_non_goals.md` (explicitly rejected paths).
-A fourth document, `docs/observability_invariants.md`, already existed as a compact
+Five rounds of design review, captured in full in `docs/refactor/observability_design.md`
+(~1,260 lines), plus two documents distilling it: `docs/refactor/observability_goals.md` (target
+public API and mechanics) and `docs/refactor/observability_non_goals.md` (explicitly rejected paths).
+A fourth document, `docs/refactor/observability_invariants.md`, already existed as a compact
 checklist of properties that must remain true — it was reviewed against the design record
 during this session and found accurate and consistent with it. No production code
 (`src/`) has been touched for observability yet; this is planning/harness work only, same
@@ -23,17 +23,17 @@ posture as the prior refactor's initial harness-building session.
 
 ## What this session added
 
-- `docs/observability_refactor_guide.md` — the implementation policy for building
+- `docs/refactor/observability_refactor_guide.md` — the implementation policy for building
   observability: an Authority Order across the observability documents, a fundamental
   rule ("implement the decided architecture, do not redesign it"), and explicit callouts of
   the two decisions the design record left unresolved (Section 2 of that document), so an
   implementing agent cannot silently freeze a default for either one.
-- `docs/observability_agent_protocol.md` — the operational entry point for an implementing
+- `docs/refactor/observability_agent_protocol.md` — the operational entry point for an implementing
   agent: a navigation map, a context-loading rule, a Slice-To-Documentation routing table,
   a slice-plan template, non-goals enforcement, and stop conditions specific to this
   workstream (in particular: stop if a slice would resolve one of the two open items as an
   unplanned side effect rather than its own dedicated slice).
-- `docs/observability_harness.md` (this document) — the milestone/slice decomposition
+- `docs/refactor/observability_harness.md` (this document) — the milestone/slice decomposition
   below, plus the harness-structure table.
 
 ## Harness structure (one responsibility per document)
@@ -215,8 +215,8 @@ whatever state Issue #4's merged PR (#17) left the branch in.
 ## Issue #8 — Structured Logging and Semantic Terminal Rendering: slice plan
 
 (Appended after Issue #7's Milestones O1-O7 landed; this section is Issue #8's own
-slice-by-slice plan, executed and closed out in one pass alongside `docs/logging_design.md`
-and `docs/observability_invariants.md`'s Issue #8 additions.)
+slice-by-slice plan, executed and closed out in one pass alongside `docs/refactor/logging_design.md`
+and `docs/refactor/observability_invariants.md`'s Issue #8 additions.)
 
 | Slice | Objective | Files | Invariant | Tests | Completion |
 |-------|-----------|-------|-----------|-------|------------|

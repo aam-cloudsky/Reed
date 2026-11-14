@@ -6,7 +6,7 @@ observability model already collected at Issue #7's semantic boundaries --
 `NodeExecutionIdentity`, `ProvenanceEvent` ("generated"/"used"), `Recording`, and a
 Node firing's own duration/error bookkeeping. It is never an independent source of
 truth: nothing here computes or stores anything Reed did not already commit via
-`ExecutionTrace`/`ProvenanceStore`/`RecordingStore` (see docs/logging_design.md Section
+`ExecutionTrace`/`ProvenanceStore`/`RecordingStore` (see docs/refactor/logging_design.md Section
 3). `StructuredLogPresenter` builds one `LogEvent` per `Presenter` hook call it
 receives and hands its `to_dict()` to a sink callable -- by default, one JSON line
 printed to stdout.
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 Severity = Literal["info", "warning", "error"]
 
 # A small, closed vocabulary (mirrors `Instrument.kind`'s own closed-set reasoning,
-# docs/observability_goals.md) -- never a free-form string a caller can invent.
+# docs/refactor/observability_goals.md) -- never a free-form string a caller can invent.
 EventName = Literal[
     "node_started",
     "node_finished",
@@ -51,7 +51,7 @@ class LogEvent:
     """
     One structured log event. Base fields are always present; event-specific
     fields are `None` unless `event` is the kind that fills them in (Section 5 of
-    docs/logging_design.md). `to_dict()` drops every `None`-valued field so the
+    docs/refactor/logging_design.md). `to_dict()` drops every `None`-valued field so the
     serialized shape only ever shows fields meaningful for that `event`.
     """
 

@@ -1,13 +1,13 @@
 # Reed Observability — Goals (Desired API and Mechanics)
 
-Status: companion to `docs/observability_design.md` (the full design record, rounds 1-5).
+Status: companion to `docs/refactor/observability_design.md` (the full design record, rounds 1-5).
 This document distills that record into what is actually to be built: the target public
 API, the identity model, the storage mechanics, and the guarantees Reed commits to. Where
 this document and `observability_design.md` conflict, `observability_design.md`'s latest
 round (17) is authoritative and this document should be updated to match — this file is a
 summary for implementers, not a second source of truth.
 
-See also `docs/observability_non_goals.md` for what is explicitly out of scope or rejected.
+See also `docs/refactor/observability_non_goals.md` for what is explicitly out of scope or rejected.
 
 ## 1. Core vocabulary
 

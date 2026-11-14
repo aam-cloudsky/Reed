@@ -7,7 +7,7 @@ This document defines the execution protocol for building Reed's observability s
 their local, offline persistence.
 
 The architectural design has already been established, across five rounds of review, in
-`docs/observability_design.md`. The objective of this work is to **implement the decided
+`docs/refactor/observability_design.md`. The objective of this work is to **implement the decided
 architecture** — not to redesign it, and not to re-litigate decisions that document already
 made and revised.
 
@@ -21,17 +21,17 @@ silently picking a side.
 
 Before implementing any slice, read the relevant observability documents.
 
-`docs/observability_design.md` is the full design record — every round of revision, every
+`docs/refactor/observability_design.md` is the full design record — every round of revision, every
 correction, every rejected alternative, in the order they happened. It is long by design:
 it is the *history* of how the decision was reached, not just the decision itself.
 
-`docs/observability_goals.md` distills that record into the target public API and
+`docs/refactor/observability_goals.md` distills that record into the target public API and
 mechanics — read this first for "what to build."
 
-`docs/observability_non_goals.md` defines what must **not** be introduced while building
+`docs/refactor/observability_non_goals.md` defines what must **not** be introduced while building
 this — read this first for "what to avoid."
 
-`docs/observability_invariants.md` is the compact, checkable list of properties that must
+`docs/refactor/observability_invariants.md` is the compact, checkable list of properties that must
 remain true throughout implementation.
 
 When implementation convenience conflicts with a decision recorded in
@@ -44,24 +44,24 @@ invent one. Stop and report the ambiguity.
 When sources disagree, resolve the disagreement by rank, not by convenience. From highest
 to lowest authority:
 
-1. **`docs/observability_design.md`** — the full design record (rounds 1-5). This is the
+1. **`docs/refactor/observability_design.md`** — the full design record (rounds 1-5). This is the
    accepted architectural decision, including every correction made along the way. Where a
    later round supersedes an earlier one, the later round governs (the document says so
    explicitly at each such point — e.g. Section 16 supersedes 11.2/12.3/12.5/14).
-2. **`docs/observability_invariants.md`** — a compact restatement of the decisions above.
+2. **`docs/refactor/observability_invariants.md`** — a compact restatement of the decisions above.
    It carries the same authority as the decisions it restates. If an invariant appears to
    say something the design record does not support, treat this as a documentation bug in
    the invariant, not a license to reinterpret the decision.
-3. **`docs/observability_non_goals.md`** — explicit scope boundaries derived from the
+3. **`docs/refactor/observability_non_goals.md`** — explicit scope boundaries derived from the
    design record. Non-goals may narrow how a decision is implemented; they cannot justify
    violating a decision.
-4. **`docs/observability_goals.md`** — the target public API and mechanics, distilled for
+4. **`docs/refactor/observability_goals.md`** — the target public API and mechanics, distilled for
    implementers. Authoritative as a concrete summary, but subordinate to the design record:
    if `observability_goals.md` and `observability_design.md` disagree, that is a drift to
    fix in `observability_goals.md`, not a license to implement the goals doc's version.
 5. **This document (`observability_refactor_guide.md`)** — the implementation policy for
    building the decisions above. It enacts them; it does not add architecture.
-6. **`docs/observability_harness.md`** — advisory planning and milestone/slice
+6. **`docs/refactor/observability_harness.md`** — advisory planning and milestone/slice
    decomposition. Useful for sequencing, non-binding where it conflicts with 1-5.
 7. **Target architecture contract tests** (once written, e.g.
    `tests/test_observability_contract.py`) — codify the intended future API and behavior.
@@ -243,7 +243,7 @@ The same regime as Reed's prior refactor applies here:
 # 11. Incremental Strategy
 
 Do not attempt to build this in one pass. The authoritative milestone/slice breakdown lives
-in `docs/observability_harness.md` — do not restate or re-derive it here.
+in `docs/refactor/observability_harness.md` — do not restate or re-derive it here.
 
 > First make the identity boundary real (Milestone O1). Then build on it.
 

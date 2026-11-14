@@ -1,8 +1,8 @@
 """
 ArtifactDescriptor (Slice 1B, Priority 3).
 
-Scope for this slice (docs/refactor_priority_order.md, Milestone 1, Slice
-1B; docs/implementation_refactor_assessment.md #11):
+Scope for this slice (docs/history/refactor_priority_order.md, Milestone 1, Slice
+1B; docs/history/implementation_refactor_assessment.md #11):
 
     ArtifactDescriptor
         domain_type
@@ -12,8 +12,8 @@ Scope for this slice (docs/refactor_priority_order.md, Milestone 1, Slice
 This is intentionally minimal: it names one domain artifact's identity at
 a node's signature boundary. It is NOT `ArtifactRecord` (Priority 6,
 Milestone 2 slice 2C) -- it carries no value, no version, no provenance.
-See `docs/non-goals.md`, "ArtifactRecord Is Not A Blind Parcel Rename",
-and `docs/parcel_boundary_decision.md`:
+See `docs/history/non-goals.md`, "ArtifactRecord Is Not A Blind Parcel Rename",
+and `docs/history/parcel_boundary_decision.md`:
 
     Domain type == artifact semantic identity
     ArtifactRecord == Reed-managed versioned record
@@ -24,9 +24,8 @@ Slice 21A (GitHub issue #21, "Distinguish triggering inputs from sampled
 inputs in node firing rules") adds `InputRole` and a defaulted
 `input_role` field, purely additive: every existing construction site
 keeps working unchanged because the field defaults to
-`InputRole.TRIGGERING`, today's only behavior. See
-`references/ingested/reed-refactor-protocol-recovered-reference.md` and
-`reed-sampled-inputs-proposal.md` for the full motivation; Slice 21B
+`InputRole.TRIGGERING`, today's only behavior (motivation: GitHub
+issue #21, "Distinguish triggering inputs from sampled inputs"); Slice 21B
 wires detection of `Annotated[T, Sampled]` into this field, and Slice
 21C changes how `Session` reads it for firing eligibility.
 

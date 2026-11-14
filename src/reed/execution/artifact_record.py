@@ -3,10 +3,10 @@ ArtifactRecord (Slice 2C, Priorities 6 and 7 -- `ArtifactRecord`;
 `ParcelProvenance`/`ParcelVersion` mechanics carried forward as
 `ArtifactProvenance`/`ArtifactVersion`).
 
-Scope for this slice (docs/refactor_priority_order.md, Milestone 2, Slice
+Scope for this slice (docs/history/refactor_priority_order.md, Milestone 2, Slice
 2C row; Priority 6 "Create `ArtifactRecord`"; Priority 7 "`ParcelProvenance`
-/ `ParcelVersion`"; docs/parcel_boundary_decision.md, "Parcel As Internal
-Envelope"; docs/architectural_invariants.md #7-11):
+/ `ParcelVersion`"; docs/history/parcel_boundary_decision.md, "Parcel As Internal
+Envelope"; docs/refactor/architectural_invariants.md #7-11):
 
     public / node-facing                Reed execution infrastructure
 
@@ -24,13 +24,13 @@ from the legacy `Parcel` model (`src/reed/synchronization/parcel/parcel.py`),
 where a domain type is instead defined by *subclassing* `Parcel` directly
 (`class RawImage(Parcel): ...`) -- so the domain data and Reed's envelope
 are the same object there. `ArtifactRecord` wraps a domain value instead of
-being subclassed by it, matching docs/parcel_boundary_decision.md's target
+being subclassed by it, matching docs/history/parcel_boundary_decision.md's target
 boundary diagram (`unwrap: Parcel[T] -> T`, `wrap: U -> Parcel[U]`) and the
-conceptual mapping in docs/implementation_refactor_assessment.md #8:
+conceptual mapping in docs/history/implementation_refactor_assessment.md #8:
 "ArtifactRecord[DomainType]: Reed-managed committed record containing
 value, version, provenance, and dependencies."
 
-Preserved mechanics (docs/refactor_priority_order.md, Priority 7,
+Preserved mechanics (docs/history/refactor_priority_order.md, Priority 7,
 "preserve current versioning behavior" / "preserve current provenance
 behavior"): `ArtifactVersion` and `ArtifactProvenance` mirror
 `ParcelVersion`/`ParcelProvenance`'s existing, regression-tested shape and
@@ -54,7 +54,7 @@ for `TriggerPolicy` alongside the untouched `PropagationPolicy` (Slice 1E)
 and `ArtifactDependencyGraph` alongside the untouched `DependencyRegistry`
 (Slice 1D). This is a deliberate, narrower reading of Priority 7 item 3
 than a literal in-place rename, reported rather than silently chosen --
-see docs/refactor_state.md's Slice 2C record for the full reasoning.
+see docs/history/refactor_state.md's Slice 2C record for the full reasoning.
 
 Explicitly out of scope for this slice (Milestone 2, later slices):
 
@@ -63,7 +63,7 @@ Explicitly out of scope for this slice (Milestone 2, later slices):
       wrap direction ("DomainValue -> wrap -> ArtifactRecord ->
       repository") as "eventual", not this slice -- that is 2E's
       "commit ArtifactRecord" responsibility
-      (docs/refactor_priority_order.md, Slice 2E row). Constructing an
+      (docs/history/refactor_priority_order.md, Slice 2E row). Constructing an
       `ArtifactRecord` directly (`ArtifactRecord(value=...)`) is plain
       object construction, not a firing-tied "wrap"; it is what this
       slice's own tests use to build fixtures.
@@ -78,10 +78,10 @@ Explicitly out of scope for this slice (Milestone 2, later slices):
       "disproportionate migration" this slice's task instruction says to
       report rather than force) or making `ArtifactRecord` a `Parcel`
       subclass (architecturally backwards -- see "ArtifactRecord Is Not
-      A Blind Parcel Rename" in docs/non-goals.md). This slice does not
+      A Blind Parcel Rename" in docs/history/non-goals.md). This slice does not
       need repository storage to work: nothing commits an
       `ArtifactRecord` anywhere yet (that is 2E's job), so there is
-      nothing to store. See docs/refactor_state.md's Open Architectural
+      nothing to store. See docs/history/refactor_state.md's Open Architectural
       Questions for the recorded finding: how `session.repository` will
       actually hold `ArtifactRecord`s is a decision Slice 2E (or 3A)
       must make, not this slice.
@@ -94,8 +94,8 @@ Explicitly out of scope for this slice (Milestone 2, later slices):
     - No `on_output` dispatch (sync or async, 2F), no
       `callback_failures` (2F), no stateful-firing serialization (2G).
     - No `ArtifactRepository` rename (Milestone 3, slice 3A;
-      docs/non-goals.md, "Broad Renaming"; see
-      docs/implementation_refactor_assessment.md #9).
+      docs/history/non-goals.md, "Broad Renaming"; see
+      docs/history/implementation_refactor_assessment.md #9).
     - No `ArtifactManager`, `RecordFactory`, `RepositoryAdapter`,
       `ExecutionManager`, `ArtifactService`, `StorageProtocol`, or
       equivalent speculative abstraction -- `ArtifactRecord` is a plain,
@@ -176,14 +176,14 @@ class ArtifactProvenance:
 
     1. `producer` references a `NodeSession` (Slice 2B; "one node
        participation materialized inside one session" --
-       docs/architectural_decision.md, "Node Session") instead of the
+       docs/refactor/architectural_decision.md, "Node Session") instead of the
        legacy `NodeId`, since `ArtifactRecord`s belong to the new
        `Session`/`NodeSession` execution model, not the legacy
        `Bus`/`Outpost` one. Stays `None` until a real firing sets it --
        no firing exists yet (Slice 2E), so this field is always `None`
        in this slice's own tests.
     2. `dependencies` is keyed by domain type, not by `Parcel` subclass
-       type (docs/refactor_priority_order.md, Priority 7, item 4).
+       type (docs/history/refactor_priority_order.md, Priority 7, item 4).
     3. `origin: Optional[ArtifactOrigin]` (Slice 22B,
        docs/refactor/session_snapshot_decision.md section 6; no
        equivalent field exists on legacy `ParcelProvenance`). Stays
@@ -308,9 +308,8 @@ class ArtifactRecord(Generic[DomainType]):
         *same* object rather than building a new `ArtifactRecord`. Every
         other reference to this record -- e.g. one already returned by
         `ArtifactRepository.get_artifact_record(...)` and held by a
-        caller -- is therefore **aliased** to it (see
-        `references/ingested/glossary.md`, "Aliasing" / "In-place
-        mutation") and observes the mutation too, rather than retaining
+        caller -- is therefore **aliased** to it (in-place mutation) and
+        observes the mutation too, rather than retaining
         the independent **value semantics** an `ArtifactRecord` had
         before this slice. A caller that still needs the old guarantee
         -- an independent snapshot unaffected by a later `.advance()` --
