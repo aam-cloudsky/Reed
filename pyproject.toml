@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "reed-sync"
-version = "0.1.0"
+version = "2.0.0"
 description = "A state synchronization engine for declarative dataflow applications"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -16,6 +16,9 @@ license = "Apache-2.0"
 
 authors = [
     { name = "Davi Guanabara de Aragão", email = "davi_guanabara@live.com" },
+    { name = "Cesar Augusto Cavalheiro Marcondes" },
+    { name = "Filipe Alves Neto Verri" },
+    { name = "Marcos Ricardo Omena de Albuquerque Máximo" },
 ]
 
 keywords = [
@@ -38,10 +41,10 @@ classifiers = [
 
 
 [project.urls]
-Homepage = "https://github.com/DaviGuanabara/Reed"
-Repository = "https://github.com/DaviGuanabara/Reed"
-Issues = "https://github.com/DaviGuanabara/Reed/issues"
-Documentation = "https://github.com/DaviGuanabara/Reed"
+Homepage = "https://github.com/aam-cloudsky/Reed"
+Repository = "https://github.com/aam-cloudsky/Reed"
+Issues = "https://github.com/aam-cloudsky/Reed/issues"
+Documentation = "https://github.com/aam-cloudsky/Reed"
 ORCID = "https://orcid.org/0009-0006-7634-6018"
 LinkedIn = "https://www.linkedin.com/in/davi-guanabara-91b3ab82/"
 
