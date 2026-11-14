@@ -4,12 +4,12 @@ Foundations).
 
 This package is deliberately separate from `reed.transportation.observability`,
 which is the pre-Issue-4 Bus/Depot/Outpost-era tracing machinery
-(`docs/observability_non_goals.md` Section 9: do not revive or extend it).
+(`docs/refactor/observability_non_goals.md` Section 9: do not revive or extend it).
 Nothing in this package imports from, or is imported by, that legacy
 package.
 
-See `docs/observability_design.md`, `docs/observability_goals.md`, and
-`docs/observability_harness.md` for the architecture this package
+See `docs/refactor/observability_design.md`, `docs/refactor/observability_goals.md`, and
+`docs/refactor/observability_harness.md` for the architecture this package
 implements incrementally, slice by slice.
 """
 

@@ -1,9 +1,9 @@
 """
 ArtifactDependencyGraph (Slice 1D, Priority 8).
 
-Scope for this slice (docs/refactor_priority_order.md, Milestone 1, Slice
-1D; docs/parcel_boundary_decision.md, "Unique Producer Responsibility" and
-"No Self-Flow"; docs/architecture.md, "Dependency Management"):
+Scope for this slice (docs/history/refactor_priority_order.md, Milestone 1, Slice
+1D; docs/history/parcel_boundary_decision.md, "Unique Producer Responsibility" and
+"No Self-Flow"; docs/refactor/architecture.md, "Dependency Management"):
 
     ArtifactDependencyGraph
         producers by artifact type
@@ -24,7 +24,7 @@ This is additive alongside the existing `DependencyRegistry`
 (`dependency_registry.py`), which is NOT modified and remains the
 current, regression-protected path (`tests/test_current_regression_artifacts_repository.py::test_dependency_registry_*`).
 The two are not merged in this slice -- see the Rename Rule in
-`docs/refactor_agent_protocol.md`: "First make the boundary real. Then
+`docs/history/refactor_agent_protocol.md`: "First make the boundary real. Then
 rename the boundary." The old registry is keyed by an arbitrary
 `module_type` and `Parcel` subclass and may allow a module to produce
 multiple Parcel types; `ArtifactDependencyGraph` is keyed by `FlowNode`
@@ -50,7 +50,7 @@ validation alongside self-flow and duplicate-producer rejection:
 consumed artifact but none with `InputRole.TRIGGERING`
 (`ZeroTriggeringInputsError`), unless its `trigger_policy` is
 `MANUAL`. Such a node could never become eligible to fire through the
-`Session.publish(...)` cascade (Slice 21C: `_is_eligible_to_fire`
+`Session.push()` propagation (Slice 21C: `_is_eligible_to_fire`
 evaluates both TriggerPolicy branches over `flow_node`'s
 TRIGGERING-role consumed types only) -- surfacing this as a
 registration-time error, matching this file's own
@@ -58,7 +58,7 @@ SelfFlowError/DuplicateArtifactProducerError precedent, is preferred
 over letting such a node silently never fire. A node with zero
 consumed artifacts at all (a pure source/producer node) is exempt --
 it was never part of this concern before Sampled existed, and is
-never a `Session.publish(...)` cascade consumer of anything either way.
+never a `Session.push()` propagation consumer of anything either way.
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ class ZeroTriggeringInputsError(RuntimeError):
     with `InputRole.TRIGGERING`, under a non-`MANUAL` `TriggerPolicy`
     (architectural_invariants.md #18-20; Slice 21C, "Session eligibility
     redefinition"). Such a node could never become eligible to fire
-    through the automatic `Session.publish(...)` cascade -- both
+    through the automatic `Session.push()` propagation -- both
     `TriggerPolicy.ALL_INPUTS_CHANGED` and `TriggerPolicy.ANY_INPUT_CHANGED`
     evaluate eligibility over TRIGGERING-role consumed types only -- so a
     node with none can only ever be fired by a `MANUAL` caller.

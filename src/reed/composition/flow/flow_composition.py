@@ -7,8 +7,8 @@ part of Priority 13 -- adds a read-only `flow_nodes` accessor so
 
 Slice 1F connected the composition collaborators already built in
 Slices 1A-1E into the target composition surface
-(docs/flow_composition_implementation_basis.md, "Move `@flow` Out
-Of The Main API Path", "`Flow.add(...)`"; docs/refactor_priority_order.md,
+(docs/history/flow_composition_implementation_basis.md, "Move `@flow` Out
+Of The Main API Path", "`Flow.add(...)`"; docs/history/refactor_priority_order.md,
 Priority 11):
 
     NodeDefinition
@@ -19,8 +19,8 @@ Priority 11):
         v
     ArtifactDependencyGraph
 
-`Flow` is an explicit composition object (docs/architectural_decision.md,
-"Flow Composition"; docs/refactor_priority_order.md, Priority 11 target):
+`Flow` is an explicit composition object (docs/refactor/architectural_decision.md,
+"Flow Composition"; docs/history/refactor_priority_order.md, Priority 11 target):
 it owns `FlowNode` registrations and validates topology (unique producer,
 self-flow) through one `ArtifactDependencyGraph` per `Flow` instance. It
 owns no Session-specific execution state (architectural_invariants.md #4, #6:
@@ -35,7 +35,7 @@ only -- this slice does not evaluate `trigger_policy` or invoke
 imply execution, `TriggerPolicy` decides eligibility but nothing here
 evaluates that eligibility, and `TriggerPolicy != on_output`).
 
-Slice 2A (docs/architectural_decision.md, "Session"; architectural_invariants.md
+Slice 2A (docs/refactor/architectural_decision.md, "Session"; architectural_invariants.md
 #4, #6 -- `Flow != Session`, `Flow` owns no Session-specific execution state) adds
 `Flow.session()`, which creates and returns a new `Session`
 (`reed.execution.session.Session`) associated with this `Flow`. `Flow` itself
@@ -64,12 +64,12 @@ Explicitly out of scope for this slice (Milestone 2, later slices):
       (sync or async, 2F), no `callback_failures` (2F), no
       stateful-firing serialization (2G), no `ArtifactRepository`
       migration.
-    - No `Flow.connect(...)` (docs/non-goals.md, "Manual Topology
+    - No `Flow.connect(...)` (docs/history/non-goals.md, "Manual Topology
       Connection"): topology is inferred from producer/consumer artifact
       types via `ArtifactDependencyGraph`, not from an explicit connect
       step.
     - No new node-participation identity semantics
-      (docs/non-goals.md, "Multiple Registrations of the Same Node
+      (docs/history/non-goals.md, "Multiple Registrations of the Same Node
       Definition") -- unchanged from Slice 1C.
 
 This class is unrelated to the old, decorator-bound
@@ -133,7 +133,7 @@ class Flow:
     def flow_id(self) -> str:
         """
         This `Flow`'s stable observability identity (Milestone O1, Slice
-        O1a/O1b; docs/observability_design.md Section 18 -- `flow_id`/
+        O1a/O1b; docs/refactor/observability_design.md Section 18 -- `flow_id`/
         `node_id` cross-session stability).
 
         Deterministically derived from the ordered tuple of this Flow's
@@ -148,13 +148,13 @@ class Flow:
         Flow that is still being composed (nodes added after an earlier
         read) is never stuck with a stale value.
 
-        Two consequences, both intentional (docs/observability_design.md
+        Two consequences, both intentional (docs/refactor/observability_design.md
         Section 17.1/17.2 and Section 18):
 
         1. Running the same script twice (the same sequence of
            `Flow.add(...)` calls) in two separate OS processes produces
            the same `flow_id` both times -- no user-supplied name or
-           identifier is required (docs/observability_non_goals.md
+           identifier is required (docs/refactor/observability_non_goals.md
            Section 8: no `name=` parameter on `Flow.add(...)`).
         2. A code change to the Flow's composition (a node added,
            removed, or reordered) changes `flow_id` automatically, as a
@@ -182,7 +182,7 @@ class Flow:
         This `Flow`'s `ArtifactDependencyGraph` (Slice 2H).
 
         A minimal, read-only accessor mirroring the `flow_nodes`
-        property's exact precedent above -- added so `Session.publish(...)`
+        property's exact precedent above -- added so `Session.push()`
         can query `consumers_of(...)` to discover cascade-eligible
         FlowNodes without reaching into `Flow`'s private state or
         `Session` duplicating a second producer/consumer index of its own.
@@ -271,7 +271,7 @@ class Flow:
     ) -> Session:
         """
         Create a new `Session` -- one concrete execution instance of this
-        `Flow` (Slice 2A; docs/architectural_decision.md, "Session").
+        `Flow` (Slice 2A; docs/refactor/architectural_decision.md, "Session").
 
         Each call returns a distinct `Session`. `Flow` records nothing
         about the `Session`s it creates, so it remains a reusable

@@ -19,9 +19,9 @@ Artifact model, where a Node's *produced/consumed types* are the single
 source of truth for what a Node does -- there is no second, parallel
 "declare your outputs again" step for Artifacts. Instruments should follow
 the same principle: **the Instrument type itself is the semantic
-Instrument Definition** (docs/observability_goals.md Section 1's "the
+Instrument Definition** (docs/refactor/observability_goals.md Section 1's "the
 logical unit of observation"), the same way an Artifact's Python type is
-the semantic Artifact Definition (docs/architectural_decision.md). A
+the semantic Artifact Definition (docs/refactor/architectural_decision.md). A
 Node's declared Instrument schema is redundant with the type the Node
 already references in its own body.
 
@@ -45,7 +45,7 @@ during execution** the first time a Node actually calls
 Flow. This is a deliberate non-goal boundary, not an oversight: static
 `AST` inspection of a Node's body to recover "which Instrument classes
 might this function call ctx.record(...) with" is explicitly rejected
-(docs/observability_non_goals.md's general "no reflection-based magic"
+(docs/refactor/observability_non_goals.md's general "no reflection-based magic"
 posture) -- `describe`'s static, no-execution report
 (`reed.observability.describe.describe_flow`) can therefore no longer
 claim prospective Instrument knowledge; see that module's docstring for
@@ -78,7 +78,7 @@ signature (`record(self, instrument: type[Instrument[T]], value: T,
 ...)`  -- see `node_context.py`), as far as Python's type system
 reasonably permits without a runtime dependent-type checker. Reed does not
 additionally enforce this same T <-> value relationship at runtime beyond
-the pre-existing scalar-type check (`docs/observability_non_goals.md`
+the pre-existing scalar-type check (`docs/refactor/observability_non_goals.md`
 Section 3) -- adding a full runtime type-check against a `Generic[T]`
 parameter would require reading `__orig_bases__`/`__class_getitem__`
 internals with no corresponding static-typing benefit, since a type
@@ -96,9 +96,9 @@ T = TypeVar("T", bound="str | int | float | bool")
 class InstrumentKind(Enum):
     """
     Restricted to `GAUGE`, `COUNTER`, and `UPDOWN_COUNTER` for V1
-    (docs/observability_non_goals.md Section 2: no `Histogram`, no OTel
+    (docs/refactor/observability_non_goals.md Section 2: no `Histogram`, no OTel
     Metric SDK types). `EVENT` is deliberately absent -- see Slice O2e
-    (docs/observability_design.md Section 19) for its resolution: a
+    (docs/refactor/observability_design.md Section 19) for its resolution: a
     lazily-named fact with no `Instrument` behind it at all is simply not
     an Instrument (Recording.kind is `None` for it).
     """
@@ -157,7 +157,7 @@ class Instrument(Generic[T]):
             if not isinstance(kind, InstrumentKind):
                 raise TypeError(
                     f"{cls.__name__}.kind must be an InstrumentKind member, "
-                    f"got {kind!r} (docs/observability_non_goals.md Section 2 "
+                    f"got {kind!r} (docs/refactor/observability_non_goals.md Section 2 "
                     "-- no Histogram, no arbitrary kind values)."
                 )
         if "unit" in cls.__dict__:

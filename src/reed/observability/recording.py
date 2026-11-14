@@ -1,14 +1,14 @@
 """
 Recording (Milestone O2, Slices O2c/O2d).
 
-One observation of one Instrument (docs/observability_goals.md Section 1).
-`value` is strictly scalar (docs/observability_non_goals.md Section 3 --
+One observation of one Instrument (docs/refactor/observability_goals.md Section 1).
+`value` is strictly scalar (docs/refactor/observability_non_goals.md Section 3 --
 no mappings, dataclasses, lists, or nested structures; a compound fact is
 multiple explicit calls with dot-segmented names, never auto-flattened).
 
 This is the in-memory representation only (Milestone O2). Milestone O3
 gives it a durable `recordings.csv` row shape; the column names chosen
-here already match docs/observability_goals.md Section 6 so O3 does not
+here already match docs/refactor/observability_goals.md Section 6 so O3 does not
 need to rename anything, only serialize it.
 """
 

@@ -51,6 +51,7 @@ def test_feed_commits_a_versioned_record_with_origin_external():
     session = flow.session()
 
     session.feed(RawReading(1.0))
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     record = session.repository.get_artifact_record(RawReading)
     assert record is not None
@@ -60,6 +61,7 @@ def test_feed_commits_a_versioned_record_with_origin_external():
     assert record.version == ArtifactVersion.initial()
 
     session.feed(RawReading(2.0))
+    session.push()  # feed only stages the value; push() applies it (#34)
     second = session.repository.get_artifact_record(RawReading)
     assert second is record
     assert record.version.number == 2
@@ -100,6 +102,8 @@ def test_feed_marks_triggering_consumers_fresh_but_not_sampled_consumers():
     from reed.execution.instance_key import InstanceKey
 
     session.feed(CalibrationOffset(0.5))
+    # Applies the staged feed without propagating it, as push() does first (#34).
+    session._apply_pending()
     fresh = session._fresh_since_last_firing.get(flow_node, {}).get(
         InstanceKey.singleton(), set()
     )
@@ -112,6 +116,8 @@ def test_feed_marks_triggering_consumers_fresh_but_not_sampled_consumers():
     )
 
     session.feed(RawReading(10.0))
+    # Applies the staged feed without propagating it, as push() does first (#34).
+    session._apply_pending()
     fresh = session._fresh_since_last_firing.get(flow_node, {}).get(
         InstanceKey.singleton(), set()
     )
@@ -130,6 +136,7 @@ def test_feed_may_overwrite_a_type_that_already_has_a_declared_producer():
     session = flow.session()
 
     session.feed(CalibratedReading(99.0))
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     record = session.repository.get_artifact_record(CalibratedReading)
     assert record is not None
@@ -156,6 +163,7 @@ def test_feed_fires_generated_provenance_and_trace_events_and_dispatches_on_outp
     trace_before = len(session.trace.events)
 
     session.feed(CalibratedReading(42.0))
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     assert session._execution_seq_counter == seq_before + 1
 
@@ -177,6 +185,7 @@ def test_fed_record_has_empty_dependencies():
     session = flow.session()
 
     session.feed(RawReading(5.0))
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     record = session.repository.get_artifact_record(RawReading)
     assert record.provenance.dependencies == {}

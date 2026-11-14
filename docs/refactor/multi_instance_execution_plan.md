@@ -4,7 +4,7 @@ Status: proposal, not yet an accepted decision. This document is the scope
 statement and slice map for the new issue "Support multiple artifact
 instances and per-instance node execution" (title and description drafted
 separately, not yet filed as a GitHub issue at the time of writing). It
-plays the same role `docs/refactor_priority_order.md` played for issue #4,
+plays the same role `docs/history/refactor_priority_order.md` played for issue #4,
 scoped to this one issue only, since that file no longer exists as a
 general-purpose document (see
 `references/ingested/reed-docs-drift-issue-21-handoff.md`).
@@ -87,13 +87,13 @@ less.
 
 ### 1.4 Documentation-authority note
 
-`docs/architectural_invariants.md` (top level) is stale: it still reads
+`docs/refactor/architectural_invariants.md` (top level) is stale: it still reads
 `Run`/`NodeRuntime` and stops at invariant 26. The current, authoritative
 version lives at `docs/refactor/architectural_invariants.md` (invariants
 27 through 33, added for issue #22) per `CLAUDE.md`'s own folder-structure
 note. `.claude/agents/reed-architect.md` already resolves this correctly
 ("currently physically under `docs/refactor/`"), but `.claude/skills/reed-refactor/SKILL.md`'s
-own bootstrap section still cites the bare `docs/architectural_invariants.md`
+own bootstrap section still cites the bare `docs/refactor/architectural_invariants.md`
 path without the `docs/refactor/` prefix. This is a real, if narrow,
 authority-resolution risk for a fresh Architect invocation and is called
 out below (Risk R6).
@@ -349,7 +349,7 @@ already requires.
 **Prerequisite before MI-A's first PLAN.** Once this plan is reviewed,
 committing it under `docs/refactor/` (this file, as delivered) gives the
 Architect a real file to read as this issue's scope statement, the same
-way `docs/refactor_priority_order.md` served issue #4. Filing the GitHub
+way `docs/history/refactor_priority_order.md` served issue #4. Filing the GitHub
 issue itself (title, description, and the review comment already drafted)
 is independently useful as the durable, human-facing record, but the
 Architect subagent reads repository files, not GitHub, so this document's

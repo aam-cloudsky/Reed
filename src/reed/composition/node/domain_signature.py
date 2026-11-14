@@ -1,9 +1,9 @@
 """
 Typed domain signature parsing (Slice 1A).
 
-Scope for this slice (docs/refactor_priority_order.md, Milestone 1, Slice
-1A -- Priority 1 + part of Priority 4; docs/parcel_boundary_decision.md;
-docs/node_context_decision.md):
+Scope for this slice (docs/history/refactor_priority_order.md, Milestone 1, Slice
+1A -- Priority 1 + part of Priority 4; docs/history/parcel_boundary_decision.md;
+docs/history/node_context_decision.md):
 
     1. parse domain artifact parameters (plain domain types, not Parcel
        subclasses);
@@ -18,7 +18,7 @@ docs/node_context_decision.md):
        parcel_boundary_decision.md, "No Self-Flow"), unless the
        self-input is `Sampled` (issue #29: an explicit unit delay).
 
-Explicitly out of scope for this slice (see docs/refactor_priority_order.md,
+Explicitly out of scope for this slice (see docs/history/refactor_priority_order.md,
 Milestones And Slices, Slice 1B and later):
 
     - `ArtifactDescriptor` (Priority 3) does not exist yet. This parser
@@ -28,7 +28,7 @@ Milestones And Slices, Slice 1B and later):
       to use this parser. The existing Parcel-centric
       `NodeDescriptionBuilder` (`reed.composition.node.node_builder`)
       remains the current, regression-protected path -- this module is
-      additive, not a replacement (docs/refactor_state.md, Known
+      additive, not a replacement (docs/history/refactor_state.md, Known
       Compatibility Layer).
     - Duplicate-producer validation across a `Flow` (Priority 8,
       `DependencyRegistry`) is a Flow-composition-level concern and is
@@ -68,8 +68,8 @@ Slice 21B (GitHub issue #21) addition: `get_type_hints` is now called
 with `include_extras=True`, so an `Annotated[T, Sampled]`-annotated
 consumed parameter (`reed.composition.node.sampled.Sampled`) survives
 resolution instead of silently collapsing to plain `T`
-(references/ingested/sampled-input-annotated-detection-gap.md records
-this as a real, implementation-blocking gap in the original proposal).
+(a real, implementation-blocking gap in the original issue #21
+proposal).
 Every annotation this parser reads is unwrapped back down to its
 underlying type (`_unwrap_annotated`) before any identity/equality
 comparison (self-flow rejection, `NodeContext` detection, the produced
@@ -166,8 +166,7 @@ class DomainNodeSignatureParser:
             globalns.update(extra_globalns)
 
         # Slice 21B: include_extras=True is required for Annotated[T, Sampled]
-        # to survive resolution at all -- see this module's docstring and
-        # references/ingested/sampled-input-annotated-detection-gap.md.
+        # to survive resolution at all -- see this module's docstring.
         self._type_hints = get_type_hints(
             function, globalns=globalns, include_extras=True
         )

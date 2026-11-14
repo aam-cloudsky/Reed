@@ -1,7 +1,7 @@
 """
 Level 1 -- Execution Trace (Milestone O5, Slice O5a).
 
-docs/observability_design.md Section 11.1 splits observability into two levels with
+docs/refactor/observability_design.md Section 11.1 splits observability into two levels with
 different persistence contracts:
 
     Level 1 (Execution Trace / propagation): "which Node fired, in response to what,
@@ -34,7 +34,7 @@ class TraceEvent:
     `event_type` is `"node_started"` (emitted immediately before a Node's function is
     called) or `"node_finished"` (emitted after its output has been committed). Both
     carry the same `node_execution_id`/`node_id`/`execution_seq` identity fields
-    Recordings and Provenance events already carry (docs/observability_design.md
+    Recordings and Provenance events already carry (docs/refactor/observability_design.md
     Section 13.1) -- Level 1 is correlated by the same identity, not a separate one.
 
     This is intentionally a much thinner record than `Recording`/`ProvenanceEvent`: no

@@ -1,6 +1,6 @@
 # Reed Observability — Non-Goals
 
-Status: companion to `docs/observability_design.md` and `docs/observability_goals.md`. This
+Status: companion to `docs/refactor/observability_design.md` and `docs/refactor/observability_goals.md`. This
 document exists so the negative decisions — things this design deliberately does not do,
 and paths it explicitly rejected after consideration — are as visible and durable as the
 positive ones in `observability_goals.md`. An item here was considered and rejected for a

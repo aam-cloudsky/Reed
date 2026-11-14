@@ -54,13 +54,13 @@ levels are added later, forcing every user to memorize a table. A semantic prese
 
 ## Detail level vs. logging severity (Milestone O8)
 
-`verbose_ops` is a *presentation detail level*, not a logging severity (docs/
+`verbose_ops` is a *presentation detail level*, not a logging severity (docs/refactor/
 logging_design.md Section 7): it controls whether artifact-publication/instrument lines
 render in the compact "what was published" grammar or the explicit "which operation
 (CONSUME/RECORD/COMMIT) happened" grammar (`reed.observability.presenter`). It never
 affects `LogEvent.severity`, which is a property of the underlying fact
 (`node_error` is always `"error"`), nor what Reed computes, collects, or persists
-(docs/observability_invariants.md #34).
+(docs/refactor/observability_invariants.md #34).
 """
 
 from __future__ import annotations

@@ -2,8 +2,7 @@
 Sampled marker (Slice 21B, GitHub issue #21 -- "Distinguish triggering
 inputs from sampled inputs in node firing rules").
 
-Scope for this slice (.claude/reed-refactor/run-21B-20260919T144759Z/
-slice_contract.yaml; reed-sampled-inputs-proposal.md):
+Scope (GitHub issue #21):
 
     A node declares a consumed parameter as sampled -- contributing to
     the node's argument coverage but never, by itself, to its firing
@@ -26,9 +25,7 @@ never instantiated: it exists only as the second argument to
 This module's own placement (a dedicated module per concept, mirroring
 `node_context.py`) is a Slice 21B naming decision recorded in this
 slice's SliceContract `stop_conditions`, not one grounded in any
-surviving accepted document -- no non-goals.md/refactor_agent_protocol.md
-etc. survive to cite here (see
-`references/ingested/reed-refactor-protocol-recovered-reference.md`).
+surviving accepted document.
 """
 
 from __future__ import annotations

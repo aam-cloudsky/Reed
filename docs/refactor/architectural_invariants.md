@@ -100,7 +100,8 @@ became `Session` in issue #22; the invariant numbers did not change).
 36. Workers of one superstep read the state committed before the superstep. Their
     outputs are committed together at the barrier that closes it. If any worker raises,
     nothing from that superstep is committed (values, versions, `last_output`,
-    provenance), and the exception propagates.
+    provenance), the node memories it touched are restored, and the exception
+    propagates. Supersteps committed earlier in the same `push()` stay committed.
 37. Iteration order during a `push()` is a function of the `Flow`'s composition and the
     inputs: registration order for nodes, fan-out order for instances. It never depends
     on `id()`-based hashing.
@@ -109,3 +110,15 @@ became `Session` in issue #22; the invariant numbers did not change).
 39. A `Collective[T]` input is triggering. Its arrival is the set of
     instances of `T` as a whole: everything committed at one barrier, in one
     `feed_instances()` call, or removed by `remove_instance()` counts as one change.
+
+## Staged Input and Output Typing (issue #34)
+
+40. `Session.feed()`, `feed_instances()` and `remove_instance()` stage an operation
+    keyed by (domain type, instance); the last operation on a key wins and there is no
+    queue. `Session.push()` applies the staged operations when it starts, before
+    planning. An operation staged during a `push()` takes effect in the next `push()`.
+    `Session.snapshot()` never shows staged operations.
+41. A node's result has exactly its declared output type (generic aliases by origin,
+    unions by member). Otherwise the worker raises `TypeError` and invariant 36 applies.
+42. Node memory transitions follow the superstep: a firing whose superstep fails leaves
+    the node's memory as it was before the superstep.

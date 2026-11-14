@@ -3,7 +3,7 @@
 This document defines how an AI agent must execute the Reed observability build (Issue #7).
 
 It is an operational protocol for the implementing agent. It does not introduce new
-architecture. The agent must use `docs/observability_design.md` and the documents it
+architecture. The agent must use `docs/refactor/observability_design.md` and the documents it
 governs as the source of truth.
 
 ## Observability Navigation Map
@@ -106,11 +106,11 @@ Work in small slices. One slice means one coherent step (one row of
 
 ## Required Reading Before Any Production Change
 
-1. `docs/observability_harness.md` (current-slice section);
-2. `docs/observability_refactor_guide.md`;
-3. `docs/observability_invariants.md`;
-4. `docs/observability_non_goals.md`;
-5. `docs/observability_goals.md`;
+1. `docs/refactor/observability_harness.md` (current-slice section);
+2. `docs/refactor/observability_refactor_guide.md`;
+3. `docs/refactor/observability_invariants.md`;
+4. `docs/refactor/observability_non_goals.md`;
+5. `docs/refactor/observability_goals.md`;
 6. the specific `observability_design.md` section(s) the Slice-To-Documentation Map names
    for the current slice.
 
@@ -215,7 +215,7 @@ opportunistically.
 
 ## Non-Goals Enforcement
 
-Follow `docs/observability_non_goals.md`. In particular, do not:
+Follow `docs/refactor/observability_non_goals.md`. In particular, do not:
 
 1. implement `Recording`/`Instrument` against the literal OTel Metrics SDK data types;
 2. add `Histogram` to `Instrument.kind` without a concrete use case;
@@ -265,7 +265,7 @@ section was updated; any ambiguity or future work.
 
 ## Observability-State Update
 
-After a slice, update `docs/observability_harness.md`'s current-slice/completed-slices
+After a slice, update `docs/refactor/observability_harness.md`'s current-slice/completed-slices
 record when: a slice completes; a new open question is discovered; one of the two flagged
 open items (Section 2 of `observability_refactor_guide.md`) is resolved; a known
 architectural question is resolved or newly discovered. Do not leave it stale after

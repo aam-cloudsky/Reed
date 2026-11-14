@@ -1,5 +1,11 @@
 # Reed Observability: Design Decision (Issue #7)
 
+> Note (issue #34): written when the entry point was `Flow.run()` / `Run` and values entered
+> through `run.publish(...)`. Today the entry point is `Flow.session()` / `Session`, with
+> `feed()` / `push()` / `snapshot()`; the `observability=` and `storage_root=` arguments
+> moved to `Flow.session()` unchanged.
+
+
 Status: **DRAFT — architectural decision and implementation plan, not yet implemented.**
 Author: drafted by Claude (Sonnet 5), for review by Davi / Instituto Curvelo.
 Scope: tracing, provenance, structured recording, and local/offline persistence of Reed
@@ -1268,7 +1274,7 @@ cross-run stability (Section 17.1)
 
 This section resolves the most severe open item flagged in Section 17.1 and, as a direct
 byproduct, most of Section 17.2. It is written as part of implementing
-`docs/observability_harness.md`'s Slice O1a, per that slice's own definition of done: "this
+`docs/refactor/observability_harness.md`'s Slice O1a, per that slice's own definition of done: "this
 is a design decision, not just code — it must be written back into `observability_design.md`
 as a new round/section... before O1b proceeds."
 
@@ -1290,7 +1296,7 @@ every observability key that uses `node_id` uses it together with `flow_id`
 cached — `flow_id` is a pure function of "which FlowNodes are registered, in what order" at
 read time, so it is never stale relative to the Flow's actual composition.
 
-No new parameter is added to `Flow.add(...)` or anywhere else (`docs/observability_non_goals.md`
+No new parameter is added to `Flow.add(...)` or anywhere else (`docs/refactor/observability_non_goals.md`
 Section 8 stands: no `name=` parameter). No user-supplied identifier is required at all —
 both ids fall directly out of source code that already exists.
 
@@ -1346,14 +1352,14 @@ Section 17.1 is resolved for Milestone O1's purposes as of this section; `execut
 (Slice O1b), `node_id`/`node_name` (Slice O1c), `node_execution_id` (Slice O1d),
 `execution_seq` (Slice O1e), and the `NodeContext` identity bundle (Slice O1f) are
 implemented on top of this section's `flow_id`/`node_id` derivation — see
-`docs/observability_implementation_state.md` for the completed-slice record and
+`docs/refactor/observability_implementation_state.md` for the completed-slice record and
 `src/reed/observability/identity.py`, `FlowNode.node_id`/`.node_name`, `Flow.flow_id`,
 `Run.execution_id`/`.flow_id`/`._begin_node_execution`, and `NodeContext.identity` for the
 implementation itself.
 
 Section 17.2's narrower remaining question (whether registration-order changes alone should
 count as a new Flow) and Section 17.5 (`kind="event"`'s fate) remain open, tracked in
-`docs/observability_implementation_state.md`'s open-questions log, not resolved here.
+`docs/refactor/observability_implementation_state.md`'s open-questions log, not resolved here.
 
 ---
 
@@ -1376,7 +1382,7 @@ non-metric, non-Instrument fact": it is simply a `Recording` with no `Instrument
 not a special `Instrument.kind` value and not a separate `Fact` type.
 
 This was implemented, ahead of this section being written, as the natural consequence of
-Slice O2d's lazy-mode design (`docs/observability_implementation_state.md`'s O1d/O2c/O2d
+Slice O2d's lazy-mode design (`docs/refactor/observability_implementation_state.md`'s O1d/O2c/O2d
 entries; `NodeRuntime._resolve_instrument`, `reed/observability/recording.py`) — this
 section formalizes that as the deliberate answer to Section 17.5, not an accident to
 retroactively bless. `ctx.record(name="reason", value="conflict avoidance")` (Section 11-13's
@@ -1393,7 +1399,7 @@ a `Fact` and a metric `Recording` are stored identically, queried identically (b
 in `recordings.csv`, Milestone O3), and differ only in whether an `Instrument` with a
 concrete `kind` stands behind them. Encoding that one difference as `kind: str | None` on the
 single existing `Recording` type is simpler, avoids a second parallel API surface on `ctx`
-(`docs/observability_non_goals.md` Section 2: no new `ctx.*` vocabulary), and costs nothing a
+(`docs/refactor/observability_non_goals.md` Section 2: no new `ctx.*` vocabulary), and costs nothing a
 `Fact` type would have bought.
 
 ### 19.3 Why not `Instrument.kind` left optional
@@ -1401,7 +1407,7 @@ single existing `Recording` type is simpler, avoids a second parallel API surfac
 The alternative — making `Instrument.kind` itself `str | None` and letting a `None`-kind
 `Instrument` represent a fact — was also rejected: `Instrument` is specifically the
 declaration of *how to interpret a metric for projection into OTel* (`kind` gates the OTel
-Metric mapping, `docs/observability_goals.md` Section 8). A fact is not an
+Metric mapping, `docs/refactor/observability_goals.md` Section 8). A fact is not an
 OTel-projectable metric at all; it should never need to go through `Instrument`'s
 declaration path (`instruments=[...]`) to be recorded, and lazy mode already gives it a path
 that requires no declaration whatsoever. Making `Instrument.kind` optional would blur
@@ -1417,7 +1423,7 @@ regardless of whether it also declares `instruments=[...]` for its metrics.
 
 ### 19.5 Status
 
-Section 17.5 is resolved. `docs/observability_goals.md` and `docs/observability_non_goals.md`
+Section 17.5 is resolved. `docs/refactor/observability_goals.md` and `docs/refactor/observability_non_goals.md`
 are updated to match (see their own edit history). No production code changed as a direct
 result of this section — Slice O2d's implementation already matched this decision; this
 section is the formal record that it was a deliberate choice, not an oversight.
@@ -1472,7 +1478,7 @@ the Node body: there is no deferred, in-flight batch to flush at exit, because n
 ever buffered past one `ctx.record()` call.
 
 This is an explicit V1 latency/simplicity trade-off, not a batching optimization deferred by
-oversight: `docs/observability_non_goals.md` Section 5's caution against "an `fsync` per
+oversight: `docs/refactor/observability_non_goals.md` Section 5's caution against "an `fsync` per
 `ctx.record()` call" was aimed at using that as a patch over an unqualified "never lossy"
 claim, which is not what is happening here — the boundary contract itself is unchanged and
 still explicitly qualified (a crash *before* `ctx.record()` is called loses nothing that was
@@ -1660,7 +1666,7 @@ buffer dropped the other half past capacity) produces no span, mirroring `termin
 "running" status rather than fabricating an end time.
 
 `export_recording_to_metric(recording, *, meter)` is strictly kind-gated per
-`docs/observability_non_goals.md` Section 4 ("do not infer OTel export mappings from Python
+`docs/refactor/observability_non_goals.md` Section 4 ("do not infer OTel export mappings from Python
 types"): `"gauge"` maps to `meter.create_gauge(...).set(...)`, `"counter"` and
 `"updown_counter"` map to `meter.create_counter(...)`/`meter.create_up_down_counter(...)`
 with `.add(...)`. A lazy-mode `Recording` (`kind=None`, Section 19) is never exported as a
@@ -1903,7 +1909,7 @@ passing the same object consistently.
 
 **Files changed:** `src/reed/execution/node_runtime.py` (`_resolve_instrument(...)`'s
 Instrument-object branch now validates against `self._declared_instruments`),
-`docs/observability_goals.md` Section 2.3 (documents the preferred name-based style and the
+`docs/refactor/observability_goals.md` Section 2.3 (documents the preferred name-based style and the
 object form's validation), `examples/observability_example.py` (Node bodies now use
 `ctx.record("name", value)` exclusively, no `Instrument` object referenced inside any Node
 body).
@@ -1914,7 +1920,7 @@ in the Node body; a matching Instrument object still works; a kind-mismatched In
 object is rejected; an undeclared Instrument object is rejected even though it is a real,
 validly-constructed `Instrument`). Full suite: 218 passed (214 + 4 new); Ruff clean.
 
-**Evidence:** `docs/observability_goals.md` Section 2.3's existing declared-mode error rule
+**Evidence:** `docs/refactor/observability_goals.md` Section 2.3's existing declared-mode error rule
 for names, generalized to the object form; `examples/new_api.py`'s own framing of Nodes as
 "ordinary typed Python functions" with no Reed-infrastructure coupling.
 
@@ -2219,7 +2225,7 @@ Pyright flag `ctx.record(Temperature, "not a float")` as a type error through or
 generic-parameter inference -- evaluated against re-checking the `T`/`value` relationship at
 runtime too (via `__orig_bases__` inspection): rejected, because a static checker already
 catches the mismatch before the program runs, and Reed's own scalar-type check
-(`docs/observability_non_goals.md` Section 3) already guards the one thing that must hold at
+(`docs/refactor/observability_non_goals.md` Section 3) already guards the one thing that must hold at
 runtime regardless of `T` (scalar-only, never a compound value).
 
 ### 34.5 What changed, mechanically

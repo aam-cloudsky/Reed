@@ -3,9 +3,9 @@ TriggerPolicy.
 
 `TriggerPolicy` decides whether a `FlowNode` becomes eligible to execute
 after one or more of its consumed artifact types receives a new committed
-value (`Session.publish`'s propagation cascade, `Session._is_eligible_to_fire`).
+value (`Session.push()`'s propagation, `Session._is_eligible_to_fire`).
 
-    TriggerPolicy != on_output (docs/architectural_invariants.md #20):
+    TriggerPolicy != on_output (docs/refactor/architectural_invariants.md #20):
     a `TriggerPolicy` decides *whether* a Node fires; `on_output`
     observes a Node's committed result strictly after it has already
     fired successfully. Neither one is a scheduler, retry policy, or
@@ -15,7 +15,7 @@ This is Reed's only execution-eligibility policy. The previous
 `PropagationPolicy` enum and its `Node`/`NodeDefinition`-based
 execution-eligibility path (superseded by this enum and by
 `Session`/`FlowNode`) have been retired along with the rest of the legacy
-decorator/Parcel programming model; see docs/refactor_state.md for that
+decorator/Parcel programming model; see docs/history/refactor_state.md for that
 removal's history.
 """
 

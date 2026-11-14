@@ -1,144 +1,39 @@
 """
-NodeSession (Slice 2B, part of Priority 13 -- `Node` -> `NodeSession`,
-runtime-ownership portion; Slice 2C, part of Priority 13 -- the
-`ArtifactRecord` unwrap boundary; Slice 2D, part of Priority 13 -- memory
-and `.context` construction; Slice 2E, part of Priority 13 -- wrap/commit,
-the firing-tied direction).
+NodeSession: one node participation (`FlowNode`) materialized inside one
+`Session`.
 
-Scope for this slice (docs/refactor_priority_order.md, Milestone 2, Slice
-2B row: "`Node` migrated to `NodeSession`: session-local ownership of one
-`FlowNode`'s execution state, created and held by `Session`"; Priority 13's
-own traceability split: "runtime ownership -> 2B"; docs/architectural_
-decision.md, "Node Session"; docs/flow_composition_implementation_basis.md,
-"FlowNode" -- the `NodeDefinition -> FlowNode -> NodeSession ->
-NodeExecution` model):
-
-    FlowNode
-        v (materialized inside one Session)
-    NodeSession
-
-`NodeSession` represents one node participation (`FlowNode`) materialized
-inside one `Session` (docs/architectural_decision.md, "Node Session": "A
-`NodeSession` represents one node participation materialized inside one
-session. It is distinct from `NodeDefinition`. This distinction prevents a
-reusable node definition from accidentally carrying state across
-unrelated executions.").
-
-Slice 2B established only the ownership/identity boundary (a `NodeSession`
-exists per (`Session`, `FlowNode`) pair, created and held by `Session`, stable
-within a `Session`, never shared across `Session`s). Slice 2C added exactly one
-thing on top of that: `NodeSession.unwrap(record)`, a pure passthrough
-(`record.value`) for the "NodeSession boundary -> unwrap -> DomainValue"
-step (see `reed/execution/artifact_record.py`'s module docstring for that
-boundary's own exact scope).
-
-Slice 2D added NodeMemory ownership and `.context` construction
-(docs/refactor_priority_order.md, Priority 5 "Create `NodeMemory`";
-Priority 13's traceability split "context/memory wiring -> 2D";
-docs/node_context_decision.md; docs/architectural_invariants.md #14, #15,
-#16):
+A `NodeSession` exists per (`Session`, `FlowNode`) pair, is created and
+held by its `Session`, and is never shared across `Session`s, so a node's
+state never leaks between executions (docs/refactor/architectural_decision.md,
+"Node Session").
 
     NodeSession
-        .memory        -- lazily instantiated from this NodeSession's
-                           FlowNode's declared MemoryType (a zero-argument
-                           construction -- docs/refactor_priority_order.md,
-                           Priority 5, "instantiate memory from
-                           MemoryType"), memoized so the same object is
-                           returned (and can be mutated in place) on every
-                           subsequent access.
-        .last_output   -- the latest committed domain output, set by
-                           `.commit(record)` (Slice 2E). `None` until this
-                           NodeSession's first successful commit.
-        .context       -- a fresh NodeContext(memory=.., last_output=..)
-                           snapshot built from the two properties above.
+        .memory:          the node's private memory, built lazily from the
+                          `MemoryType` declared in `NodeContext[MemoryType,
+                          OutputType]` and kept per `InstanceKey`.
+        .last_output:     the latest committed output, per `InstanceKey`;
+                          `None` before the first commit.
+        .context:         a fresh `NodeContext(memory=..., last_output=...)`.
+        .unwrap(record):      `record.value`.
+        .wrap(value):         a new `ArtifactRecord` produced by this node.
+        .commit(record):      stores the record in the repository and sets
+                              `last_output`, together.
 
-Both `.memory` and `.last_output` (and therefore `.context`, which is
-built from them) raise `AttributeError` if this `NodeSession`'s node
-function does not declare a `NodeContext[MemoryType, OutputType]`
-parameter at all (`self.flow_node.context is None` -- see `FlowNode.context`,
-Slice 1C, delegating to `NodeContextDescriptor`, Slice 1B). `AttributeError`
-is used deliberately, not `ValueError`: it lets `hasattr(node_session,
-"memory")` correctly report `False` for such a node (Python's `hasattr`
-only swallows `AttributeError`), matching the intuition that a node
-without a `NodeContext` parameter simply has no memory/context/last_output
-capability -- there is no `MemoryType` to construct from and no declared
-`OutputType` for `last_output` to be typed against.
+`.memory`, `.last_output` and `.context` raise `AttributeError` for a node
+without a `NodeContext` parameter, so `hasattr(node_session, "memory")`
+reports `False` for it.
 
-Because two different `Session`s never share a `NodeSession` (Slice 2B) and
-each `NodeSession`'s `.memory` is memoized on the `NodeSession` instance
-itself (not on `FlowNode` or `Flow`), `NodeMemory` is scoped to exactly
-`Session x NodeSession` (architectural_invariants.md #14) and is never shared
-across `Session`s (architectural_invariants.md #16) as a direct structural
-consequence of Slice 2B's ownership boundary -- this slice does not need
-to add any additional isolation mechanism of its own.
-
-Slice 2E adds the firing-tied, commit direction (docs/refactor_priority_
-order.md, Milestone 2, Slice 2E row; docs/parcel_boundary_decision.md,
-"Parcel As Internal Envelope" -- `wrap: U -> Parcel[U]`, read here as
-`wrap: DomainValue -> ArtifactRecord[DomainValue]`):
-
-    NodeSession
-        .wrap(domain_value)   -- wraps a returned domain value into a
-                                  fresh ArtifactRecord, with this
-                                  NodeSession recorded as its producer
-                                  (docs/architectural_decision.md's
-                                  ArtifactProvenance.producer) and its
-                                  version advanced from pending (0) to
-                                  initial (1).
-        .commit(record)       -- the successful-commit path only
-                                  (docs/node_context_decision.md,
-                                  "Transaction Semantics"): stores
-                                  `record` into `self.session.repository`'s
-                                  additive ArtifactRecord storage (see
-                                  `reed/synchronization/depot.py`,
-                                  `set_artifact_record`) and updates
-                                  `self._last_output` to `record.value`
-                                  together, in that order, so both moves
-                                  happen as one call. Failure/rollback
-                                  semantics for a firing that raises
-                                  partway through are explicitly out of
-                                  scope for this slice (see
-                                  `session.py`'s `publish` docstring and the
-                                  SliceContract's stop_conditions) --
-                                  neither target test this slice must
-                                  pass exercises them.
-
-`Session.publish(domain_value)` (`reed/execution/session.py`, Slice 2E) is what
-actually calls `.wrap(...)` and `.commit(...)` as part of one firing; this
-class only owns the two operations themselves, not the decision of when
-to fire.
-
-Explicitly out of scope for this slice (Milestone 2, later slices; see
-`docs/refactor_priority_order.md`'s Priority 13 "Recommended work" items
-3-8, split across 2C-2G by the Priority-To-Slice Traceability table):
-
-    - No `on_output` dispatch (sync or async), no `callback_failures`
-      (2F).
-    - No stateful-firing serialization (architectural_invariants.md #17,
-      2G) -- `.commit(...)` here is not itself a lock/serialization
-      mechanism; concurrent firings of the same NodeSession are not
-      guarded against yet.
-    - No transactional rollback for a firing that fails partway through
-      wrap/commit -- only the successful-commit path is implemented (see
-      above and the SliceContract's stop_conditions for why guessing a
-      rollback mechanism here would be wrong).
-    - No multi-node dispatch/routing, no TriggerPolicy-gated execution
-      eligibility -- both remain `Session.publish(...)`'s concern (2E) and,
-      for TriggerPolicy specifically, out of this slice entirely.
-    - No new executors, schedulers, managers, factories, or lifecycle
-      frameworks.
-
-`NodeSession`'s responsibilities in this slice: exist as a distinct
-object per (`Session`, `FlowNode`) pair, know which `Session` and which
-`FlowNode` it materializes, unwrap an `ArtifactRecord` into its domain
-value on request, own a private, node-local memory instance and a
-last-committed-output slot (both scoped to itself), construct a
-`NodeContext` snapshot exposing both, and wrap/commit a successfully
-produced domain value into the session's repository.
+Transactions: a firing that fails commits neither an output nor a memory
+transition. Outputs are staged until the superstep barrier; memory is
+copied before each firing (`_memory_checkpoint`) and restored by `Session`
+when the superstep fails (`_restore_memory`). `Session.push()` decides
+when a node fires; `NodeSession` only owns these operations. Design record:
+docs/history/node_context_decision.md, "Transaction Semantics".
 """
 
 from __future__ import annotations
 
+import copy
 import threading
 from typing import TYPE_CHECKING
 
@@ -149,6 +44,9 @@ from reed.observability.instrument import Instrument, InstrumentKind
 from reed.observability.recording import Recording, ScalarValue
 
 from reed.execution.instance_key import InstanceKey
+
+# Marks a checkpoint taken before a node's memory existed (issue #34).
+_NO_MEMORY = object()
 
 if TYPE_CHECKING:
     from reed.composition.flow.flow_node import FlowNode
@@ -165,7 +63,7 @@ class NodeSession:
     See module docstring for the exact scope: an identity/ownership
     boundary, a pure unwrap operation, a private, node-local memory
     instance plus a `.context` snapshot, and now the wrap/commit
-    operations `Session.publish(...)` uses to complete one firing.
+    operations `Session.push()` uses to complete one firing.
     `NodeSession` still owns no execution-eligibility policy and no
     callback dispatch -- it exists so that later slices (2F-2G) have
     somewhere correct to attach callback dispatch and stateful-firing
@@ -198,7 +96,7 @@ class NodeSession:
         # Milestone O2, Slice O2c/O2d: in-memory Recording buffer (Level 2
         # precursor -- Milestone O3 gives it a durable store) plus the
         # lazy-mode registry that makes "first observed kind/unit wins"
-        # enforceable (docs/observability_goals.md Section 2.3).
+        # enforceable (docs/refactor/observability_goals.md Section 2.3).
         self._recordings: list[Recording] = []
         # Milestone O7, Slice O7i: Instruments are discovered dynamically
         # -- there is nothing to pre-populate here anymore (no more
@@ -285,7 +183,7 @@ class NodeSession:
         docs/refactor/session_snapshot_decision.md section 7), not an
         independent snapshot -- `.commit(...)` re-storing it under the
         same key is therefore idempotent. This is the "wrap" half of
-        docs/parcel_boundary_decision.md's boundary diagram (`U -> wrap
+        docs/history/parcel_boundary_decision.md's boundary diagram (`U -> wrap
         -> Parcel[U]`, read here as `ArtifactRecord`); it does not
         change what `.commit(...)` is responsible for (updating
         `self._last_output`).
@@ -305,12 +203,12 @@ class NodeSession:
 
         Stores `record` into `self.session.repository`'s additive,
         domain-type-keyed `ArtifactRecord` storage
-        (`reed/synchronization/depot.py`, `set_artifact_record`,
-        docs/parcel_boundary_decision.md's "Addendum: Slice 2E
+        (`ArtifactRepository.set_artifact_record`,
+        docs/history/parcel_boundary_decision.md's "Addendum: Slice 2E
         ArtifactRecord Commit Storage") and updates `self._last_output`
         to `record.value`, so that both the repository commit and the
         local `last_output` transition happen together
-        (docs/node_context_decision.md, "Transaction Semantics":
+        (docs/history/node_context_decision.md, "Transaction Semantics":
         "successful firing -> memory transition and output publication
         commit together"). Only the successful path is implemented here
         -- a firing that raises before reaching `.commit(...)` leaves
@@ -323,6 +221,33 @@ class NodeSession:
         self._session.repository.set_artifact_record(record, instance=instance)
         key = instance if instance is not None else InstanceKey.singleton()
         self._last_output[key] = record.value
+
+    def _memory_checkpoint(self, instance: "InstanceKey") -> object:
+        """
+        A copy of this node's memory for `instance`, taken before a firing so
+        that a failed superstep can restore it (issue #34). Returns
+        `_NO_MEMORY` when the memory has not been created yet.
+
+        Raises `TypeError` if the memory cannot be copied with
+        `copy.deepcopy`.
+        """
+        if instance not in self._memory:
+            return _NO_MEMORY
+        try:
+            return copy.deepcopy(self._memory[instance])
+        except Exception as exc:
+            raise TypeError(
+                f"The memory of {self._flow_node.definition.function!r} cannot "
+                "be copied with copy.deepcopy; Reed copies node memory before "
+                "each firing so that a failed superstep can restore it."
+            ) from exc
+
+    def _restore_memory(self, instance: "InstanceKey", checkpoint: object) -> None:
+        """Put back the memory saved by `_memory_checkpoint` (issue #34)."""
+        if checkpoint is _NO_MEMORY:
+            self._memory.pop(instance, None)
+        else:
+            self._memory[instance] = checkpoint
 
     def _memory_for(self, instance: "InstanceKey") -> object:
         """
@@ -415,7 +340,7 @@ class NodeSession:
         this property returns `None` for it rather than constructing an
         unnecessary lock.
 
-        For a state-aware `NodeSession`, `Session.publish(...)` acquires
+        For a state-aware `NodeSession`, `Session.push()` acquires
         this `Lock` immediately before calling the node function and
         releases it (via try/finally) immediately after
         `.commit(...)` completes, so that at most one firing of this
@@ -477,12 +402,12 @@ class NodeSession:
         accepts an `instruments=` parameter at all).
 
         `value` must be scalar (`str | int | float | bool`) --
-        docs/observability_non_goals.md Section 3.
+        docs/refactor/observability_non_goals.md Section 3.
         """
         if not isinstance(value, (str, int, float, bool)):
             raise TypeError(
                 f"Recording value must be scalar (str | int | float | bool), "
-                f"got {type(value).__name__!r} (docs/observability_non_goals.md "
+                f"got {type(value).__name__!r} (docs/refactor/observability_non_goals.md "
                 "Section 3 -- no mappings, dataclasses, lists, or nested "
                 "structures; flatten a compound fact into multiple explicit "
                 "ctx.record(...) calls with dot-segmented names instead)."
@@ -524,7 +449,7 @@ class NodeSession:
         """
         Flush and durably persist every `Recording` buffered for
         `node_execution_id` as one batch (Milestone O7, Slice O7c) --
-        the NodeExecution durability boundary (docs/observability_goals.md
+        the NodeExecution durability boundary (docs/refactor/observability_goals.md
         Section 5; architectural invariants #20/#21). Called from
         `Session._run_worker`'s `finally` block, so it runs whether the firing
         succeeded or raised. A no-op if this firing made no
@@ -593,7 +518,7 @@ class NodeSession:
         ):
             raise TypeError(
                 f"{instrument.__name__} must declare kind: InstrumentKind as "
-                "a class attribute (docs/observability_non_goals.md Section "
+                "a class attribute (docs/refactor/observability_non_goals.md Section "
                 "2 -- no Histogram, no arbitrary kind values)."
             )
         if not hasattr(instrument, "unit") or not isinstance(instrument.unit, str):

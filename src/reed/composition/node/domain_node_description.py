@@ -1,8 +1,8 @@
 """
 Domain-typed NodeDescription / NodeDefinition (Slice 1B, Priority 2).
 
-Scope for this slice (docs/refactor_priority_order.md, Milestone 1, Slice
-1B; docs/architectural_decision.md, "Node Definition"):
+Scope for this slice (docs/history/refactor_priority_order.md, Milestone 1, Slice
+1B; docs/refactor/architectural_decision.md, "Node Definition"):
 
     NodeDefinition
         reusable typed callable definition
@@ -24,16 +24,16 @@ performed there and reused here, not duplicated.
 This is additive alongside the existing Parcel-centric
 `NodeDescription`/`NodeDefinition` (`reed.composition.node.node_definition`),
 which remains the current, regression-protected path (see
-`docs/refactor_state.md`, Known Compatibility Layer). The two are not
+`docs/history/refactor_state.md`, Known Compatibility Layer). The two are not
 merged in this slice -- see the Rename Rule in
-`docs/refactor_agent_protocol.md`: "First make the boundary real. Then
+`docs/history/refactor_agent_protocol.md`: "First make the boundary real. Then
 rename the boundary." `DomainNodeDefinition` deliberately carries no
 `propagation_policy`/`trigger_policy`/`on_output` field: that ownership
 belongs to `FlowNode` (Priority 9 / 10, Slice 1C / 1E), not to the node
 definition (architectural_invariants.md #1, #5).
 
 `NodeKind` (INPUT/TRANSFORM/OUTPUT) has no equivalent here: the target
-architecture (docs/parcel_boundary_decision.md) treats every node
+architecture (docs/history/parcel_boundary_decision.md) treats every node
 uniformly as consuming and producing domain artifact types; Flow infers
 topology and role from the type graph, not from a declared node kind.
 """

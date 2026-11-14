@@ -26,7 +26,7 @@ jobs:
       - name: Install package
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[dev]"
+          python -m pip install ".[dev,otel]"
 
       - name: Validate imports
         run: |
@@ -35,7 +35,7 @@ jobs:
 
           # Reed's only supported public execution model (the previous
           # decorator/Parcel/bind(...) programming model was retired --
-          # see docs/refactor_state.md's legacy-removal entries).
+          # see docs/history/refactor_state.md's legacy-removal entries).
           required_exports = ("Flow", "TriggerPolicy", "NodeContext", "Session")
           missing_exports = [name for name in required_exports if not hasattr(reed, name)]
 

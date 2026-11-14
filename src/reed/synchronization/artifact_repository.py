@@ -14,7 +14,7 @@ and `get_parcel`/`set_parcel`/`get_pallet`). That protocol belonged
 exclusively to the retired decorator/Parcel/`RepositoryAdapter` execution
 path -- nothing in the current architecture (`Session`, `NodeSession`,
 `FlowNode`) ever read or wrote through it -- and has been removed
-alongside the rest of that path (see docs/refactor_state.md). What
+alongside the rest of that path (see docs/history/refactor_state.md). What
 remains is exactly what `Session`/`NodeSession` actually use: additive,
 domain-type-keyed `ArtifactRecord` storage.
 

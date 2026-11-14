@@ -14,7 +14,7 @@ time a Node actually calls `ctx.record(SomeInstrument, value)` during a
 real `Session`. `describe_flow(flow)` therefore **cannot** claim any static
 Instrument knowledge anymore -- there is no `FlowNode.instruments` field
 left to read, and Reed deliberately does not recover this information via
-`AST` inspection of a Node's body (docs/observability_non_goals.md's
+`AST` inspection of a Node's body (docs/refactor/observability_non_goals.md's
 general "no reflection-based magic" posture; explicitly reiterated by the
 task that authorized this redesign).
 

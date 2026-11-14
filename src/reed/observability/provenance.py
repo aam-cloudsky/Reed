@@ -3,7 +3,7 @@ ProvenanceEvent (Milestone O4, Slice O4a).
 
 A normalized W3C-PROV-style event: `"generated"` (a Node produced an
 Artifact) or `"used"` (a Node consumed an Artifact) -- never a wide
-producer/consumer row (docs/observability_design.md Section 8, Round 4).
+producer/consumer row (docs/refactor/observability_design.md Section 8, Round 4).
 A producer/consumer graph is reconstructed by grouping on
 `(artifact_id, artifact_version, instance_id)` at query time (Slice MI-J,
 docs/refactor/multi_instance_execution_plan.md, Risk R5 -- `instance_id`

@@ -1,5 +1,11 @@
 # Reed Observability — Implementation State
 
+> Note (issue #34): written when the entry point was `Flow.run()` / `Run` and values entered
+> through `run.publish(...)`. Today the entry point is `Flow.session()` / `Session`, with
+> `feed()` / `push()` / `snapshot()`; the `observability=` and `storage_root=` arguments
+> moved to `Flow.session()` unchanged.
+
+
 Status: live operational checkpoint for the observability build (Issue #7), analogous to
 `refactor_state.md` from Reed's prior architectural refactor. This document starts nearly
 empty on purpose — no implementation slice has begun yet. It exists so the next agent (or
@@ -15,7 +21,7 @@ meaningful progress.
 ## Current slice
 
 **All authorized O7 slices complete (O1a-O7i).** 228 tests passing, Ruff clean. See
-`docs/observability_harness.md`'s Milestone O7 table for the full slice list and design
+`docs/refactor/observability_harness.md`'s Milestone O7 table for the full slice list and design
 record §§28-34 for every slice's rationale.
 
 ## Baseline verification
@@ -43,8 +49,8 @@ is the final baseline of the authorized slice sequence (O1a-O6d).**
 
 ### O1a — Resolve `flow_id`/`node_id` cross-run stability (2026-09-13)
 - observability_design.md section(s) implemented: written back as new Section 18 (Round 6).
-- Files changed: `docs/observability_design.md` (+Section 18), `docs/observability_goals.md`
-  (§3, §10), `docs/observability_non_goals.md` (§10).
+- Files changed: `docs/refactor/observability_design.md` (+Section 18), `docs/refactor/observability_goals.md`
+  (§3, §10), `docs/refactor/observability_non_goals.md` (§10).
 - Tests: none (design decision only, no production code in this slice).
 - Deviations from the slice plan (if any): none.
 - New open questions discovered (if any): none — narrowed Section 17.2 to "does
@@ -180,8 +186,8 @@ round/section, and only then is it marked resolved here.
 
 ### O2e — Resolve `kind="event"` (2026-09-13)
 - observability_design.md section(s) implemented: written back as new Section 19 (Round 7).
-- Files changed: `docs/observability_design.md` (+Section 19), `docs/observability_goals.md`
-  (§10), `docs/observability_non_goals.md` (§10), plus two confirming tests appended to
+- Files changed: `docs/refactor/observability_design.md` (+Section 19), `docs/refactor/observability_goals.md`
+  (§10), `docs/refactor/observability_non_goals.md` (§10), plus two confirming tests appended to
   `tests/test_observability_o2_instrument_recording.py`.
 - Tests: `test_lazy_mode_recording_kind_is_always_none_slice_o2e`,
   `test_declared_mode_recording_kind_is_never_none_slice_o2e`; full suite 167 passed; ruff
@@ -410,8 +416,8 @@ version; earlier records are not mutated by later firings; `provenance.csv`'s "g
 events show distinct versions end-to-end; two different Artifact types version
 independently). Full suite: 210 passed (206 + 4 new); Ruff clean.
 
-**Evidence:** `docs/observability_design.md` Section 8 ("causally distinct Artifact
-generations"); `docs/observability_invariants.md` #22 ("generation and usage are distinct
+**Evidence:** `docs/refactor/observability_design.md` Section 8 ("causally distinct Artifact
+generations"); `docs/refactor/observability_invariants.md` #22 ("generation and usage are distinct
 provenance events") and #24 ("each Artifact type has exactly one producer within a Flow");
 direct reproduction via `examples/observability_example.py`'s own output.
 
@@ -473,8 +479,8 @@ successful firing; recordings still flush when the Node raises; a firing with no
 `ctx.record()` calls performs zero Recording-related fsyncs (only the Provenance event's
 own fsync remains)). Full suite: 214 passed (210 + 4 new); Ruff clean.
 
-**Evidence:** `docs/observability_goals.md` Section 5 (durability boundary contract, quoted
-verbatim); `docs/observability_non_goals.md` Section 5 (explicit prohibition, quoted
+**Evidence:** `docs/refactor/observability_goals.md` Section 5 (durability boundary contract, quoted
+verbatim); `docs/refactor/observability_non_goals.md` Section 5 (explicit prohibition, quoted
 verbatim); architectural invariants #20, #21, #26.
 
 ### O7h — Instrument API self-containment audit (user-prompted mid-O7) (2026-09-13)
@@ -496,7 +502,7 @@ Instrument object could silently bypass the FlowNode's declared schema entirely.
 **Fix:** validate the object's `.name` against `self._declared_instruments`, and its
 `kind`/`unit` against the declared entry; raise `ValueError` on either mismatch.
 
-**Files changed:** `src/reed/execution/node_runtime.py`, `docs/observability_goals.md`
+**Files changed:** `src/reed/execution/node_runtime.py`, `docs/refactor/observability_goals.md`
 Section 2.3, `examples/observability_example.py` (Node bodies switched to the name-based
 style).
 
@@ -655,7 +661,7 @@ bookkeeping added), `src/reed/composition/flow/flow_node.py` /
 `merge_discovered_instruments`), `src/reed/execution/run.py`
 (`record_discovered_instruments` added; manifest write moved from `__init__` to
 `NodeRuntime.flush_recordings`), `src/reed/observability/describe.py` (`describe_flow`
-reports discovery is runtime-only for every Node uniformly), `docs/observability_goals.md`
+reports discovery is runtime-only for every Node uniformly), `docs/refactor/observability_goals.md`
 Section 2 (rewritten). Every existing test referencing the old API was migrated (O2, O3,
 O5c, O6a, O6b, O6c, O7c, O7d, O7f, O7g's instrument-touching test) or, for O7h specifically,
 replaced with a single test documenting its own supersession. `examples/
@@ -691,7 +697,7 @@ Authorized sequence as of this entry: O2a through O6d.
 
 ## Notes for the next agent
 
-- Read `docs/observability_agent_protocol.md` first, then this file's "Current slice"
+- Read `docs/refactor/observability_agent_protocol.md` first, then this file's "Current slice"
   section, before touching any production code.
 - **As of 2026-09-13, all slices authorized by the continuous-execution instruction (O1a
   through O6d) are complete.** Stop condition 4 of that authorization ("all remaining slices
@@ -703,5 +709,5 @@ Authorized sequence as of this entry: O2a through O6d.
 - If a human re-authorizes further work, it should name the next slice(s) explicitly (as
   O2a-O6d were named) rather than assuming "continuous execution" extends indefinitely to
   undefined future scope.
-- If this file and `docs/observability_harness.md` disagree on what the current slice is,
+- If this file and `docs/refactor/observability_harness.md` disagree on what the current slice is,
   stop and report — do not guess which one is stale.

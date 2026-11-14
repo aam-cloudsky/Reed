@@ -5,10 +5,10 @@ the harness already assembled. It does not introduce new architecture and does n
 what the other documents already say — it operationalizes them into a repeatable cycle and
 an ordered path through the milestones. Read it alongside, not instead of:
 
-- `docs/observability_agent_protocol.md` — operational rules for the implementing agent.
-- `docs/observability_harness.md` — the milestone/slice table (`O1`-`O6`) and current slice.
-- `docs/observability_refactor_guide.md` — the authority order and implementation policy.
-- `docs/observability_implementation_state.md` — the live checkpoint this plan's cycle
+- `docs/refactor/observability_agent_protocol.md` — operational rules for the implementing agent.
+- `docs/refactor/observability_harness.md` — the milestone/slice table (`O1`-`O6`) and current slice.
+- `docs/refactor/observability_refactor_guide.md` — the authority order and implementation policy.
+- `docs/refactor/observability_implementation_state.md` — the live checkpoint this plan's cycle
   writes back into after every slice.
 
 ## 1. Why a separate plan document
@@ -79,18 +79,18 @@ do not iterate blindly on the code until the test happens to pass.
 
 ### 2.4 Record
 
-Update `docs/observability_implementation_state.md`:
+Update `docs/refactor/observability_implementation_state.md`:
 
 - Append a completed-slice entry (design section(s) implemented, files changed, tests run,
   deviations, new open questions, follow-up work).
 - If the slice resolved one of the two flagged open items, that resolution must first be
-  written back into `docs/observability_design.md` as a new round/section (per the harness
+  written back into `docs/refactor/observability_design.md` as a new round/section (per the harness
   table's O1a/O2e rows), and only then marked resolved in the state file's open-questions
   log — never the reverse order.
 - If a new open question surfaced during implementation, log it here immediately, even if
   it does not block the current slice.
 
-Then update `docs/observability_harness.md`'s "Current slice" section to point at the next
+Then update `docs/refactor/observability_harness.md`'s "Current slice" section to point at the next
 slice (Section 4 below gives the default ordering), and its "Milestones and slices" table
 stays as the durable plan of record — the state file is the log of what actually happened
 against that plan.

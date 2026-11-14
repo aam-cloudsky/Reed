@@ -20,7 +20,7 @@ Issue #8 closes both gaps without opening a second observability model.
 
 No literal source for the legacy `EventRenderer` survives in git history (searched full
 history for `EventRenderer`/`Depot`/`Outpost`/`Parcel` renderer code; only prose
-references remain, in `docs/observability_design.md` Section 1 and Section 19). Its
+references remain, in `docs/refactor/observability_design.md` Section 1 and Section 19). Its
 described visual language, which this design borrows as *aesthetic*, not architecture:
 
 - one compact line per event, `●` activity marker, semantic color per category;
@@ -113,7 +113,7 @@ Event-specific fields, present only on the relevant `event` value:
   `unit: str | None`, `kind: str | None`
 
 `event` values are a small closed set (mirrors `Instrument.kind`'s own closed-vocabulary
-reasoning, `docs/observability_goals.md`): `node_started`, `node_finished`, `node_error`,
+reasoning, `docs/refactor/observability_goals.md`): `node_started`, `node_finished`, `node_error`,
 `artifact_generated`, `artifact_consumed`, `instrument_recorded`.
 
 Field names deliberately match the existing `NodeExecutionIdentity`/`ProvenanceEvent`/
@@ -123,7 +123,7 @@ reasons, so a reader who already knows Issue #7's vocabulary needs to learn noth
 
 ## 6. Visual grammar
 
-See `docs/observability_invariants.md` for the corresponding test-enforceable invariants.
+See `docs/refactor/observability_invariants.md` for the corresponding test-enforceable invariants.
 Rendering is built with Rich `Text`/style composition (`console.print(Text(...))`),
 never preformatted ANSI strings — matching `TerminalPresenter`'s existing approach.
 
@@ -159,7 +159,7 @@ sequence, not just the net publication:
 
 `(a82f91)` is `node_execution_id[:6]` — enough to correlate lines from the same firing
 without the visual noise of a full UUID; never claimed as a causality marker on its own
-(temporal/vertical proximity is not causality — `docs/observability_invariants.md` #9).
+(temporal/vertical proximity is not causality — `docs/refactor/observability_invariants.md` #9).
 Column order is fixed (marker, artifact-or-op, short id, node/flow), so scanning down one
 column reads consistently across every line — no information is repeated that is already
 implied by column position (no `fired`/`published`/`committed`/`[INFO]`/full timestamps

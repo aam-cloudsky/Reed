@@ -2,7 +2,7 @@
 Public `reed` package surface.
 
 Reed's only supported public execution model, per the accepted
-architecture (docs/architecture.md) and the explicit decision to retire
+architecture (docs/refactor/architecture.md) and the explicit decision to retire
 the previous decorator/Parcel/bind/callable-Flow programming model:
 
     from reed import Flow, NodeContext, TriggerPolicy
@@ -30,11 +30,8 @@ inputs in node firing rules") additionally exports `InputRole` and
 (`Annotated[T, Sampled]`) exactly as it already references `NodeContext`,
 and `InputRole` for callers that inspect a `FlowNode`'s consumed
 artifacts. Both are new public types, the same category as
-`TriggerPolicy`/`NodeContext` (see
-`.claude/reed-refactor/run-3G-20260912T205200Z/no_change_rationale.md`
-for the precedent this follows: a new public type a node signature is
-meant to reference directly belongs here; an internal execution or
-repository class does not) -- not internal execution classes.
+`TriggerPolicy`/`NodeContext`. The precedent: a new public type a node
+signature is meant to reference directly belongs here.
 
 Issue #31 additionally exports `Collective` and `InstanceKey`, by the
 same rule: a node signature references `Collective[T]` directly (a

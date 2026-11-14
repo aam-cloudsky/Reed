@@ -18,7 +18,7 @@ Two consequences that follow directly from already-decided architecture, not new
        not a Reed-specific error -- there is nothing to catch and re-raise more helpfully
        that `pip install reed-sync[otel]` in the traceback doesn't already say.
     2. The mapping from `Instrument.kind` to an OTel metric instrument is explicit and
-       kind-gated (`docs/observability_non_goals.md` Section 4: "do not infer OTel export
+       kind-gated (`docs/refactor/observability_non_goals.md` Section 4: "do not infer OTel export
        mappings from Python types"). A lazy-mode `Recording` (`kind=None`, Section 19) is
        never exported as a metric -- there is no `Instrument` behind it to determine which
        OTel instrument kind it would even be. `export_recording_to_metric(...)` silently
@@ -119,7 +119,7 @@ def _get_metric_instrument(meter: "Meter", kind: str, name: str, unit: str) -> o
 def export_recording_to_metric(recording: Recording, *, meter: "Meter") -> bool:
     """
     Translate one `Recording` into an OTel metric observation, kind-gated
-    per `Instrument.kind` (`docs/observability_non_goals.md` Section 4) --
+    per `Instrument.kind` (`docs/refactor/observability_non_goals.md` Section 4) --
     `"gauge"` -> `meter.create_gauge(...)`, `"counter"` ->
     `meter.create_counter(...)`, `"updown_counter"` ->
     `meter.create_up_down_counter(...)`. `recording.attributes` is passed
