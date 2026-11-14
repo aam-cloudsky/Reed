@@ -198,6 +198,8 @@ from typing import TYPE_CHECKING, Any, Callable
 import functools
 import threading
 import time
+import types
+import typing
 import uuid
 from pathlib import Path
 
@@ -232,6 +234,48 @@ if TYPE_CHECKING:
     from reed.composition.flow.flow_composition import Flow
     from reed.composition.flow.flow_node import FlowNode
     from reed.composition.node.artifact_descriptor import ArtifactDescriptor
+
+
+def _runtime_classes(declared: object) -> "tuple[type, ...] | None":
+    """
+    The classes a value of the annotation `declared` may have at run time,
+    or `None` when the annotation cannot be checked (issue #34). Generic
+    aliases check their origin (`list[int]` -> `list`); unions check each
+    member; `None` stands for `NoneType`.
+    """
+    if declared is None:
+        return (type(None),)
+    origin = typing.get_origin(declared)
+    if origin in (typing.Union, types.UnionType):
+        classes: list[type] = []
+        for member in typing.get_args(declared):
+            member_classes = _runtime_classes(member)
+            if member_classes is None:
+                return None
+            classes.extend(member_classes)
+        return tuple(classes)
+    if origin is typing.Annotated:
+        return _runtime_classes(typing.get_args(declared)[0])
+    candidate = origin if origin is not None else declared
+    return (candidate,) if isinstance(candidate, type) else None
+
+
+def _check_output_type(flow_node: "FlowNode", value: object) -> None:
+    """
+    Reject a node result whose type is not the declared output type
+    (issue #34). Reed stores a value under its exact type, so a value of
+    another type -- even a subclass -- would be committed where no consumer
+    looks for it. The check is exact for the same reason.
+    """
+    declared = flow_node.produced_artifact.domain_type
+    classes = _runtime_classes(declared)
+    if classes is None or type(value) in classes:
+        return
+    raise TypeError(
+        f"Node {flow_node.definition.function.__qualname__!r} is declared to "
+        f"return {getattr(declared, '__name__', declared)!s} but returned a "
+        f"value of type {type(value).__name__!r}: {value!r}"
+    )
 
 
 @dataclass(frozen=True)
@@ -1373,6 +1417,7 @@ class Session:
         try:
             try:
                 result = flow_node.definition.function(**call_kwargs)
+                _check_output_type(flow_node, result)
             except BaseException as exc:
                 self._safe_presenter_call(
                     self._presenter.on_node_error,
