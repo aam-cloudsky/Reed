@@ -13,11 +13,14 @@ Likewise, Reed organizes strongly typed pieces of application state, automatical
 
 ## Installation
 
-Using pip:
+Reed requires Python 3.12 or later. It is not yet published on PyPI;
+install it from a clone of this repository:
 
 ```bash
-pip install reed
+pip install .
 ```
+
+The distribution name is `reed-sync`; the import name is `reed`.
 
 ---
 
@@ -25,6 +28,7 @@ pip install reed
 
 ```python
 from dataclasses import dataclass
+
 from reed import Flow
 
 
@@ -49,8 +53,9 @@ def show_size(size: TextSize) -> None:
 flow = Flow()
 flow.add(compute, on_output=show_size)
 
-run = flow.run()
-run.publish(Text("Hello Reed"))
+session = flow.session(observability="silent")
+session.feed(Text("Hello Reed"))
+session.push()
 ```
 
 Output:
@@ -62,30 +67,64 @@ Output:
 `Text` and `TextSize` are ordinary Python dataclasses -- Reed places no
 base class or decorator requirement on domain types. A function's
 parameter and return type annotations are enough for Reed to infer the
-dependency between `compute`'s input and output; publishing a `Text`
-automatically propagates through every eligible downstream node.
+dependency between `compute`'s input and output.
+
+A `Session` is one execution of a `Flow`. `feed()` stores a value,
+`push()` propagates every pending change through the eligible
+downstream nodes until the graph settles, and `snapshot()` returns the
+committed values. `invoke(value)` does `feed` -> `push` -> `snapshot`
+in one call. `observability="silent"` turns off the default per-node
+terminal output.
 
 ---
 
-## Example
+## Examples
 
-A complete example demonstrating fan-out, a multi-input join gated by a
-`TriggerPolicy`, and automatic multi-hop propagation through a full
-graph is available in:
+The `examples/` directory contains runnable scripts:
 
-```text
-examples/text_analysis_pipeline.py
-```
+- `text_analysis_pipeline.py` -- fan-out, a multi-input join gated by a
+  `TriggerPolicy`, and multi-hop propagation through a full graph.
+- `sampled_inputs.py` -- non-triggering (`Sampled`) inputs.
+- `multi_instance_fleet_example.py` -- multiple instances of the same
+  type (`InstanceKey`) and fan-in through `Collective[T]`.
+- `self_flow/` -- feedback through a `Sampled` self-input (unit delay).
+- `superstep/` -- fan-out/fan-in, diamond joins, feedback loops and
+  the barrier commit of each superstep.
+- `observability_example.py` -- tracing, instruments and provenance.
 
 ---
 
 ## Features
+
 - Ordinary Python domain values -- no base class or decorator required.
-- Explicit `Flow` composition (`flow.add(...)`) with automatic, type-inferred dependencies.
-- Automatic, multi-hop reactive propagation: fan-out, multi-input joins, and repeated updates, driven by a single `run.publish(...)`.
-- Per-node `TriggerPolicy` (any-input, all-inputs, or manual) governing execution eligibility.
-- Optional `NodeContext` for node-local memory and access to the previous committed output.
+- Explicit `Flow` composition (`flow.add(...)`) with dependencies
+  inferred from type annotations.
+- Automatic, multi-hop incremental propagation: fan-out, multi-input
+  joins and repeated updates, driven by `session.feed(...)` and
+  `session.push()`.
+- Per-node `TriggerPolicy` (`ANY_INPUT_CHANGED`, `ALL_INPUTS_CHANGED`,
+  `MANUAL`) governing execution eligibility.
+- `Sampled` inputs that are read but do not trigger a node.
+- Multiple instances per type (`InstanceKey`) and collective inputs
+  (`Collective[T]`).
+- Superstep execution with a barrier commit.
+- Optional `NodeContext` for node-local memory and access to the
+  previous committed output.
 - Post-commit `on_output` observation, isolated from execution.
+- Observability: structured logging, execution traces, provenance and
+  optional OpenTelemetry export (`pip install ".[otel]"`).
+
+---
+
+## Authors
+
+- Davi Guanabara de Aragão
+- Cesar Augusto Cavalheiro Marcondes
+- Filipe Alves Neto Verri
+- Marcos Ricardo Omena de Albuquerque Máximo
+
+Autonomous Computational Systems Lab (LAB-SCA), Aeronautics Institute of
+Technology (ITA).
 
 ---
 
