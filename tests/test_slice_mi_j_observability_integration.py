@@ -189,6 +189,7 @@ def test_two_instances_first_commits_do_not_collide_in_the_provenance_graph(tmp_
             INSTANCE_B: AircraftState(altitude=2.0),
         }
     )
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     graph = build_provenance_graph(_run_dir(root, session))
 
@@ -285,6 +286,7 @@ def test_feed_instances_generated_event_carries_its_own_instance_id(tmp_path):
             INSTANCE_B: AircraftState(altitude=2.0),
         }
     )
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     rows = load_provenance(_run_dir(root, session))
 

@@ -40,6 +40,7 @@ def test_feed_instances_commits_one_record_per_instance():
             InstanceKey(key="B"): AircraftState(altitude=200.0),
         }
     )
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     record_a = session.repository.get_artifact_record(
         AircraftState, instance=InstanceKey(key="A")
@@ -57,6 +58,7 @@ def test_feed_instances_existing_feed_is_completely_unaffected():
     session = make_session()
 
     session.feed(AircraftState(altitude=50.0))
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     assert session.repository.get_artifact_record(AircraftState).value.altitude == 50.0
     assert (
@@ -91,6 +93,7 @@ def test_feed_instances_each_instance_gets_origin_external():
     session = make_session()
 
     session.feed_instances({InstanceKey(key="A"): AircraftState(altitude=1.0)})
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     record = session.repository.get_artifact_record(
         AircraftState, instance=InstanceKey(key="A")
@@ -102,11 +105,13 @@ def test_feed_instances_re_feeding_same_instance_advances_its_own_record_only():
     session = make_session()
 
     session.feed_instances({InstanceKey(key="A"): AircraftState(altitude=1.0)})
+    session.push()  # feed only stages the value; push() applies it (#34)
     first = session.repository.get_artifact_record(
         AircraftState, instance=InstanceKey(key="A")
     )
 
     session.feed_instances({InstanceKey(key="A"): AircraftState(altitude=2.0)})
+    session.push()  # feed only stages the value; push() applies it (#34)
     second = session.repository.get_artifact_record(
         AircraftState, instance=InstanceKey(key="A")
     )

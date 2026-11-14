@@ -59,7 +59,9 @@ def test_replacing_an_already_known_instance_works_via_existing_machinery():
     session = flow.session()
 
     session.feed_instances({INSTANCE_A: AircraftState(altitude=100.0)})
+    session.push()  # feed only stages the value; push() applies it (#34)
     session.feed_instances({INSTANCE_A: AircraftState(altitude=150.0)})
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     record = session.repository.get_artifact_record(
         AircraftState, instance=INSTANCE_A
@@ -73,11 +75,13 @@ def test_removed_instance_disappears_from_the_repository():
     session = flow.session()
 
     session.feed_instances({INSTANCE_A: AircraftState(altitude=100.0)})
+    session.push()  # feed only stages the value; push() applies it (#34)
     assert session.repository.get_artifact_record(
         AircraftState, instance=INSTANCE_A
     ) is not None
 
     removed = session.remove_instance(AircraftState, INSTANCE_A)
+    session.push()  # remove_instance only stages the removal; push() applies it (#34)
 
     assert removed is True
     assert (

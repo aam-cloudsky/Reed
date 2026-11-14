@@ -333,6 +333,15 @@ class Session:
         # interleave two propagation plans.
         self._push_lock = threading.Lock()
         self._push_owner: int | None = None
+        # Issue #34: feed()/feed_instances()/remove_instance() only stage an
+        # operation here, keyed by (domain type, instance); the last
+        # operation on a key wins and there is no queue. push() applies the
+        # whole dictionary when it starts, so a push works on the state fed
+        # before it began, and a value fed during a push waits for the next
+        # one. `_pending_lock` guards only the dictionary swap, so feed()
+        # never waits for a running push().
+        self._pending: dict[tuple[type, InstanceKey], tuple[str, object]] = {}
+        self._pending_lock = threading.Lock()
 
         # Milestone O7, Slice O7d: the terminal presentation layer is a
         # pure *consumer* of the identity/trace/recording data above --
@@ -508,6 +517,40 @@ class Session:
 
     def feed(self, value: object) -> None:
         """
+        Stage an externally supplied domain value for the next `push()`
+        (issue #34).
+
+        Nothing is committed here: the value is held, keyed by its domain
+        type, until the next `push()` applies it (see `_apply_feed`).
+        Feeding the same type again before that `push()` replaces the
+        staged value -- the last value wins, there is no queue. A value fed
+        while a `push()` is running (from a node function, from an
+        `on_output` callback or from another thread) is not seen by that
+        `push()`; the next `push()` propagates it. `snapshot()` does not show
+        staged values.
+        """
+        self._stage((type(value), InstanceKey.singleton()), ("feed", value))
+
+    def _stage(self, key: "tuple[type, InstanceKey]", operation: "tuple[str, object]") -> None:
+        """Record `operation` for `key`; the last operation on a key wins."""
+        with self._pending_lock:
+            self._pending.pop(key, None)
+            self._pending[key] = operation
+
+    def _apply_pending(self) -> None:
+        """Apply every staged operation, in staging order (issue #34)."""
+        with self._pending_lock:
+            pending, self._pending = self._pending, {}
+        for (domain_type, instance), (kind, value) in pending.items():
+            if kind == "feed":
+                self._apply_feed(value)
+            elif kind == "feed_instance":
+                self._apply_feed_instance(instance, value)
+            else:
+                self._apply_remove(domain_type, instance)
+
+    def _apply_feed(self, value: object) -> None:
+        """
         Record and commit an externally supplied domain value (Slice 22E;
         docs/refactor/session_snapshot_decision.md section 4 "`feed()` is a
         node"; architectural_invariants.md #10, #29, #30, #31).
@@ -647,29 +690,34 @@ class Session:
         domain_type = next(iter(domain_types))
 
         for instance, value in values.items():
-            for flow_node in self._flow.dependency_graph.ordered_consumers_of(domain_type):
-                self._record_input(flow_node, domain_type, value, instance=instance)
+            self._stage((domain_type, instance), ("feed_instance", value))
 
-            record = self._commit(
-                value, origin=ArtifactOrigin.EXTERNAL, producer=None, instance=instance
-            )
+    def _apply_feed_instance(self, instance: "InstanceKey", value: object) -> None:
+        """Commit one staged `feed_instances` value (see `feed_instances`)."""
+        domain_type = type(value)
+        for flow_node in self._flow.dependency_graph.ordered_consumers_of(domain_type):
+            self._record_input(flow_node, domain_type, value, instance=instance)
 
-            self._execution_seq_counter += 1
-            identity = NodeExecutionIdentity(
-                execution_id=self._execution_id,
-                flow_id=self.flow_id,
-                node_id=self._artifact_id(domain_type),
-                node_execution_id=str(uuid.uuid4()),
-                execution_seq=self._execution_seq_counter,
-                instance_id=self._instance_identifier(instance),
-            )
+        record = self._commit(
+            value, origin=ArtifactOrigin.EXTERNAL, producer=None, instance=instance
+        )
 
-            self._record_trace_event("node_finished", identity)
-            self._emit_generated_provenance_event(record, identity, instance=instance)
+        self._execution_seq_counter += 1
+        identity = NodeExecutionIdentity(
+            execution_id=self._execution_id,
+            flow_id=self.flow_id,
+            node_id=self._artifact_id(domain_type),
+            node_execution_id=str(uuid.uuid4()),
+            execution_seq=self._execution_seq_counter,
+            instance_id=self._instance_identifier(instance),
+        )
 
-            producer_node = self._flow.dependency_graph.producer_of(domain_type)
-            if producer_node is not None:
-                self._dispatch_on_output(producer_node, record.value)
+        self._record_trace_event("node_finished", identity)
+        self._emit_generated_provenance_event(record, identity, instance=instance)
+
+        producer_node = self._flow.dependency_graph.producer_of(domain_type)
+        if producer_node is not None:
+            self._dispatch_on_output(producer_node, record.value)
 
     def push(self) -> None:
         """
@@ -710,6 +758,7 @@ class Session:
         with self._push_lock:
             self._push_owner = threading.get_ident()
             try:
+                self._apply_pending()
                 self._run_plan(self._propagation_plan())
             finally:
                 self._push_owner = None
@@ -784,6 +833,30 @@ class Session:
         return self.snapshot()
 
     def remove_instance(self, domain_type: type, instance: "InstanceKey") -> bool:
+        """
+        Stage the removal of one (`domain_type`, `instance`) pair for the
+        next `push()` (issue #34).
+
+        Like `feed()`, nothing changes until the next `push()` applies the
+        removal (see `_apply_remove`). A removal replaces a value staged for
+        the same pair, and a later feed of the pair replaces the removal --
+        the last operation wins.
+
+        Returns whether the pair will be removed: `True` if it is committed
+        now or a value is staged for it, `False` otherwise.
+        """
+        key = (domain_type, instance)
+        with self._pending_lock:
+            staged = self._pending.get(key)
+            will_remove = (
+                staged is not None and staged[0] != "remove"
+            ) or self._repository.get_artifact_record(
+                domain_type, instance=instance
+            ) is not None
+        self._stage(key, ("remove", None))
+        return will_remove
+
+    def _apply_remove(self, domain_type: type, instance: "InstanceKey") -> bool:
         """
         Remove one (`domain_type`, `instance`) pair's committed artifact
         from this `Session` (Slice MI-I, Lifecycle -- docs/refactor/

@@ -86,6 +86,7 @@ def test_snapshot_does_not_crash_for_a_type_committed_only_via_feed_instances():
             INSTANCE_B: AircraftState(altitude=2.0),
         }
     )
+    session.push()  # feed only stages the value; push() applies it (#34)
 
     # Before the fix: AttributeError, 'NoneType' object has no attribute
     # 'value' -- AircraftState is a key in the repository (both A and B
@@ -132,6 +133,7 @@ def test_snapshot_instance_keyword_reaches_one_specific_instance():
     session.feed_instances(
         {INSTANCE_A: AircraftState(altitude=10.0), INSTANCE_B: AircraftState(altitude=20.0)}
     )
+    session.push()  # feed only stages the value; push() applies it (#34)
     snapshot = session.snapshot()
 
     assert snapshot.get(AircraftState, instance=INSTANCE_A).altitude == 10.0
