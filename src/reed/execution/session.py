@@ -1312,17 +1312,33 @@ class Session:
         the exception propagates and the staged results are dropped.
         """
         staged: list[_StagedFiring] = []
-        for flow_node in flow_nodes:
-            for instance in self._candidate_instances(flow_node):
-                if not self._is_ready_worker(flow_node, instance):
-                    continue
-                identity = self._begin_node_execution(flow_node, instance=instance)
-                call_kwargs = self._build_call_kwargs(flow_node, identity, instance=instance)
-                staged.append(
-                    self._run_worker(
-                        flow_node, call_kwargs, identity, depth=depth, instance=instance
+        # Issue #34: node memory follows the superstep. Each worker's memory
+        # is copied before it runs; if any worker raises, every copy is put
+        # back, so a failed superstep leaves no memory transition behind
+        # ("failed firing -> no committed memory transition and no committed
+        # output", NodeSession.commit).
+        checkpoints: list[tuple[NodeSession, InstanceKey, object]] = []
+        try:
+            for flow_node in flow_nodes:
+                for instance in self._candidate_instances(flow_node):
+                    if not self._is_ready_worker(flow_node, instance):
+                        continue
+                    if flow_node.context is not None:
+                        node_session = self.node_session(flow_node.definition.function)
+                        checkpoints.append(
+                            (node_session, instance, node_session._memory_checkpoint(instance))
+                        )
+                    identity = self._begin_node_execution(flow_node, instance=instance)
+                    call_kwargs = self._build_call_kwargs(flow_node, identity, instance=instance)
+                    staged.append(
+                        self._run_worker(
+                            flow_node, call_kwargs, identity, depth=depth, instance=instance
+                        )
                     )
-                )
+        except BaseException:
+            for node_session, instance, checkpoint in reversed(checkpoints):
+                node_session._restore_memory(instance, checkpoint)
+            raise
         return staged
 
     def _run_worker(

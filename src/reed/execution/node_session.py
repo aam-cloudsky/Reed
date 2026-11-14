@@ -139,6 +139,7 @@ produced domain value into the session's repository.
 
 from __future__ import annotations
 
+import copy
 import threading
 from typing import TYPE_CHECKING
 
@@ -149,6 +150,9 @@ from reed.observability.instrument import Instrument, InstrumentKind
 from reed.observability.recording import Recording, ScalarValue
 
 from reed.execution.instance_key import InstanceKey
+
+# Marks a checkpoint taken before a node's memory existed (issue #34).
+_NO_MEMORY = object()
 
 if TYPE_CHECKING:
     from reed.composition.flow.flow_node import FlowNode
@@ -323,6 +327,33 @@ class NodeSession:
         self._session.repository.set_artifact_record(record, instance=instance)
         key = instance if instance is not None else InstanceKey.singleton()
         self._last_output[key] = record.value
+
+    def _memory_checkpoint(self, instance: "InstanceKey") -> object:
+        """
+        A copy of this node's memory for `instance`, taken before a firing so
+        that a failed superstep can restore it (issue #34). Returns
+        `_NO_MEMORY` when the memory has not been created yet.
+
+        Raises `TypeError` if the memory cannot be copied with
+        `copy.deepcopy`.
+        """
+        if instance not in self._memory:
+            return _NO_MEMORY
+        try:
+            return copy.deepcopy(self._memory[instance])
+        except Exception as exc:
+            raise TypeError(
+                f"The memory of {self._flow_node.definition.function!r} cannot "
+                "be copied with copy.deepcopy; Reed copies node memory before "
+                "each firing so that a failed superstep can restore it."
+            ) from exc
+
+    def _restore_memory(self, instance: "InstanceKey", checkpoint: object) -> None:
+        """Put back the memory saved by `_memory_checkpoint` (issue #34)."""
+        if checkpoint is _NO_MEMORY:
+            self._memory.pop(instance, None)
+        else:
+            self._memory[instance] = checkpoint
 
     def _memory_for(self, instance: "InstanceKey") -> object:
         """
